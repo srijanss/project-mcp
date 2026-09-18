@@ -7,6 +7,7 @@ from mcp.server.mcpserver import MCPServer
 from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import get_index_status, run_scan
+from project_mcp.tools.dependencies import normalize_dependency_name
 
 
 def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> list[dict]:
@@ -53,8 +54,9 @@ def build_server(project_root: Path) -> MCPServer:
         name: str, ecosystem: str | None = None
     ) -> dict:
         """Return a project's declared or resolved dependency version."""
+        target = normalize_dependency_name(name)
         for dependency in _indexed_dependencies(project_root, config, ecosystem):
-            if dependency["name"] == name:
+            if normalize_dependency_name(dependency["name"]) == target:
                 return dependency
         return {"status": "not_found"}
 

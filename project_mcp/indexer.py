@@ -337,7 +337,7 @@ def run_scan(
 
     discovered = discover_files(project_root, config)
     discovered_paths = set()
-    changed_python_imports = {}
+    changed_python_files = {}
     for record in discovered:
         discovered_paths.add(record["path"])
         previous = existing_rows.get(record["path"])
@@ -365,7 +365,7 @@ def run_scan(
                 imports = extract_imports(record["path"], source)
             except SyntaxError:
                 imports = []
-            changed_python_imports[record["path"]] = (file_id, imports)
+            changed_python_files[record["path"]] = imports
 
             classes = [s for s in symbols if s.get("kind") == "class"]
             if classes:
@@ -380,14 +380,28 @@ def run_scan(
         remove_file(conn, project_id, stale_path)
         path_to_file_id.pop(stale_path, None)
 
-    for path, file_id in path_to_file_id.items():
-        if Path(path).suffix != ".py":
-            continue
-        source = (Path(project_root) / path).read_text()
-        try:
-            imports = extract_imports(path, source)
-        except SyntaxError:
-            imports = []
+    # A newly-added file can resolve another file's previously-unresolvable
+    # import, so a brand-new file forces a full refresh of every python
+    # file's import relationships. Otherwise, only the files that actually
+    # changed this scan need their import relationships recomputed.
+    new_file_added = any(path not in existing_rows for path in changed_python_files)
+    if new_file_added:
+        paths_to_refresh = [
+            path for path in path_to_file_id if Path(path).suffix == ".py"
+        ]
+    else:
+        paths_to_refresh = list(changed_python_files)
+
+    for path in paths_to_refresh:
+        file_id = path_to_file_id[path]
+        if path in changed_python_files:
+            imports = changed_python_files[path]
+        else:
+            source = (Path(project_root) / path).read_text()
+            try:
+                imports = extract_imports(path, source)
+            except SyntaxError:
+                imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)

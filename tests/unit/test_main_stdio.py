@@ -67,6 +67,20 @@ def test_get_dependency_version_reads_the_persisted_index(tmp_path):
     assert "requests" in result.content[0].text
 
 
+def test_get_dependency_version_matches_name_case_and_separator_insensitively(
+    tmp_path,
+):
+    (tmp_path / "requirements.txt").write_text("python-dotenv>=1.0\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_dependency_version", {"name": "Python_Dotenv"})
+    )
+
+    assert result.is_error is False
+    assert "python-dotenv" in result.content[0].text
+
+
 def test_build_server_raises_clear_error_for_missing_project_root(tmp_path):
     missing_root = tmp_path / "does-not-exist"
 

@@ -478,6 +478,31 @@ def test_run_scan_refreshes_unchanged_importer_when_target_file_is_added(tmp_pat
     assert relationship == ("imports", "high")
 
 
+def test_run_scan_does_not_reparse_unchanged_python_files_for_import_relationships(
+    tmp_path, monkeypatch
+):
+    import project_mcp.indexer as indexer_module
+
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    calls = []
+    original_extract_imports = indexer_module.extract_imports
+
+    def spy(path, source):
+        calls.append(path)
+        return original_extract_imports(path, source)
+
+    monkeypatch.setattr(indexer_module, "extract_imports", spy)
+
+    run_scan(conn, project_root, config)
+
+    assert calls == []
+
+
 def test_run_scan_resolves_from_package_submodule_import(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)

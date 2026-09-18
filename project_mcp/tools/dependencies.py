@@ -6,7 +6,7 @@ from pathlib import Path
 _REQUIREMENT = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^]]+\])?(.*)$")
 
 
-def _normalized_name(name: str) -> str:
+def normalize_dependency_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
@@ -78,7 +78,7 @@ def _resolved_versions(project_root: Path) -> dict[str, str]:
         return {}
     packages = _load_toml(lockfile).get("package", [])
     return {
-        _normalized_name(package["name"]): package["version"]
+        normalize_dependency_name(package["name"]): package["version"]
         for package in packages
         if "name" in package and "version" in package
     }
@@ -94,7 +94,7 @@ def list_dependencies(project_root: Path, ecosystem: str | None = None) -> list[
     result = []
     for dependency in _declared_dependencies(root):
         name = dependency["name"]
-        normalized_name = _normalized_name(name)
+        normalized_name = normalize_dependency_name(name)
         if normalized_name in seen:
             continue
         seen.add(normalized_name)
@@ -109,11 +109,11 @@ def get_dependency_version(
     project_root: Path, name: str, ecosystem: str | None = None
 ) -> dict:
     for dependency in list_dependencies(project_root, ecosystem):
-        if _normalized_name(dependency["name"]) == _normalized_name(name):
+        if normalize_dependency_name(dependency["name"]) == normalize_dependency_name(name):
             return dependency
     root = Path(project_root)
     if not _declared_dependencies(root) and ecosystem in (None, "python"):
-        version = _resolved_versions(root).get(_normalized_name(name))
+        version = _resolved_versions(root).get(normalize_dependency_name(name))
         if version:
             return _dependency(name, version, "resolved")
     return {"status": "not_found"}
