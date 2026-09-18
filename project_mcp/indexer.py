@@ -2,6 +2,8 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from project_mcp.analyzers.generic.filesystem import discover_files
+from project_mcp.config import ProjectConfig
 from project_mcp.schema import get_schema_version
 
 
@@ -116,6 +118,51 @@ def mark_index_complete(conn: sqlite3.Connection) -> None:
         """
     )
     conn.commit()
+
+
+def run_scan(
+    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+) -> int:
+    project_id = begin_index(conn, project_root)
+
+    existing_rows = {
+        row[0]: (row[1], row[2])
+        for row in conn.execute(
+            "SELECT path, size, mtime_ns FROM files WHERE project_id = ?",
+            (project_id,),
+        ).fetchall()
+    }
+
+    discovered = discover_files(project_root, config)
+    discovered_paths = set()
+    for record in discovered:
+        discovered_paths.add(record["path"])
+        if existing_rows.get(record["path"]) == (
+            record["size"],
+            record["mtime_ns"],
+        ):
+            continue
+        upsert_file(
+            conn,
+            project_id,
+            record["path"],
+            language=record["language"],
+            file_kind=record["file_kind"],
+            size=record["size"],
+            mtime_ns=record["mtime_ns"],
+        )
+
+    existing_paths = {
+        row[0]
+        for row in conn.execute(
+            "SELECT path FROM files WHERE project_id = ?", (project_id,)
+        ).fetchall()
+    }
+    for stale_path in existing_paths - discovered_paths:
+        remove_file(conn, project_id, stale_path)
+
+    mark_index_complete(conn)
+    return project_id
 
 
 def get_index_status(conn: sqlite3.Connection) -> dict:

@@ -1,11 +1,26 @@
+import shutil
+from pathlib import Path
+
+from project_mcp.config import load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import (
     begin_index,
     get_index_status,
     mark_index_complete,
     remove_file,
+    run_scan,
     upsert_file,
 )
+
+FIXTURE_ROOT = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "python" / "sample_project"
+)
+
+
+def _copy_fixture(tmp_path: Path) -> Path:
+    project_root = tmp_path / "sample_project"
+    shutil.copytree(FIXTURE_ROOT, project_root)
+    return project_root
 
 
 def test_begin_index_creates_project_row(tmp_path):
@@ -166,3 +181,50 @@ def test_mark_index_complete_sets_status_fresh(tmp_path):
     status = get_index_status(conn)
     assert status["status"] == "fresh"
     assert status["schema_version"] == 1
+
+
+def test_run_scan_persists_discovered_files_and_marks_fresh(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    paths = {
+        row[0] for row in conn.execute("SELECT path FROM files").fetchall()
+    }
+    assert "app/models.py" in paths
+    assert "tests/test_models.py" in paths
+    assert not any(path.startswith(".venv/") for path in paths)
+    assert not any(path.startswith("node_modules/") for path in paths)
+    assert not any(path.startswith("target/") for path in paths)
+    assert get_index_status(conn)["status"] == "fresh"
+
+
+def test_run_scan_second_pass_skips_unchanged_files_but_reindexes_modified_ones(
+    tmp_path,
+):
+    import time
+
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+    first_pass = dict(
+        conn.execute("SELECT path, indexed_at FROM files").fetchall()
+    )
+
+    time.sleep(0.01)
+    (project_root / "app" / "models.py").write_text(
+        (project_root / "app" / "models.py").read_text() + "\n# touched\n"
+    )
+
+    run_scan(conn, project_root, config)
+    second_pass = dict(
+        conn.execute("SELECT path, indexed_at FROM files").fetchall()
+    )
+
+    assert second_pass["app/models.py"] != first_pass["app/models.py"]
+    assert second_pass["tests/test_models.py"] == first_pass["tests/test_models.py"]
+    assert second_pass["README.md"] == first_pass["README.md"]

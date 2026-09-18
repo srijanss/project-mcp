@@ -61,5 +61,74 @@
     "targetFiles": [],
     "recordedAt": "2026-09-18T00:17:21.212455+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp2-ignore-excludes-generated-and-secret-paths",
+    "description": "project_mcp/ignore.py exposes should_exclude(relative_path, config) applying DEFAULT_EXCLUDE dirs (.git, .venv, venv, node_modules, target, dist, build, coverage) plus common secret/credential file patterns (.env, *.pem, *.key) and honoring config.exclude overrides from ProjectConfig.",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_ignore.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:29:47.646058+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp2-filesystem-analyzer-classifies-files",
+    "description": "project_mcp/analyzers/generic/filesystem.py exposes classify_file(path) -> {language, file_kind} using an extension map plus path heuristics (test_*.py/*_test.py or under a tests/ dir => test; manifest/config filenames like pyproject.toml, *.toml/*.ini/*.cfg/*.yaml/*.yml => config; *.md/*.rst => docs; else source). Language-neutral: extension map isn't limited to Python, but only Python cases are exercised in v1 per SPEC.md V1 scope.",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_filesystem_analyzer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:30:55.952943+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp2-filesystem-analyzer-discovers-project-files",
+    "description": "discover_files(project_root, config) in project_mcp/analyzers/generic/filesystem.py walks the project tree, skips anything should_exclude() flags, and returns a list of file records (path, language, file_kind, size, mtime_ns) using classify_file. Tested against a tests/fixtures/python sample project that also contains stray .venv/node_modules/target/.env entries to prove exclusion.",
+    "dependsOn": [
+      "mvp2-ignore-excludes-generated-and-secret-paths",
+      "mvp2-filesystem-analyzer-classifies-files"
+    ],
+    "status": "completed",
+    "testFile": "tests/unit/test_filesystem_analyzer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:32:18.803392+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp2-indexer-full-scan-persists-discovered-files",
+    "description": "project_mcp/indexer.py gains run_scan(conn, project_root, config) that runs discover_files, upserts each record via upsert_file, removes files no longer discovered via remove_file, and calls mark_index_complete.",
+    "dependsOn": [
+      "mvp2-filesystem-analyzer-discovers-project-files"
+    ],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:33:31.713335+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp2-indexer-incremental-scan-skips-unchanged-files",
+    "description": "A second run_scan() over an unchanged project does not re-upsert files whose mtime_ns/content_hash haven't changed (only touched/new/removed files hit the db), satisfying the MVP2 acceptance criterion that a second unchanged scan does not fully re-index all files.",
+    "dependsOn": [
+      "mvp2-indexer-full-scan-persists-discovered-files"
+    ],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:34:36.847868+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp2-get-project-overview-tool",
+    "description": "project_mcp/tools/project.py exposes get_project_overview(project_root) which reads the already-indexed SQLite db (running a scan if never indexed) and returns a dict with project, languages, source_roots, test_roots, manifests, framework_hints, file_counts, index_status.",
+    "dependsOn": [
+      "mvp2-indexer-full-scan-persists-discovered-files"
+    ],
+    "status": "completed",
+    "testFile": "tests/unit/test_project_tool.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:35:51.662567+00:00",
+    "cyclesCompleted": 1
   }
 ]
