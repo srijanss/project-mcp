@@ -763,3 +763,36 @@ def test_run_scan_handles_malformed_metadata_json(tmp_path):
         "SELECT metadata_json FROM symbols WHERE qualified_name = 'app.models.Widget'"
     ).fetchone()
     assert widget is not None  # Widget should still exist
+
+
+def test_indexer_discovers_pytest_tests(tmp_path):
+    """Test files are indexed and stored in the tests table during scan."""
+    project_root = tmp_path / "test_project"
+    project_root.mkdir()
+    (project_root / ".project-mcp").mkdir()
+
+    # Create a test file
+    test_file = project_root / "tests" / "test_example.py"
+    test_file.parent.mkdir(parents=True)
+    test_file.write_text("""\
+def test_something():
+    assert True
+
+class TestExample:
+    def test_method(self):
+        assert True
+""")
+
+    # Create a source file for association
+    src_file = project_root / "src" / "example.py"
+    src_file.parent.mkdir(parents=True)
+    src_file.write_text("def something(): pass")
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+
+    # Check that tests were indexed
+    tests = conn.execute("SELECT COUNT(*) FROM tests").fetchone()[0]
+    assert tests > 0, "No tests found in database after indexing"
