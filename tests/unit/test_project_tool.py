@@ -1,6 +1,7 @@
 import shutil
 from pathlib import Path
 
+from project_mcp.db import get_connection
 from project_mcp.tools.project import get_project_overview
 
 FIXTURE_ROOT = (
@@ -57,3 +58,27 @@ def test_get_project_overview_omits_excluded_dirs_from_roots(tmp_path):
 
     assert ".venv" not in overview["source_roots"]
     assert "node_modules" not in overview["source_roots"]
+
+
+def test_get_project_overview_only_counts_current_project_files(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+
+    baseline = get_project_overview(project_root)
+    baseline_source_count = baseline["file_counts"]["source"]
+
+    conn = get_connection(project_root)
+    other_project_id = conn.execute(
+        "INSERT INTO projects (root_path, created_at) VALUES (?, ?)",
+        ("/tmp/other-project", "2026-01-01"),
+    ).lastrowid
+    conn.execute(
+        "INSERT INTO files (project_id, path, language, file_kind) VALUES (?, ?, ?, ?)",
+        (other_project_id, "other/leaked.py", "python", "source"),
+    )
+    conn.commit()
+    conn.close()
+
+    overview = get_project_overview(project_root)
+
+    assert overview["file_counts"]["source"] == baseline_source_count
+    assert "other" not in overview["source_roots"]

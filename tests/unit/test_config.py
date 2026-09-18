@@ -44,3 +44,12 @@ def test_load_config_reads_overrides_from_config_toml(tmp_path):
     assert config.test_roots == ["tests"]
     assert config.architecture_docs == ["docs/architecture"]
     assert config.legacy_paths == ["legacy"]
+
+
+def test_load_config_raises_clear_error_for_invalid_toml_syntax(tmp_path):
+    project_mcp_dir = tmp_path / ".project-mcp"
+    project_mcp_dir.mkdir()
+    (project_mcp_dir / "config.toml").write_text("exclude = [oops")
+
+    with pytest.raises(ConfigError, match="invalid config"):
+        load_config(tmp_path)

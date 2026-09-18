@@ -1,6 +1,8 @@
+import os
 import shutil
 from pathlib import Path
 
+from project_mcp.analyzers.generic import filesystem
 from project_mcp.analyzers.generic.filesystem import classify_file, discover_files
 from project_mcp.config import load_config
 
@@ -91,3 +93,54 @@ def test_discover_files_returns_classification_and_stat_fields(tmp_path):
 
     test_record = by_path["tests/test_models.py"]
     assert test_record["file_kind"] == "test"
+
+
+def test_discover_files_prunes_excluded_dirs_without_descending_into_them(
+    tmp_path, monkeypatch
+):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+
+    visited_dirs = []
+    real_walk = os.walk
+
+    def spy_walk(top, *args, **kwargs):
+        for dirpath, dirnames, filenames in real_walk(top, *args, **kwargs):
+            visited_dirs.append(Path(dirpath).relative_to(project_root))
+            yield dirpath, dirnames, filenames
+
+    monkeypatch.setattr(filesystem.os, "walk", spy_walk)
+
+    discover_files(project_root, config)
+
+    assert not any("node_modules" in path.parts for path in visited_dirs)
+    assert not any("target" in path.parts for path in visited_dirs)
+    assert Path(".") in visited_dirs
+
+
+def test_discover_files_does_not_follow_symlinked_directories(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+
+    outside_dir = tmp_path / "outside-project"
+    outside_dir.mkdir()
+    (outside_dir / "secret.py").write_text("SECRET = 1\n")
+    (project_root / "linked").symlink_to(outside_dir, target_is_directory=True)
+
+    records = discover_files(project_root, config)
+    paths = {record["path"] for record in records}
+
+    assert not any(path.startswith("linked/") for path in paths)
+
+
+def test_discover_files_handles_symlink_cycle_without_hanging(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+
+    looping_dir = project_root / "looping"
+    looping_dir.mkdir()
+    (looping_dir / "self").symlink_to(looping_dir, target_is_directory=True)
+
+    records = discover_files(project_root, config)
+
+    assert isinstance(records, list)

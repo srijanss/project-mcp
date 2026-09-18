@@ -38,7 +38,10 @@ def load_config(project_root: Path) -> ProjectConfig:
     if not config_toml_path.exists():
         return ProjectConfig(project_root=project_root)
 
-    raw = tomllib.loads(config_toml_path.read_text())
+    try:
+        raw = tomllib.loads(config_toml_path.read_text())
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid config toml at {config_toml_path}: {exc}") from exc
     return ProjectConfig(
         project_root=project_root,
         exclude=raw.get("exclude", list(DEFAULT_EXCLUDE)),

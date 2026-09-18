@@ -22,7 +22,15 @@ def get_project_overview(project_root: Path) -> dict:
     if get_index_status(conn)["status"] == "never_indexed":
         run_scan(conn, project_root, config)
 
-    rows = conn.execute("SELECT path, language, file_kind FROM files").fetchall()
+    project_row = conn.execute(
+        "SELECT id FROM projects WHERE root_path = ?", (str(project_root),)
+    ).fetchone()
+    project_id = project_row[0] if project_row else None
+
+    rows = conn.execute(
+        "SELECT path, language, file_kind FROM files WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
 
     languages = sorted({language for _, language, _ in rows if language})
 

@@ -228,3 +228,23 @@ def test_run_scan_second_pass_skips_unchanged_files_but_reindexes_modified_ones(
     assert second_pass["app/models.py"] != first_pass["app/models.py"]
     assert second_pass["tests/test_models.py"] == first_pass["tests/test_models.py"]
     assert second_pass["README.md"] == first_pass["README.md"]
+
+
+def test_run_scan_does_not_requery_existing_paths_redundantly(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    file_queries = []
+    conn.set_trace_callback(
+        lambda sql: file_queries.append(sql)
+        if "FROM files WHERE project_id" in sql
+        else None
+    )
+
+    run_scan(conn, project_root, config)
+    conn.set_trace_callback(None)
+
+    assert len(file_queries) <= 1

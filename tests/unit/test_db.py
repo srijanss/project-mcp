@@ -10,6 +10,12 @@ def test_get_connection_creates_index_db_file(tmp_path):
     assert (tmp_path / ".project-mcp" / "index.db").exists()
 
 
+def test_get_connection_creates_project_mcp_dir_when_missing(tmp_path):
+    get_connection(tmp_path)
+
+    assert (tmp_path / ".project-mcp" / "index.db").exists()
+
+
 def test_get_connection_reopening_preserves_data(tmp_path):
     (tmp_path / ".project-mcp").mkdir()
 

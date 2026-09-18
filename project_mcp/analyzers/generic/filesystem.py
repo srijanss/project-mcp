@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from project_mcp.config import ProjectConfig
@@ -44,30 +45,45 @@ def classify_file(path: Path) -> dict:
     return {"language": language, "file_kind": file_kind}
 
 
+def _is_excluded_dir(dir_path: Path, project_root: Path, config: ProjectConfig) -> bool:
+    relative_dir = dir_path.relative_to(project_root)
+    if relative_dir.parts[0] in ALWAYS_EXCLUDED_DIRS:
+        return True
+    return should_exclude(relative_dir, config)
+
+
 def discover_files(project_root: Path, config: ProjectConfig) -> list[dict]:
     project_root = Path(project_root)
     records = []
 
-    for path in sorted(project_root.rglob("*")):
-        if not path.is_file():
-            continue
+    for dirpath, dirnames, filenames in os.walk(project_root):
+        current_dir = Path(dirpath)
+        dirnames[:] = [
+            name
+            for name in dirnames
+            if not _is_excluded_dir(current_dir / name, project_root, config)
+        ]
 
-        relative_path = path.relative_to(project_root)
-        if relative_path.parts[0] in ALWAYS_EXCLUDED_DIRS:
-            continue
-        if should_exclude(relative_path, config):
-            continue
+        for filename in filenames:
+            path = current_dir / filename
+            if not path.is_file():
+                continue
 
-        classification = classify_file(relative_path)
-        stat = path.stat()
-        records.append(
-            {
-                "path": relative_path.as_posix(),
-                "language": classification["language"],
-                "file_kind": classification["file_kind"],
-                "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
-            }
-        )
+            relative_path = path.relative_to(project_root)
+            if should_exclude(relative_path, config):
+                continue
 
+            classification = classify_file(relative_path)
+            stat = path.stat()
+            records.append(
+                {
+                    "path": relative_path.as_posix(),
+                    "language": classification["language"],
+                    "file_kind": classification["file_kind"],
+                    "size": stat.st_size,
+                    "mtime_ns": stat.st_mtime_ns,
+                }
+            )
+
+    records.sort(key=lambda record: record["path"])
     return records

@@ -130,5 +130,59 @@
     "targetFiles": [],
     "recordedAt": "2026-09-18T00:35:51.662567+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-overview-project-filter",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_project_tool.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T01:14:13.019954+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-config-toml-decode-error",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_config.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T01:15:12.736891+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-get-connection-missing-dir",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_db.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T01:16:11.680583+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-discover-files-prunes-excluded-dirs",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_filesystem_analyzer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T01:18:31.142924+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-run-scan-redundant-query",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T01:19:51.658274+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-discover-files-symlink-handling",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_filesystem_analyzer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T01:20:36.253318+00:00",
+    "cyclesCompleted": 1
   }
 ]

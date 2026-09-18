@@ -11,7 +11,9 @@ from project_mcp.schema import (
 
 def get_connection(project_root: Path) -> sqlite3.Connection:
     project_root = Path(project_root)
-    db_path = project_root / ".project-mcp" / "index.db"
+    project_mcp_dir = project_root / ".project-mcp"
+    project_mcp_dir.mkdir(exist_ok=True)
+    db_path = project_mcp_dir / "index.db"
     conn = sqlite3.connect(db_path)
     init_schema(conn)
     _invalidate_if_stale(conn)

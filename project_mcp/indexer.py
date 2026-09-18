@@ -152,12 +152,7 @@ def run_scan(
             mtime_ns=record["mtime_ns"],
         )
 
-    existing_paths = {
-        row[0]
-        for row in conn.execute(
-            "SELECT path FROM files WHERE project_id = ?", (project_id,)
-        ).fetchall()
-    }
+    existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
         remove_file(conn, project_id, stale_path)
 
