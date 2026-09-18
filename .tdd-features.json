@@ -7,5 +7,85 @@
     "targetFiles": [],
     "recordedAt": "2026-09-18T06:46:29.785391+00:00",
     "cyclesCompleted": 5
+  },
+  {
+    "featureName": "mvp9",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_git_analyzer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T06:52:22.636619+00:00",
+    "cyclesCompleted": 4
+  },
+  {
+    "featureName": "mvp9-fixture-tests",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_git_analyzer.py::TestGitFixtures",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T06:56:19.091468+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp12",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_context_packs.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T09:58:31.840474+00:00",
+    "cyclesCompleted": 7
+  },
+  {
+    "featureName": "mvp12-context-packs-bugfixes",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_context_packs.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T10:04:17.628000+00:00",
+    "cyclesCompleted": 2
+  },
+  {
+    "featureName": "mvp12-verify-tests",
+    "dependsOn": [],
+    "status": "abandoned",
+    "testFile": "tests/unit/test_context_packs.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T10:05:02.455465+00:00",
+    "cyclesCompleted": 0
+  },
+  {
+    "featureName": "full-regression-check",
+    "dependsOn": [],
+    "status": "abandoned",
+    "testFile": "tests/",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T10:07:21.949542+00:00",
+    "cyclesCompleted": 0
+  },
+  {
+    "featureName": "integrate-pytest-discovery",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py::test_indexer_discovers_pytest_tests",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T10:07:57.827703+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "final-regression-check",
+    "dependsOn": [],
+    "status": "abandoned",
+    "testFile": "tests/",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T10:08:07.008757+00:00",
+    "cyclesCompleted": 0
+  },
+  {
+    "featureName": "mvp13",
+    "dependsOn": [],
+    "status": "in_progress",
+    "testFile": "tests/unit/test_incremental_refresh.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T10:09:49.741436+00:00"
   }
 ]

@@ -311,6 +311,13 @@ def mark_index_complete(conn: sqlite3.Connection) -> None:
         ON CONFLICT (key) DO UPDATE SET value = excluded.value
         """
     )
+    conn.execute(
+        """
+        INSERT INTO index_metadata (key, value) VALUES ('last_refresh_time', ?)
+        ON CONFLICT (key) DO UPDATE SET value = excluded.value
+        """,
+        (_now(),),
+    )
     conn.commit()
 
 
@@ -487,9 +494,151 @@ def _enrich_framework_metadata(conn: sqlite3.Connection, project_id: int) -> Non
     conn.commit()
 
 
-def get_index_status(conn: sqlite3.Connection) -> dict:
+def _detect_stale_index(
+    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+) -> bool:
+    """Check if any indexed files have changed or been deleted on disk."""
+    indexed_files = {
+        row[0]: (row[1], row[2])
+        for row in conn.execute("SELECT path, size, mtime_ns FROM files").fetchall()
+    }
+
+    if not indexed_files:
+        return False
+
+    discovered = discover_files(project_root, config)
+    discovered_by_path = {record["path"]: record for record in discovered}
+    discovered_paths = set(discovered_by_path.keys())
+
+    # Check for deleted files
+    if set(indexed_files.keys()) != discovered_paths:
+        return True
+
+    # Check for modified files
+    for path, (size, mtime_ns) in indexed_files.items():
+        if path not in discovered_by_path:
+            return True
+        record = discovered_by_path[path]
+        if (size, mtime_ns) != (record["size"], record["mtime_ns"]):
+            return True
+
+    return False
+
+
+def get_index_status(
+    conn: sqlite3.Connection,
+    project_root: Path | None = None,
+    config: ProjectConfig | None = None,
+) -> dict:
     row = conn.execute(
         "SELECT value FROM index_metadata WHERE key = 'index_status'"
     ).fetchone()
     status = row[0] if row else "never_indexed"
-    return {"status": status, "schema_version": get_schema_version(conn)}
+
+    if project_root and config and status in ("fresh", "indexing"):
+        if _detect_stale_index(conn, project_root, config):
+            status = "stale"
+
+    last_refresh = conn.execute(
+        "SELECT value FROM index_metadata WHERE key = 'last_refresh_time'"
+    ).fetchone()
+
+    return {
+        "status": status,
+        "schema_version": get_schema_version(conn),
+        "last_refresh_time": last_refresh[0] if last_refresh else None,
+    }
+
+
+def refresh_index(
+    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+) -> None:
+    """Incrementally refresh index, only re-analyzing changed files."""
+    project_row = conn.execute(
+        "SELECT id FROM projects WHERE root_path = ?", (str(project_root),)
+    ).fetchone()
+    if not project_row:
+        run_scan(conn, project_root, config)
+        return
+
+    project_id = project_row[0]
+    begin_index(conn, project_root)
+
+    existing_rows = {
+        row[0]: (row[1], row[2], row[3])
+        for row in conn.execute(
+            "SELECT path, id, size, mtime_ns FROM files WHERE project_id = ?",
+            (project_id,),
+        ).fetchall()
+    }
+    path_to_file_id = {path: values[0] for path, values in existing_rows.items()}
+
+    discovered = discover_files(project_root, config)
+    discovered_paths = set()
+    changed_python_files = {}
+    for record in discovered:
+        discovered_paths.add(record["path"])
+        previous = existing_rows.get(record["path"])
+        if previous is not None and previous[1:] == (
+            record["size"],
+            record["mtime_ns"],
+        ):
+            continue
+        file_id = upsert_file(
+            conn,
+            project_id,
+            record["path"],
+            language=record["language"],
+            file_kind=record["file_kind"],
+            size=record["size"],
+            mtime_ns=record["mtime_ns"],
+        )
+        path_to_file_id[record["path"]] = file_id
+
+        if record["language"] == "python":
+            source = (Path(project_root) / record["path"]).read_text()
+            symbols = index_python_symbols(conn, file_id, record["path"], source)
+            calls = extract_static_calls(record["path"], source)
+            try:
+                imports = extract_imports(record["path"], source)
+            except SyntaxError:
+                imports = []
+            changed_python_files[record["path"]] = imports
+
+            classes = [s for s in symbols if s.get("kind") == "class"]
+            if classes:
+                module_symbol = next(s for s in symbols if s["kind"] == "module")
+                index_python_inheritance_relationships(
+                    conn, file_id, module_symbol["qualified_name"], classes
+                )
+            index_python_call_relationships(conn, file_id, calls)
+            index_python_tests(conn, file_id, record["path"], source)
+
+    existing_paths = set(existing_rows.keys())
+    for stale_path in existing_paths - discovered_paths:
+        remove_file(conn, project_id, stale_path)
+        path_to_file_id.pop(stale_path, None)
+
+    new_file_added = any(path not in existing_rows for path in changed_python_files)
+    if new_file_added:
+        paths_to_refresh = [
+            path for path in path_to_file_id if Path(path).suffix == ".py"
+        ]
+    else:
+        paths_to_refresh = list(changed_python_files)
+
+    for path in paths_to_refresh:
+        file_id = path_to_file_id[path]
+        if path in changed_python_files:
+            imports = changed_python_files[path]
+        else:
+            source = (Path(project_root) / path).read_text()
+            try:
+                imports = extract_imports(path, source)
+            except SyntaxError:
+                imports = []
+        index_python_import_relationships(conn, file_id, imports, path_to_file_id)
+
+    index_python_dependencies(conn, project_id, project_root)
+    _enrich_framework_metadata(conn, project_id)
+    mark_index_complete(conn)
