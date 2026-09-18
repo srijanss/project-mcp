@@ -1,8 +1,10 @@
+import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
 from project_mcp.analyzers.generic.filesystem import discover_files
+from project_mcp.analyzers.python.parser import extract_imports, parse_python_source
 from project_mcp.config import ProjectConfig
 from project_mcp.schema import get_schema_version
 
@@ -110,6 +112,138 @@ def remove_file(conn: sqlite3.Connection, project_id: int, path: str) -> None:
     conn.commit()
 
 
+def index_python_symbols(
+    conn: sqlite3.Connection, file_id: int, path: str, source: str
+) -> list[dict]:
+    symbols = parse_python_source(path, source)
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE (source_entity_type = 'symbol' AND source_entity_id IN
+               (SELECT id FROM symbols WHERE file_id = ?))
+           OR (target_entity_type = 'symbol' AND target_entity_id IN
+               (SELECT id FROM symbols WHERE file_id = ?))
+        """,
+        (file_id, file_id),
+    )
+    conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
+
+    if len(symbols) == 1 and symbols[0].get("kind") == "parse_error":
+        conn.commit()
+        return symbols
+
+    for symbol in symbols:
+        metadata = (
+            json.dumps({"bases": symbol["bases"]}) if symbol["kind"] == "class" else None
+        )
+        conn.execute(
+            """
+            INSERT INTO symbols (
+                file_id, name, qualified_name, kind, language,
+                start_line, end_line, visibility, metadata_json
+            ) VALUES (?, ?, ?, ?, 'python', ?, ?, ?, ?)
+            """,
+            (
+                file_id,
+                symbol["name"],
+                symbol["qualified_name"],
+                symbol["kind"],
+                symbol["start_line"],
+                symbol["end_line"],
+                symbol["visibility"],
+                metadata,
+            ),
+        )
+    conn.commit()
+    return symbols
+
+
+def index_python_inheritance_relationships(
+    conn: sqlite3.Connection, file_id: int, module_name: str, classes: list[dict]
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE source_entity_type = 'symbol' AND relationship_type = 'inherits'
+          AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
+        """,
+        (file_id,),
+    )
+
+    for class_symbol in classes:
+        class_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, class_symbol["qualified_name"]),
+        ).fetchone()
+        if class_row is None:
+            continue
+        class_symbol_id = class_row[0]
+
+        for base in class_symbol["bases"]:
+            if not isinstance(base, str) or "." in base:
+                continue
+            base_row = conn.execute(
+                "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+                (file_id, f"{module_name}.{base}"),
+            ).fetchone()
+            if base_row is None:
+                continue
+            conn.execute(
+                """
+                INSERT INTO relationships (
+                    source_entity_type, source_entity_id,
+                    target_entity_type, target_entity_id,
+                    relationship_type, confidence
+                ) VALUES ('symbol', ?, 'symbol', ?, 'inherits', 'high')
+                """,
+                (class_symbol_id, base_row[0]),
+            )
+    conn.commit()
+
+
+def index_python_import_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND relationship_type = 'imports'
+        """,
+        (file_id,),
+    )
+
+    for imp in imports:
+        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
+            continue
+        module_path = imp["module"].replace(".", "/")
+        candidate_paths = [module_path + ".py"]
+        candidate_paths.extend(
+            f"{module_path}/{name}.py" for name in imp.get("names", [])
+        )
+        target_file_id = next(
+            (path_to_file_id.get(path) for path in candidate_paths
+             if path_to_file_id.get(path) is not None),
+            None,
+        )
+        if target_file_id is None:
+            continue
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('file', ?, 'file', ?, 'imports', 'high')
+            """,
+            (file_id, target_file_id),
+        )
+    conn.commit()
+
+
 def mark_index_complete(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -126,23 +260,26 @@ def run_scan(
     project_id = begin_index(conn, project_root)
 
     existing_rows = {
-        row[0]: (row[1], row[2])
+        row[0]: (row[1], row[2], row[3])
         for row in conn.execute(
-            "SELECT path, size, mtime_ns FROM files WHERE project_id = ?",
+            "SELECT path, id, size, mtime_ns FROM files WHERE project_id = ?",
             (project_id,),
         ).fetchall()
     }
+    path_to_file_id = {path: values[0] for path, values in existing_rows.items()}
 
     discovered = discover_files(project_root, config)
     discovered_paths = set()
+    changed_python_imports = {}
     for record in discovered:
         discovered_paths.add(record["path"])
-        if existing_rows.get(record["path"]) == (
+        previous = existing_rows.get(record["path"])
+        if previous is not None and previous[1:] == (
             record["size"],
             record["mtime_ns"],
         ):
             continue
-        upsert_file(
+        file_id = upsert_file(
             conn,
             project_id,
             record["path"],
@@ -151,10 +288,38 @@ def run_scan(
             size=record["size"],
             mtime_ns=record["mtime_ns"],
         )
+        path_to_file_id[record["path"]] = file_id
+
+        if record["language"] == "python":
+            source = (Path(project_root) / record["path"]).read_text()
+            symbols = index_python_symbols(conn, file_id, record["path"], source)
+            try:
+                imports = extract_imports(record["path"], source)
+            except SyntaxError:
+                imports = []
+            changed_python_imports[record["path"]] = (file_id, imports)
+
+            classes = [s for s in symbols if s.get("kind") == "class"]
+            if classes:
+                module_symbol = next(s for s in symbols if s["kind"] == "module")
+                index_python_inheritance_relationships(
+                    conn, file_id, module_symbol["qualified_name"], classes
+                )
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
         remove_file(conn, project_id, stale_path)
+        path_to_file_id.pop(stale_path, None)
+
+    for path, file_id in path_to_file_id.items():
+        if Path(path).suffix != ".py":
+            continue
+        source = (Path(project_root) / path).read_text()
+        try:
+            imports = extract_imports(path, source)
+        except SyntaxError:
+            imports = []
+        index_python_import_relationships(conn, file_id, imports, path_to_file_id)
 
     mark_index_complete(conn)
     return project_id

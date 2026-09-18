@@ -248,3 +248,205 @@ def test_run_scan_does_not_requery_existing_paths_redundantly(tmp_path):
     conn.set_trace_callback(None)
 
     assert len(file_queries) <= 1
+
+
+def test_run_scan_persists_python_symbols_for_discovered_files(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    qualified_names = {
+        row[0] for row in conn.execute("SELECT qualified_name FROM symbols").fetchall()
+    }
+
+    assert "app.models" in qualified_names
+    assert "app.models.Widget" in qualified_names
+    assert "app.models.Widget.__init__" in qualified_names
+
+
+def test_run_scan_replaces_stale_symbols_when_python_file_changes(tmp_path):
+    import time
+
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    time.sleep(0.01)
+    (project_root / "app" / "models.py").write_text(
+        "class Widget:\n"
+        "    def __init__(self, name: str):\n"
+        "        self.name = name\n"
+        "\n"
+        "    def rename(self, name: str):\n"
+        "        self.name = name\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    qualified_names = {
+        row[0] for row in conn.execute("SELECT qualified_name FROM symbols").fetchall()
+    }
+
+    assert "app.models.Widget.rename" in qualified_names
+    assert len(
+        [name for name in qualified_names if name == "app.models.Widget.__init__"]
+    ) == 1
+
+
+def test_run_scan_persists_import_relationship_for_resolvable_project_import(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'tests/test_models.py'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/models.py'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
+
+
+def test_run_scan_persists_inheritance_relationship_for_same_file_base(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    (project_root / "app" / "shapes.py").write_text(
+        "class Shape:\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class Circle(Shape):\n"
+        "    pass\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    base_symbol_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.shapes.Shape'"
+    ).fetchone()[0]
+    class_symbol_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.shapes.Circle'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'symbol' AND source_entity_id = ?
+          AND target_entity_type = 'symbol' AND target_entity_id = ?
+        """,
+        (class_symbol_id, base_symbol_id),
+    ).fetchone()
+
+    assert relationship == ("inherits", "high")
+
+
+def test_run_scan_removes_inheritance_relationships_for_replaced_symbols(tmp_path):
+    import time
+
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    shapes_path = project_root / "app" / "shapes.py"
+    shapes_path.write_text(
+        "class Shape:\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class Circle(Shape):\n"
+        "    pass\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    time.sleep(0.01)
+    shapes_path.write_text("class Shape:\n    pass\n")
+    run_scan(conn, project_root, config)
+
+    relationships = conn.execute(
+        "SELECT * FROM relationships WHERE relationship_type = 'inherits'"
+    ).fetchall()
+
+    assert relationships == []
+
+
+def test_run_scan_refreshes_unchanged_importer_when_target_file_is_added(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    importer_path = project_root / "app" / "importer.py"
+    importer_path.write_text("import app.later\n")
+
+    run_scan(conn, project_root, config)
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/importer.py'"
+    ).fetchone()[0]
+    assert conn.execute(
+        """
+        SELECT COUNT(*) FROM relationships
+        WHERE relationship_type = 'imports'
+          AND source_entity_type = 'file' AND source_entity_id = ?
+        """,
+        (source_file_id,),
+    ).fetchone()[0] == 0
+
+    (project_root / "app" / "later.py").write_text("VALUE = 1\n")
+    run_scan(conn, project_root, config)
+
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/later.py'"
+    ).fetchone()[0]
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
+
+
+def test_run_scan_resolves_from_package_submodule_import(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "importer.py").write_text("from app import later\n")
+    (project_root / "app" / "later.py").write_text("VALUE = 1\n")
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/importer.py'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/later.py'"
+    ).fetchone()[0]
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
