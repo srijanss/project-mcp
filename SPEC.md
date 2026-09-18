@@ -664,6 +664,55 @@ Project MCP should reduce discovery cost.
 
 ---
 
+# V1 scope
+
+The full MVP list below documents the long-term target design — the core
+schema, analyzer plugin model, and tool surface are meant to support
+Python, JavaScript/TypeScript, and Rust (plus Django/React/Astro
+enrichment) without changing the core schema, per the "Analyzer model"
+section above.
+
+**v1 build scope is narrower: Python + Django only.** Concretely:
+
+```text
+in v1:
+  MVP 0  skeleton, config, storage
+  MVP 1  SQLite schema and index lifecycle
+  MVP 2  generic filesystem/project index
+  MVP 3  Python analyzer
+  MVP 6  dependency/manifest indexing — python (pyproject.toml, uv.lock,
+         requirements*.txt) only; npm/cargo lockfile support deferred
+  MVP 7  framework enrichment — Django only; React/Astro deferred
+  MVP 8  test relationship index — Python/pytest evidence only
+  MVP 9  Git history, churn, temporal coupling (language-neutral already)
+  MVP 10 architecture docs and ADR ingestion (language-neutral already)
+  MVP 11 legacy signals and hotspot model
+  MVP 12 context packs
+  MVP 13 incremental refresh and stale-index protection
+  MVP 14 token-efficiency benchmark
+  MVP 15 downstream MCP integration contracts
+  MVP 16 README and handoff documentation
+
+deferred post-v1, to be added as adapters (no core schema change needed):
+  MVP 4  JavaScript/TypeScript analyzer
+  MVP 5  Rust analyzer
+  MVP 6  npm/cargo dependency indexing
+  MVP 7  React and Astro framework enrichment
+```
+
+This is a scope decision, not an architecture change: the analyzer
+registry, normalized schema, and context-pack tools must stay
+language-neutral exactly as specced, so that JS/TS, Rust, React, and
+Astro support can be dropped in later as additional analyzer adapters
+without touching `project_mcp/schema.py`, `project_mcp/db.py`, or the
+context-pack tool contracts.
+
+Any MVP acceptance criteria above that mention JS/TS or Rust fixtures
+are out of scope for v1 and should be skipped until those adapters are
+built.
+
+---
+
 # MVP 0 — Skeleton, config, and storage convention
 
 **Depends on:** nothing.

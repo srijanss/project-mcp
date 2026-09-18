@@ -34,5 +34,32 @@
     "targetFiles": [],
     "recordedAt": "2026-09-18T00:02:43.052191+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp1-schema-creates-core-tables-and-version",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_schema.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:11:17.485911+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp1-db-auto-initializes-and-invalidates-stale-schema",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_db.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:12:59.992667+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp1-indexer-lifecycle-helpers",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:17:21.212455+00:00",
+    "cyclesCompleted": 1
   }
 ]
