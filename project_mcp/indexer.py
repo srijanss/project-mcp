@@ -4,7 +4,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from project_mcp.analyzers.generic.filesystem import discover_files
-from project_mcp.analyzers.python.parser import extract_imports, parse_python_source
+from project_mcp.analyzers.python.parser import (
+    extract_imports,
+    extract_static_calls,
+    parse_python_source,
+)
 from project_mcp.config import ProjectConfig
 from project_mcp.schema import get_schema_version
 
@@ -201,6 +205,43 @@ def index_python_inheritance_relationships(
     conn.commit()
 
 
+def index_python_call_relationships(
+    conn: sqlite3.Connection, file_id: int, calls: list[dict]
+) -> None:
+    module_row = conn.execute(
+        "SELECT qualified_name FROM symbols WHERE file_id = ? AND kind = 'module'",
+        (file_id,),
+    ).fetchone()
+    if module_row is None:
+        return
+    module_name = module_row[0]
+
+    for call in calls:
+        caller_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, call["caller"]),
+        ).fetchone()
+        if caller_row is None:
+            continue
+        callee_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, f"{module_name}.{call['callee']}"),
+        ).fetchone()
+        if callee_row is None:
+            continue
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
+            """,
+            (caller_row[0], callee_row[0]),
+        )
+    conn.commit()
+
+
 def index_python_import_relationships(
     conn: sqlite3.Connection,
     file_id: int,
@@ -293,6 +334,7 @@ def run_scan(
         if record["language"] == "python":
             source = (Path(project_root) / record["path"]).read_text()
             symbols = index_python_symbols(conn, file_id, record["path"], source)
+            calls = extract_static_calls(record["path"], source)
             try:
                 imports = extract_imports(record["path"], source)
             except SyntaxError:
@@ -305,6 +347,7 @@ def run_scan(
                 index_python_inheritance_relationships(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
+            index_python_call_relationships(conn, file_id, calls)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:

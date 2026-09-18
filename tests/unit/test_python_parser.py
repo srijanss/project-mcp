@@ -1,4 +1,8 @@
-from project_mcp.analyzers.python.parser import extract_imports, parse_python_source
+from project_mcp.analyzers.python.parser import (
+    extract_imports,
+    extract_static_calls,
+    parse_python_source,
+)
 
 SOURCE = '''"""Module docstring."""
 
@@ -124,3 +128,58 @@ def test_parse_python_source_marks_dynamically_computed_base_as_limitation():
     widget = next(s for s in symbols if s["qualified_name"] == "app.widget.Widget")
 
     assert widget["bases"] == [{"dynamic": True, "expression": "make_base()"}]
+
+
+def test_extract_static_calls_returns_same_module_function_calls():
+    source = (
+        "def helper():\n"
+        "    return 'done'\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    return helper()\n"
+    )
+
+    assert extract_static_calls("app/workflow.py", source) == [
+        {
+            "caller": "app.workflow.run",
+            "callee": "helper",
+            "line": 6,
+        }
+    ]
+
+
+def test_extract_static_calls_qualifies_method_callers_with_their_class():
+    source = (
+        "class Service:\n"
+        "    def run(self):\n"
+        "        return helper()\n"
+    )
+
+    assert extract_static_calls("app/workflow.py", source) == [
+        {
+            "caller": "app.workflow.Service.run",
+            "callee": "helper",
+            "line": 3,
+        }
+    ]
+
+
+def test_parse_python_source_extracts_nested_function():
+    source = (
+        "def outer():\n"
+        "    def inner():\n"
+        "        return 1\n"
+        "\n"
+        "    return inner\n"
+    )
+
+    symbols = parse_python_source("app/workflow.py", source)
+    nested = next(
+        symbol
+        for symbol in symbols
+        if symbol["qualified_name"] == "app.workflow.outer.inner"
+    )
+
+    assert nested["kind"] == "function"
+    assert nested["start_line"] == 2

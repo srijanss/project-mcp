@@ -63,6 +63,7 @@ def parse_python_source(path: str, source: str) -> list[dict]:
                         "visibility": _visibility(node.name),
                     }
                 )
+                visit_body(node.body, qualified_name, in_class=False)
 
     visit_body(tree.body, module_name, in_class=False)
     return symbols
@@ -96,3 +97,45 @@ def extract_imports(path: str, source: str) -> list[dict]:
             imports.append(record)
 
     return imports
+
+
+def extract_static_calls(path: str, source: str) -> list[dict]:
+    module_name = _module_qualified_name(path)
+    try:
+        tree = ast.parse(source, filename=path)
+    except SyntaxError:
+        return []
+
+    calls = []
+
+    class CallVisitor(ast.NodeVisitor):
+        def __init__(self):
+            self.callers = []
+            self.scopes = [module_name]
+
+        def visit_ClassDef(self, node):
+            self.scopes.append(f"{self.scopes[-1]}.{node.name}")
+            self.generic_visit(node)
+            self.scopes.pop()
+
+        def visit_FunctionDef(self, node):
+            prefix = self.callers[-1] if self.callers else self.scopes[-1]
+            self.callers.append(f"{prefix}.{node.name}")
+            self.generic_visit(node)
+            self.callers.pop()
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_Call(self, node):
+            if self.callers and isinstance(node.func, ast.Name):
+                calls.append(
+                    {
+                        "caller": self.callers[-1],
+                        "callee": node.func.id,
+                        "line": node.lineno,
+                    }
+                )
+            self.generic_visit(node)
+
+    CallVisitor().visit(tree)
+    return calls

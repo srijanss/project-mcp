@@ -450,3 +450,108 @@ def test_run_scan_resolves_from_package_submodule_import(tmp_path):
     ).fetchone()
 
     assert relationship == ("imports", "high")
+
+
+def test_run_scan_persists_static_call_relationship_for_same_module_functions(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "workflow.py").write_text(
+        "def helper():\n"
+        "    return 'done'\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    return helper()\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    caller_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.workflow.run'"
+    ).fetchone()[0]
+    callee_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.workflow.helper'"
+    ).fetchone()[0]
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'symbol' AND source_entity_id = ?
+          AND target_entity_type = 'symbol' AND target_entity_id = ?
+        """,
+        (caller_id, callee_id),
+    ).fetchone()
+
+    assert relationship == ("calls", "high")
+
+
+def test_run_scan_persists_static_call_relationship_from_method_to_module_function(
+    tmp_path,
+):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "workflow.py").write_text(
+        "def helper():\n"
+        "    return 'done'\n"
+        "\n"
+        "\n"
+        "class Service:\n"
+        "    def run(self):\n"
+        "        return helper()\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    caller_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.workflow.Service.run'"
+    ).fetchone()[0]
+    callee_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.workflow.helper'"
+    ).fetchone()[0]
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'symbol' AND source_entity_id = ?
+          AND target_entity_type = 'symbol' AND target_entity_id = ?
+        """,
+        (caller_id, callee_id),
+    ).fetchone()
+
+    assert relationship == ("calls", "high")
+
+
+def test_run_scan_persists_static_call_relationship_from_nested_function(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "workflow.py").write_text(
+        "def helper():\n"
+        "    return 'done'\n"
+        "\n"
+        "\n"
+        "def outer():\n"
+        "    def inner():\n"
+        "        return helper()\n"
+        "\n"
+        "    return inner\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    caller_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.workflow.outer.inner'"
+    ).fetchone()[0]
+    callee_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.workflow.helper'"
+    ).fetchone()[0]
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'symbol' AND source_entity_id = ?
+          AND target_entity_type = 'symbol' AND target_entity_id = ?
+        """,
+        (caller_id, callee_id),
+    ).fetchone()
+
+    assert relationship == ("calls", "high")
