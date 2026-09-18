@@ -10,6 +10,7 @@ from project_mcp.analyzers.python.parser import (
     extract_static_calls,
     parse_python_source,
 )
+from project_mcp.analyzers.python.pytest_analyzer import discover_tests
 from project_mcp.config import ProjectConfig
 from project_mcp.tools.dependencies import list_dependencies
 from project_mcp.schema import get_schema_version
@@ -287,6 +288,22 @@ def index_python_import_relationships(
     conn.commit()
 
 
+def index_python_tests(
+    conn: sqlite3.Connection, file_id: int, path: str, source: str
+) -> None:
+    """Index pytest tests found in a Python file."""
+    tests = discover_tests(path, source)
+    for test in tests:
+        conn.execute(
+            """
+            INSERT INTO tests (file_id, test_kind, framework)
+            VALUES (?, ?, ?)
+            """,
+            (file_id, test["kind"], "pytest"),
+        )
+    conn.commit()
+
+
 def mark_index_complete(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
@@ -375,6 +392,7 @@ def run_scan(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
             index_python_call_relationships(conn, file_id, calls)
+            index_python_tests(conn, file_id, record["path"], source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
