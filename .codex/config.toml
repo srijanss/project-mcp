@@ -55,6 +55,12 @@ approval_mode = "approve"
 [mcp_servers.outside-in-tdd.tools.record_review_finding]
 approval_mode = "approve"
 
+[mcp_servers.outside-in-tdd.tools.session_start]
+approval_mode = "approve"
+
+[mcp_servers.outside-in-tdd.tools.reset_feature]
+approval_mode = "approve"
+
 
 # Counterpart to the .claude/settings.json PreToolUse hook — blocks direct
 # pytest/vitest/etc. invocations so agents go through run_tests() instead.

@@ -61,5 +61,52 @@
     "targetFiles": [],
     "recordedAt": "2026-09-18T03:46:59.495818+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-dependency-manifest-indexing",
+    "dependsOn": [],
+    "status": "abandoned",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [
+      "project_mcp/tools/dependencies.py"
+    ],
+    "recordedAt": "2026-09-18T03:51:08.593657+00:00",
+    "cyclesCompleted": 0
+  },
+  {
+    "featureName": "mvp6-python-dependency-manifest-indexing",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T03:52:29.749059+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-direct-reference-dependency-handling",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T03:57:29.991674+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-case-insensitive-python-package-matching",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T03:58:13.409360+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-lockfile-transitive-dependency-consistency",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T03:59:03.200788+00:00",
+    "cyclesCompleted": 1
   }
 ]
