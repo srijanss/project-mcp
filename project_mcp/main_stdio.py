@@ -8,6 +8,13 @@ from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import get_index_status, run_scan
 from project_mcp.tools.dependencies import normalize_dependency_name
+from project_mcp.tools.project import get_project_overview
+from project_mcp.tools.symbols import (
+    find_symbol,
+    get_dependencies,
+    get_dependents,
+    get_symbol_context,
+)
 
 
 def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> list[dict]:
@@ -59,6 +66,31 @@ def build_server(project_root: Path) -> MCPServer:
             if normalize_dependency_name(dependency["name"]) == target:
                 return dependency
         return {"status": "not_found"}
+
+    @server.tool(name="get_project_overview")
+    def get_project_overview_tool() -> dict:
+        """Return a summary of the project's languages, roots, and manifests."""
+        return get_project_overview(project_root)
+
+    @server.tool(name="find_symbol")
+    def find_symbol_tool(query: str) -> list[dict]:
+        """Find symbols whose name or qualified name matches the query."""
+        return find_symbol(project_root, query)
+
+    @server.tool(name="get_symbol_context")
+    def get_symbol_context_tool(qualified_name: str) -> dict:
+        """Return full details for one exact symbol match."""
+        return get_symbol_context(project_root, qualified_name)
+
+    @server.tool(name="get_dependencies")
+    def get_dependencies_tool(qualified_name: str) -> list[dict]:
+        """Return what a symbol or module imports or inherits from."""
+        return get_dependencies(project_root, qualified_name)
+
+    @server.tool(name="get_dependents")
+    def get_dependents_tool(qualified_name: str) -> list[dict]:
+        """Return what imports or inherits from a symbol or module."""
+        return get_dependents(project_root, qualified_name)
 
     return server
 

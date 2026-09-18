@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from mcp.server.mcpserver import MCPServer
 
-from main_stdio import build_server, main
+from project_mcp.main_stdio import build_server, main
 from project_mcp.config import ConfigError
 
 
@@ -19,6 +19,85 @@ def test_build_server_registers_dependency_tools(tmp_path):
     tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
 
     assert {"list_dependencies", "get_dependency_version"} <= tool_names
+
+
+def test_build_server_registers_project_and_symbol_tools(tmp_path):
+    server = build_server(tmp_path)
+
+    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert {
+        "get_project_overview",
+        "find_symbol",
+        "get_symbol_context",
+        "get_dependencies",
+        "get_dependents",
+    } <= tool_names
+
+
+def test_get_project_overview_tool_call_returns_overview(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("get_project_overview", {}))
+
+    assert result.is_error is False
+    assert "python" in result.content[0].text
+
+
+def test_find_symbol_tool_call_returns_matches(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("find_symbol", {"query": "widget"}))
+
+    assert result.is_error is False
+    assert "Widget" in result.content[0].text
+
+
+def test_get_symbol_context_tool_call_returns_details(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool(
+            "get_symbol_context", {"qualified_name": "app.models.Widget"}
+        )
+    )
+
+    assert result.is_error is False
+    assert "Widget" in result.content[0].text
+
+
+def test_get_dependencies_tool_call_returns_relationships(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+    (tmp_path / "app" / "importer.py").write_text("import app.models\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_dependencies", {"qualified_name": "app.importer"})
+    )
+
+    assert result.is_error is False
+    assert "app/models.py" in result.content[0].text
+
+
+def test_get_dependents_tool_call_returns_relationships(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+    (tmp_path / "app" / "importer.py").write_text("import app.models\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_dependents", {"qualified_name": "app.models"})
+    )
+
+    assert result.is_error is False
+    assert "app/importer.py" in result.content[0].text
 
 
 def test_dependency_tools_describe_their_inputs(tmp_path):

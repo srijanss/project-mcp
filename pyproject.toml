@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-project-mcp = "main_stdio:main"
+project-mcp = "project_mcp.main_stdio:main"
 
 [dependency-groups]
 dev = [
@@ -23,9 +23,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["project_mcp"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"main_stdio.py" = "main_stdio.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
