@@ -108,5 +108,95 @@
     "targetFiles": [],
     "recordedAt": "2026-09-18T03:59:03.200788+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-register-python-dependency-mcp-tools",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_main_stdio.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:01:26.003288+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-direct-reference-without-spaces",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:04:58.769013+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "fix-malformed-python-manifest-errors",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:05:40.294906+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-python-requirement-parser-robustness",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:08:37.697959+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-mcp-dependency-tool-invocation",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_main_stdio.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:08:54.956742+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-index-python-dependencies",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:09:45.384549+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-mcp-tools-read-dependency-index",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_main_stdio.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:10:48.134379+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-parse-common-python-requirement-syntax",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:11:27.596794+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-follow-python-requirement-includes",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_dependency_tools.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:12:08.827992+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp6-python-dependency-fixtures",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T04:13:14.221888+00:00",
+    "cyclesCompleted": 1
   }
 ]

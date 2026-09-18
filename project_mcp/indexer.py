@@ -10,6 +10,7 @@ from project_mcp.analyzers.python.parser import (
     parse_python_source,
 )
 from project_mcp.config import ProjectConfig
+from project_mcp.tools.dependencies import list_dependencies
 from project_mcp.schema import get_schema_version
 
 
@@ -295,6 +296,31 @@ def mark_index_complete(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def index_python_dependencies(
+    conn: sqlite3.Connection, project_id: int, project_root: Path
+) -> None:
+    conn.execute(
+        "DELETE FROM dependencies WHERE project_id = ? AND ecosystem = 'python'",
+        (project_id,),
+    )
+    for dependency in list_dependencies(project_root, ecosystem="python"):
+        status = dependency["version_status"]
+        conn.execute(
+            """
+            INSERT INTO dependencies (
+                project_id, name, ecosystem, declared_version, resolved_version
+            ) VALUES (?, ?, 'python', ?, ?)
+            """,
+            (
+                project_id,
+                dependency["name"],
+                dependency["version"] if status == "declared" else None,
+                dependency["version"] if status == "resolved" else None,
+            ),
+        )
+    conn.commit()
+
+
 def run_scan(
     conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
 ) -> int:
@@ -364,6 +390,7 @@ def run_scan(
             imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
 
+    index_python_dependencies(conn, project_id, project_root)
     mark_index_complete(conn)
     return project_id
 

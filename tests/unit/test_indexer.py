@@ -201,6 +201,59 @@ def test_run_scan_persists_discovered_files_and_marks_fresh(tmp_path):
     assert get_index_status(conn)["status"] == "fresh"
 
 
+def test_run_scan_persists_python_dependencies(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    (project_root / "requirements.txt").write_text("requests>=2.31\n")
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    assert conn.execute(
+        "SELECT name, ecosystem, declared_version, resolved_version FROM dependencies"
+    ).fetchall() == [("requests", "python", ">=2.31", None)]
+
+
+def test_python_fixture_indexes_declared_and_resolved_dependencies(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    (project_root / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["requests>=2"]\n'
+    )
+    (project_root / "requirements.txt").write_text("pytest>=8\n")
+    (project_root / "uv.lock").write_text(
+        '[[package]]\nname = "requests"\nversion = "2.32.3"\n'
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    assert conn.execute(
+        "SELECT name, declared_version, resolved_version FROM dependencies ORDER BY name"
+    ).fetchall() == [
+        ("pytest", ">=8", None),
+        ("requests", None, "2.32.3"),
+    ]
+
+
+def test_run_scan_persists_resolved_python_dependencies(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    (project_root / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["requests>=2"]\n'
+    )
+    (project_root / "uv.lock").write_text(
+        '[[package]]\nname = "requests"\nversion = "2.32.3"\n'
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    assert conn.execute(
+        "SELECT name, declared_version, resolved_version FROM dependencies"
+    ).fetchall() == [("requests", None, "2.32.3")]
+
+
 def test_run_scan_second_pass_skips_unchanged_files_but_reindexes_modified_ones(
     tmp_path,
 ):

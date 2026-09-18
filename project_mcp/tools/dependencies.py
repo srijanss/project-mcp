@@ -10,6 +10,13 @@ def _normalized_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def _load_toml(path: Path) -> dict:
+    try:
+        return tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"invalid {path.name}") from exc
+
+
 def _dependency(name: str, version: str | None, status: str) -> dict:
     if version and version.startswith("=="):
         version = version[2:]
@@ -17,16 +24,17 @@ def _dependency(name: str, version: str | None, status: str) -> dict:
         "name": name,
         "ecosystem": "python",
         "version": version,
-        "version_status": status,
+        "version_status": "unknown" if version is None else status,
     }
 
 
 def _parse_requirement(requirement: str) -> dict | None:
-    requirement = requirement.strip()
+    requirement = requirement.split("#", 1)[0].strip()
     if not requirement or requirement.startswith(("#", "-")):
         return None
-    if " @ " in requirement:
+    if "@" in requirement:
         return None
+    requirement = requirement.split(";", 1)[0].split(" --", 1)[0].strip()
     match = _REQUIREMENT.match(requirement)
     if match is None:
         return None
@@ -37,17 +45,30 @@ def _declared_dependencies(project_root: Path) -> list[dict]:
     dependencies = []
     pyproject = project_root / "pyproject.toml"
     if pyproject.is_file():
-        project = tomllib.loads(pyproject.read_text()).get("project", {})
+        project = _load_toml(pyproject).get("project", {})
         for requirement in project.get("dependencies", []):
             parsed = _parse_requirement(requirement)
             if parsed:
                 dependencies.append(parsed)
 
-    for requirements_file in sorted(project_root.glob("requirements*.txt")):
+    seen_files = set()
+
+    def read_requirements(requirements_file: Path) -> None:
+        resolved_file = requirements_file.resolve()
+        if resolved_file in seen_files or not requirements_file.is_file():
+            return
+        seen_files.add(resolved_file)
         for line in requirements_file.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith(("-r ", "--requirement ")):
+                read_requirements(requirements_file.parent / stripped.split(maxsplit=1)[1])
+                continue
             parsed = _parse_requirement(line)
             if parsed:
                 dependencies.append(parsed)
+
+    for requirements_file in sorted(project_root.glob("requirements*.txt")):
+        read_requirements(requirements_file)
     return dependencies
 
 
@@ -55,7 +76,7 @@ def _resolved_versions(project_root: Path) -> dict[str, str]:
     lockfile = project_root / "uv.lock"
     if not lockfile.is_file():
         return {}
-    packages = tomllib.loads(lockfile.read_text()).get("package", [])
+    packages = _load_toml(lockfile).get("package", [])
     return {
         _normalized_name(package["name"]): package["version"]
         for package in packages
