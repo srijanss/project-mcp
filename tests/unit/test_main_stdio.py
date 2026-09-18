@@ -121,23 +121,37 @@ def test_dependency_tools_call_against_the_project_root(tmp_path):
     assert "requests" in result.content[0].text
 
 
-def test_dependency_tools_read_the_persisted_index(tmp_path):
+def test_dependency_tools_read_the_persisted_index_when_unchanged(tmp_path):
     (tmp_path / "requirements.txt").write_text("requests>=2.31\n")
     server = build_server(tmp_path)
     asyncio.run(server.call_tool("list_dependencies", {}))
-    (tmp_path / "requirements.txt").write_text("rich>=13\n")
 
     result = asyncio.run(server.call_tool("list_dependencies", {}))
 
     assert "requests" in result.content[0].text
-    assert "rich" not in result.content[0].text
+
+
+def test_dependency_tools_pick_up_edits_made_since_last_call(tmp_path):
+    """MVP 13: a tool call must not silently serve stale data."""
+    import time
+
+    (tmp_path / "requirements.txt").write_text("requests>=2.31\n")
+    server = build_server(tmp_path)
+    asyncio.run(server.call_tool("list_dependencies", {}))
+
+    time.sleep(0.01)
+    (tmp_path / "requirements.txt").write_text("rich>=13\n")
+
+    result = asyncio.run(server.call_tool("list_dependencies", {}))
+
+    assert "rich" in result.content[0].text
+    assert "requests" not in result.content[0].text
 
 
 def test_get_dependency_version_reads_the_persisted_index(tmp_path):
     (tmp_path / "requirements.txt").write_text("requests>=2.31\n")
     server = build_server(tmp_path)
     asyncio.run(server.call_tool("list_dependencies", {}))
-    (tmp_path / "requirements.txt").write_text("rich>=13\n")
 
     result = asyncio.run(
         server.call_tool("get_dependency_version", {"name": "requests"})
@@ -188,3 +202,80 @@ def test_main_falls_back_to_project_mcp_root_env_var_when_no_argv(
 
     assert exit_code == 1
     assert "does not exist" in capsys.readouterr().err
+
+
+def test_build_server_registers_index_status_and_refresh_tools(tmp_path):
+    server = build_server(tmp_path)
+
+    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert {"get_index_status", "refresh_index"} <= tool_names
+
+
+def test_get_index_status_tool_reports_never_indexed_before_any_call(tmp_path):
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("get_index_status", {}))
+
+    assert result.is_error is False
+    assert "never_indexed" in result.content[0].text
+
+
+def test_get_index_status_tool_detects_stale_after_edit(tmp_path):
+    import time
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+    asyncio.run(server.call_tool("get_project_overview", {}))
+
+    time.sleep(0.01)
+    (tmp_path / "app" / "models.py").write_text(
+        "class Widget:\n    pass\n\nclass Gadget:\n    pass\n"
+    )
+
+    result = asyncio.run(server.call_tool("get_index_status", {}))
+
+    assert result.is_error is False
+    assert "stale" in result.content[0].text
+
+
+def test_refresh_index_tool_reindexes_changed_files_and_returns_fresh(tmp_path):
+    import time
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+    asyncio.run(server.call_tool("get_project_overview", {}))
+
+    time.sleep(0.01)
+    (tmp_path / "app" / "models.py").write_text(
+        "class Widget:\n    pass\n\nclass Gadget:\n    pass\n"
+    )
+
+    result = asyncio.run(server.call_tool("refresh_index", {}))
+    assert result.is_error is False
+    assert "fresh" in result.content[0].text
+
+    found = asyncio.run(server.call_tool("find_symbol", {"query": "Gadget"}))
+    assert "Gadget" in found.content[0].text
+
+
+def test_find_symbol_tool_call_sees_edits_made_after_first_index(tmp_path):
+    """A tool call must not silently serve stale data (MVP 13)."""
+    import time
+
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+    asyncio.run(server.call_tool("find_symbol", {"query": "Widget"}))
+
+    time.sleep(0.01)
+    (tmp_path / "app" / "models.py").write_text(
+        "class Widget:\n    pass\n\nclass Gadget:\n    pass\n"
+    )
+
+    result = asyncio.run(server.call_tool("find_symbol", {"query": "Gadget"}))
+
+    assert result.is_error is False
+    assert "Gadget" in result.content[0].text

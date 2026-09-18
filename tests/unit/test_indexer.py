@@ -6,6 +6,7 @@ from project_mcp.config import load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import (
     begin_index,
+    ensure_fresh_index,
     get_index_status,
     mark_index_complete,
     remove_file,
@@ -796,3 +797,55 @@ class TestExample:
     # Check that tests were indexed
     tests = conn.execute("SELECT COUNT(*) FROM tests").fetchone()[0]
     assert tests > 0, "No tests found in database after indexing"
+
+
+def test_ensure_fresh_index_runs_full_scan_when_never_indexed(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    ensure_fresh_index(conn, project_root, config)
+
+    assert get_index_status(conn)["status"] == "fresh"
+    paths = {row[0] for row in conn.execute("SELECT path FROM files").fetchall()}
+    assert "app/models.py" in paths
+
+
+def test_ensure_fresh_index_refreshes_when_stale(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    run_scan(conn, project_root, config)
+
+    import time
+
+    time.sleep(0.01)
+    app_file = project_root / "app" / "models.py"
+    app_file.write_text(app_file.read_text() + "\n\nclass FreshlyAdded:\n    pass\n")
+
+    ensure_fresh_index(conn, project_root, config)
+
+    row = conn.execute(
+        "SELECT name FROM symbols WHERE name = 'FreshlyAdded'"
+    ).fetchone()
+    assert row is not None
+    assert get_index_status(conn)["status"] == "fresh"
+
+
+def test_ensure_fresh_index_is_a_noop_when_already_fresh(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    run_scan(conn, project_root, config)
+    indexed_at_before = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT path, indexed_at FROM files").fetchall()
+    }
+
+    ensure_fresh_index(conn, project_root, config)
+
+    indexed_at_after = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT path, indexed_at FROM files").fetchall()
+    }
+    assert indexed_at_before == indexed_at_after

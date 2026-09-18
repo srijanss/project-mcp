@@ -6,7 +6,7 @@ from mcp.server.mcpserver import MCPServer
 
 from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
-from project_mcp.indexer import get_index_status, run_scan
+from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
 from project_mcp.tools.dependencies import normalize_dependency_name
 from project_mcp.tools.project import get_project_overview
 from project_mcp.tools.symbols import (
@@ -21,8 +21,7 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
     if ecosystem not in (None, "python"):
         return []
     conn = get_connection(project_root)
-    if get_index_status(conn)["status"] == "never_indexed":
-        run_scan(conn, project_root, config)
+    ensure_fresh_index(conn, project_root, config)
     project_id = conn.execute(
         "SELECT id FROM projects WHERE root_path = ?", (str(project_root),)
     ).fetchone()[0]
@@ -91,6 +90,19 @@ def build_server(project_root: Path) -> MCPServer:
     def get_dependents_tool(qualified_name: str) -> list[dict]:
         """Return what imports or inherits from a symbol or module."""
         return get_dependents(project_root, qualified_name)
+
+    @server.tool(name="get_index_status")
+    def get_index_status_tool() -> dict:
+        """Return whether the local index is fresh, stale, or never indexed."""
+        conn = get_connection(project_root)
+        return get_index_status(conn, project_root, config)
+
+    @server.tool(name="refresh_index")
+    def refresh_index_tool() -> dict:
+        """Force an incremental re-index of changed/new/deleted files."""
+        conn = get_connection(project_root)
+        refresh_index(conn, project_root, config)
+        return get_index_status(conn, project_root, config)
 
     return server
 

@@ -642,3 +642,18 @@ def refresh_index(
     index_python_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
     mark_index_complete(conn)
+
+
+def ensure_fresh_index(
+    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+) -> None:
+    """Guarantee the index reflects the current filesystem before a tool reads it.
+
+    Never indexed -> full scan. Stale (files changed/added/removed on disk
+    since the last index) -> incremental refresh. Already fresh -> no-op.
+    """
+    status = get_index_status(conn, project_root, config)["status"]
+    if status == "never_indexed":
+        run_scan(conn, project_root, config)
+    elif status == "stale":
+        refresh_index(conn, project_root, config)

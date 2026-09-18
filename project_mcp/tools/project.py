@@ -2,7 +2,7 @@ from pathlib import Path
 
 from project_mcp.config import load_config
 from project_mcp.db import get_connection
-from project_mcp.indexer import get_index_status, run_scan
+from project_mcp.indexer import ensure_fresh_index, get_index_status
 
 MANIFEST_NAMES = {
     "pyproject.toml",
@@ -19,8 +19,7 @@ def get_project_overview(project_root: Path) -> dict:
     config = load_config(project_root)
     conn = get_connection(project_root)
 
-    if get_index_status(conn)["status"] == "never_indexed":
-        run_scan(conn, project_root, config)
+    ensure_fresh_index(conn, project_root, config)
 
     project_row = conn.execute(
         "SELECT id FROM projects WHERE root_path = ?", (str(project_root),)
