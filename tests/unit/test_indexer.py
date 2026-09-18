@@ -555,3 +555,19 @@ def test_run_scan_persists_static_call_relationship_from_nested_function(tmp_pat
     ).fetchone()
 
     assert relationship == ("calls", "high")
+
+
+def test_run_scan_continues_indexing_when_a_python_file_has_syntax_error(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "broken.py").write_text("def broken(:\n    pass\n")
+
+    run_scan(conn, project_root, config)
+
+    qualified_names = {
+        row[0] for row in conn.execute("SELECT qualified_name FROM symbols").fetchall()
+    }
+
+    assert "app.models.Widget" in qualified_names
+    assert "app.broken" not in qualified_names

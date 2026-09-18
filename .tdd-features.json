@@ -52,5 +52,14 @@
     "targetFiles": [],
     "recordedAt": "2026-09-18T03:43:12.637203+00:00",
     "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp3-indexing-continues-after-python-syntax-error",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_indexer.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T03:46:59.495818+00:00",
+    "cyclesCompleted": 1
   }
 ]
