@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy .agents/mcp/launch-project-mcp.sh into a consumer repo (same relative path), then add this entry to that repo's .mcp.json. project-mcp must be installed globally first — see README's 'Without Docker' / pipx install section.",
+  "mcpServers": {
+    "project-mcp": {
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.agents/mcp/launch-project-mcp.sh",
+      "args": []
+    }
+  }
+}

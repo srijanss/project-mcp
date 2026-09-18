@@ -1,0 +1,38 @@
+[
+  {
+    "featureName": "mvp0-config-loads-and-validates-project-root",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_config.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-17T23:53:31.838166+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp0-db-creates-and-opens-index-db",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_db.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-17T23:54:52.313576+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp0-server-starts-with-valid-config-and-clear-startup-error",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_main_stdio.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-17T23:57:27.261752+00:00",
+    "cyclesCompleted": 1
+  },
+  {
+    "featureName": "mvp0-main-honors-project-mcp-root-env-var",
+    "dependsOn": [],
+    "status": "completed",
+    "testFile": "tests/unit/test_main_stdio.py",
+    "targetFiles": [],
+    "recordedAt": "2026-09-18T00:02:43.052191+00:00",
+    "cyclesCompleted": 1
+  }
+]

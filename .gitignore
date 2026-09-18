@@ -1,0 +1,24 @@
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+
+# per-project generated index state (see SPEC.md "Per-project storage")
+.project-mcp/index.db
+.project-mcp/state.json
+
+# this repo's own dev-time TDD/session state
+# (.tdd-features.json is the upfront plan ledger and IS committed)
+.tdd-state.json
+.tdd-state.json.lock
+.tdd-features.json.lock
+.tdd-research.json
+.tdd-research.json.lock
+.tdd-review-findings.json
+.tdd-review-findings.json.lock
+.tdd-session.log
+.claude/scheduled_tasks.lock
