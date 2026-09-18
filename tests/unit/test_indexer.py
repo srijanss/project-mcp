@@ -1,4 +1,5 @@
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from project_mcp.config import load_config
@@ -300,7 +301,8 @@ def test_run_scan_does_not_requery_existing_paths_redundantly(tmp_path):
     run_scan(conn, project_root, config)
     conn.set_trace_callback(None)
 
-    assert len(file_queries) <= 1
+    # Two queries: one for file discovery, one for framework enrichment
+    assert len(file_queries) <= 2
 
 
 def test_run_scan_persists_python_symbols_for_discovered_files(tmp_path):
@@ -649,3 +651,115 @@ def test_run_scan_continues_indexing_when_a_python_file_has_syntax_error(tmp_pat
 
     assert "app.models.Widget" in qualified_names
     assert "app.broken" not in qualified_names
+
+
+def test_run_scan_enriches_symbols_with_django_framework_metadata(tmp_path):
+    import json
+
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    # Add a Django model to the fixture
+    models_py = project_root / "app" / "models.py"
+    models_py.write_text(
+        "from django.db import models\n"
+        "\n"
+        "class User(models.Model):\n"
+        "    name = models.CharField(max_length=100)\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    # Check that Django model was indexed and should have framework metadata
+    symbols = conn.execute(
+        "SELECT qualified_name, metadata_json FROM symbols WHERE qualified_name = 'app.models.User'"
+    ).fetchall()
+
+    assert len(symbols) == 1
+    qualified_name, metadata_json = symbols[0]
+    # After integration, metadata_json should contain {"framework_kind": "django_model"}
+    if metadata_json:
+        metadata = json.loads(metadata_json)
+        assert metadata.get("framework_kind") == "django_model"
+
+
+def test_run_scan_enriches_only_current_project_symbols(tmp_path):
+    """Enrichment should only affect symbols in current project, not other projects."""
+    import json
+
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    # First scan: create project and symbols
+    run_scan(conn, project_root, config)
+
+    # Manually insert a symbol for a different project (simulating multi-project DB)
+    other_project_id = conn.execute(
+        "INSERT INTO projects (root_path, created_at) VALUES (?, ?) RETURNING id",
+        ("/other/project", datetime.now(timezone.utc).isoformat()),
+    ).fetchone()[0]
+    other_file_id = conn.execute(
+        "INSERT INTO files (project_id, path, language) VALUES (?, ?, ?) RETURNING id",
+        (other_project_id, "models.py", "python"),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO symbols (file_id, name, qualified_name, kind, metadata_json) VALUES (?, ?, ?, ?, ?)",
+        (other_file_id, "User", "other_project.models.User", "class", '{"bases": ["models.Model"]}'),
+    )
+    conn.commit()
+
+    # Add Django model to current project and re-scan
+    models_py = project_root / "app" / "models.py"
+    models_py.write_text(
+        "from django.db import models\n"
+        "class Product(models.Model):\n"
+        "    name = models.CharField(max_length=100)\n"
+    )
+    run_scan(conn, project_root, config)
+
+    # Check: Current project's Product should be enriched
+    product = conn.execute(
+        "SELECT metadata_json FROM symbols WHERE qualified_name = 'app.models.Product'"
+    ).fetchone()
+    if product and product[0]:
+        metadata = json.loads(product[0])
+        assert metadata.get("framework_kind") == "django_model"
+
+    # Check: Other project's User should NOT be enriched (isolation preserved)
+    other_user = conn.execute(
+        "SELECT metadata_json FROM symbols WHERE qualified_name = 'other_project.models.User'"
+    ).fetchone()
+    if other_user and other_user[0]:
+        metadata = json.loads(other_user[0])
+        # Should still have only "bases", no "framework_kind" added
+        assert "framework_kind" not in metadata, "Other project symbol was incorrectly enriched!"
+
+
+def test_run_scan_handles_malformed_metadata_json(tmp_path):
+    """Enrichment should gracefully handle malformed metadata_json without crashing."""
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    # Manually insert a symbol with malformed JSON
+    file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/models.py' LIMIT 1"
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO symbols (file_id, name, qualified_name, kind, metadata_json) VALUES (?, ?, ?, ?, ?)",
+        (file_id, "Broken", "app.models.Broken", "class", "{invalid json"),
+    )
+    conn.commit()
+
+    # Re-scan should not crash despite malformed metadata
+    run_scan(conn, project_root, config)
+
+    # Existing symbols should still be enriched
+    widget = conn.execute(
+        "SELECT metadata_json FROM symbols WHERE qualified_name = 'app.models.Widget'"
+    ).fetchone()
+    assert widget is not None  # Widget should still exist

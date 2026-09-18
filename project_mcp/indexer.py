@@ -3,6 +3,7 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from project_mcp.analyzers.frameworks.django import enrich_django_metadata
 from project_mcp.analyzers.generic.filesystem import discover_files
 from project_mcp.analyzers.python.parser import (
     extract_imports,
@@ -405,8 +406,67 @@ def run_scan(
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
+    _enrich_framework_metadata(conn, project_id)
     mark_index_complete(conn)
     return project_id
+
+
+def _enrich_framework_metadata(conn: sqlite3.Connection, project_id: int) -> None:
+    """Enrich symbols with framework-specific metadata (Django, etc.)."""
+    # Only enrich if there are symbols to process
+    symbol_count = conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0]
+    if symbol_count == 0:
+        return
+
+    # Get symbols and files for enrichment
+    # Fetch both in minimal queries to avoid redundant database access
+    symbols = conn.execute(
+        """SELECT s.name, s.qualified_name, s.kind, s.metadata_json FROM symbols s
+           INNER JOIN files f ON s.file_id = f.id
+           WHERE f.project_id = ?""",
+        (project_id,),
+    ).fetchall()
+
+    files = conn.execute(
+        "SELECT path FROM files WHERE project_id = ?", (project_id,)
+    ).fetchall()
+
+    # Convert DB rows to format expected by detectors
+    symbol_dicts = []
+    for name, qname, kind, metadata_json in symbols:
+        try:
+            metadata = json.loads(metadata_json) if metadata_json else {}
+        except json.JSONDecodeError:
+            # Skip symbols with malformed metadata
+            metadata = {}
+        symbol_dict = {
+            "name": name,
+            "qualified_name": qname,
+            "kind": kind,
+            "bases": metadata.get("bases", []),
+        }
+        symbol_dicts.append(symbol_dict)
+
+    file_dicts = [{"path": f[0]} for f in files]
+
+    # Call Django enrichment
+    enriched = enrich_django_metadata(symbol_dicts, file_dicts, [])
+
+    # Update symbols with framework metadata
+    for enrichment in enriched:
+        if "qualified_name" in enrichment:
+            # Merge framework_kind into existing metadata
+            # Use JOIN to ensure we only update symbols in this project
+            conn.execute(
+                """UPDATE symbols SET metadata_json = json_set(
+                    COALESCE(metadata_json, '{}'),
+                    '$.framework_kind',
+                    ?
+                ) WHERE qualified_name = ?
+                AND file_id IN (SELECT id FROM files WHERE project_id = ?)""",
+                (enrichment.get("framework_kind"), enrichment["qualified_name"], project_id),
+            )
+    conn.commit()
 
 
 def get_index_status(conn: sqlite3.Connection) -> dict:
