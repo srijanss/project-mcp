@@ -1,3 +1,4 @@
+import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -377,6 +378,35 @@ def test_run_scan_persists_import_relationship_for_resolvable_project_import(tmp
     ).fetchone()
 
     assert relationship == ("imports", "high")
+
+
+def test_run_scan_persists_test_relationship_for_resolvable_source_module(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'tests/test_models.py'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/models.py'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence, evidence_json FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+          AND relationship_type = 'tests'
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship[0] == "tests"
+    assert relationship[1] == "high"
+    assert json.loads(relationship[2]) == ["direct_import"]
 
 
 def test_run_scan_persists_inheritance_relationship_for_same_file_base(tmp_path):

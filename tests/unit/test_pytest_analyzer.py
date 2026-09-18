@@ -126,7 +126,101 @@ def test_my_function():
 
     def test_no_false_positive_association(self):
         """Avoid associating unrelated tests to source modules."""
-        pytest.skip("GREEN: implement test relationship builder")
+        from project_mcp.analyzers.python.pytest_analyzer import (
+            build_test_relationships,
+        )
+
+        test_source = """\
+from mymodule import my_function
+
+def test_my_function():
+    unrelated = 5
+    expected = 10
+    result = my_function()
+    assert result == expected
+"""
+        relationships = build_test_relationships("tests/test_mymodule.py", test_source)
+
+        # "unrelated", "expected", and "result" are local names, not source
+        # module references, and must not be reported as separate
+        # (false-positive) test-relationship targets.
+        assert len(relationships) == 1
+        assert relationships[0]["target_module"] == "mymodule"
+        assert relationships[0]["confidence"] == "high"
+        assert "direct_import" in relationships[0]["evidence"]
+
+    def test_naming_convention_fallback_when_no_imports(self):
+        """Fall back to naming-convention evidence when no import exists."""
+        from project_mcp.analyzers.python.pytest_analyzer import (
+            build_test_relationships,
+        )
+
+        test_source = """\
+def test_widget_creation():
+    assert True
+"""
+        relationships = build_test_relationships("tests/test_widgets.py", test_source)
+
+        assert len(relationships) == 1
+        assert relationships[0]["target_module"] == "widgets"
+        assert relationships[0]["confidence"] == "low"
+        assert relationships[0]["evidence"] == ["naming_convention"]
+
+    def test_merges_multiple_imports_from_the_same_module(self):
+        """Two import statements from the same module -> one relationship."""
+        from project_mcp.analyzers.python.pytest_analyzer import (
+            build_test_relationships,
+        )
+
+        test_source = """\
+from mymodule import my_function
+from mymodule import other_function
+
+def test_my_function():
+    assert my_function()
+    assert other_function()
+"""
+        relationships = build_test_relationships("tests/test_mymodule.py", test_source)
+
+        assert len(relationships) == 1
+        assert relationships[0]["target_module"] == "mymodule"
+        assert relationships[0]["confidence"] == "high"
+        assert relationships[0]["evidence"] == ["direct_import"]
+
+    def test_reports_each_distinct_imported_module_once(self):
+        """Imports from two distinct modules -> two separate relationships."""
+        from project_mcp.analyzers.python.pytest_analyzer import (
+            build_test_relationships,
+        )
+
+        test_source = """\
+from mymodule import my_function
+from othermodule import other_function
+
+def test_things():
+    assert my_function()
+    assert other_function()
+"""
+        relationships = build_test_relationships("tests/test_mymodule.py", test_source)
+
+        target_modules = {r["target_module"] for r in relationships}
+        assert target_modules == {"mymodule", "othermodule"}
+
+    def test_ignores_non_test_files(self):
+        """A regular (non-test) Python file yields no test relationships."""
+        from project_mcp.analyzers.python.pytest_analyzer import (
+            build_test_relationships,
+        )
+
+        source = """\
+from mymodule import my_function
+
+def use_it():
+    return my_function()
+"""
+        relationships = build_test_relationships("app/importer.py", source)
+
+        assert relationships == []
 
 
 class TestPyTestKinds:

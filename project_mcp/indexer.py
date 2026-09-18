@@ -10,7 +10,10 @@ from project_mcp.analyzers.python.parser import (
     extract_static_calls,
     parse_python_source,
 )
-from project_mcp.analyzers.python.pytest_analyzer import discover_tests
+from project_mcp.analyzers.python.pytest_analyzer import (
+    build_test_relationships,
+    discover_tests,
+)
 from project_mcp.config import ProjectConfig
 from project_mcp.tools.dependencies import list_dependencies
 from project_mcp.schema import get_schema_version
@@ -288,6 +291,45 @@ def index_python_import_relationships(
     conn.commit()
 
 
+def index_python_test_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    path: str,
+    source: str,
+    path_to_file_id: dict,
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND relationship_type = 'tests'
+        """,
+        (file_id,),
+    )
+
+    for relationship in build_test_relationships(path, source):
+        module_path = relationship["target_module"].replace(".", "/")
+        target_file_id = path_to_file_id.get(module_path + ".py")
+        if target_file_id is None:
+            continue
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence, evidence_json
+            ) VALUES ('file', ?, 'file', ?, 'tests', ?, ?)
+            """,
+            (
+                file_id,
+                target_file_id,
+                relationship["confidence"],
+                json.dumps(relationship["evidence"]),
+            ),
+        )
+    conn.commit()
+
+
 def index_python_tests(
     conn: sqlite3.Connection, file_id: int, path: str, source: str
 ) -> None:
@@ -420,15 +462,16 @@ def run_scan(
 
     for path in paths_to_refresh:
         file_id = path_to_file_id[path]
+        source = (Path(project_root) / path).read_text()
         if path in changed_python_files:
             imports = changed_python_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
             try:
                 imports = extract_imports(path, source)
             except SyntaxError:
                 imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
+        index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
@@ -629,15 +672,16 @@ def refresh_index(
 
     for path in paths_to_refresh:
         file_id = path_to_file_id[path]
+        source = (Path(project_root) / path).read_text()
         if path in changed_python_files:
             imports = changed_python_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
             try:
                 imports = extract_imports(path, source)
             except SyntaxError:
                 imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
+        index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)

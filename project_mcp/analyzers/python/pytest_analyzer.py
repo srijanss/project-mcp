@@ -180,6 +180,56 @@ def infer_tested_module(test_path: str) -> str | None:
     return None
 
 
+def build_test_relationships(path: str, source: str) -> list[dict]:
+    """Combine test-to-source evidence into confidence-scored relationships.
+
+    Only counts a module as related when there is real evidence (a direct
+    import) — bare local names referenced in the test body (e.g. a plain
+    variable like ``expected``) are not source-module evidence and must not
+    show up as relationship targets.
+
+    Args:
+        path: Test file path
+        source: Test source code
+
+    Returns:
+        List of dicts with target_module, confidence, and evidence.
+    """
+    if not _is_test_file(path):
+        return []
+
+    imports = extract_test_imports(path, source)
+
+    imported_modules = []
+    seen_modules = set()
+    for imp in imports:
+        module = imp.get("module")
+        if not module or module in seen_modules:
+            continue
+        seen_modules.add(module)
+        imported_modules.append(module)
+
+    relationships = [
+        {
+            "target_module": module,
+            "confidence": "high",
+            "evidence": ["direct_import"],
+        }
+        for module in imported_modules
+    ]
+    if relationships:
+        return relationships
+
+    inferred = infer_tested_module(path)
+    if inferred:
+        relationships.append({
+            "target_module": inferred,
+            "confidence": "low",
+            "evidence": ["naming_convention"],
+        })
+    return relationships
+
+
 def classify_test_type(path: str) -> str:
     """Classify test type based on directory structure.
 

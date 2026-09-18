@@ -100,6 +100,46 @@ def test_get_dependents_tool_call_returns_relationships(tmp_path):
     assert "app/importer.py" in result.content[0].text
 
 
+def test_build_server_registers_test_relationship_tools(tmp_path):
+    server = build_server(tmp_path)
+
+    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert {"get_tests_for", "get_test_summary"} <= tool_names
+
+
+def test_get_tests_for_tool_call_returns_relationships(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_models.py").write_text(
+        "from app.models import VALUE\n\n\ndef test_value():\n    assert VALUE\n"
+    )
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_tests_for", {"qualified_name": "app.models"})
+    )
+
+    assert result.is_error is False
+    assert "tests/test_models.py" in result.content[0].text
+
+
+def test_get_test_summary_tool_call_returns_totals(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_models.py").write_text(
+        "from app.models import VALUE\n\n\ndef test_value():\n    assert VALUE\n"
+    )
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("get_test_summary", {}))
+
+    assert result.is_error is False
+    assert "total_tests" in result.content[0].text
+
+
 def test_dependency_tools_describe_their_inputs(tmp_path):
     server = build_server(tmp_path)
 

@@ -15,6 +15,7 @@ from project_mcp.tools.symbols import (
     get_dependents,
     get_symbol_context,
 )
+from project_mcp.tools.tests import get_test_summary, get_tests_for
 
 
 def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> list[dict]:
@@ -90,6 +91,16 @@ def build_server(project_root: Path) -> MCPServer:
     def get_dependents_tool(qualified_name: str) -> list[dict]:
         """Return what imports or inherits from a symbol or module."""
         return get_dependents(project_root, qualified_name)
+
+    @server.tool(name="get_tests_for")
+    def get_tests_for_tool(qualified_name: str) -> list[dict]:
+        """Return tests associated with a source module or symbol, with confidence and evidence."""
+        return get_tests_for(project_root, qualified_name)
+
+    @server.tool(name="get_test_summary")
+    def get_test_summary_tool() -> dict:
+        """Return project-wide test counts and test-relationship confidence breakdown."""
+        return get_test_summary(project_root)
 
     @server.tool(name="get_index_status")
     def get_index_status_tool() -> dict:
