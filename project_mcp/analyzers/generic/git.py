@@ -114,9 +114,9 @@ def get_files_changed_together(
         List of co-changed files with coupling frequency/confidence.
     """
     try:
-        # Get commits that touched the target file
+        # Get all commits with all files they changed (no filtering yet)
         result = subprocess.run(
-            ["git", "log", "--name-only", "--pretty=format:%H", f"-n{limit}", "--", target_path],
+            ["git", "log", "--name-only", "--pretty=format:%H", f"-n{limit}"],
             cwd=project_root,
             capture_output=True,
             text=True,
@@ -147,14 +147,19 @@ def get_files_changed_together(
         if current_commit and files_in_commit:
             commits.append((current_commit, files_in_commit))
 
-        # Count co-occurrences
+        # Find commits that touched the target and count co-occurrences
         coupling = {}
-        target_commit_count = len(commits)
+        target_commit_count = 0
 
         for commit, files in commits:
-            for file in files:
-                if file != target_path and file.strip():
-                    coupling[file] = coupling.get(file, 0) + 1
+            # Check if target file is in this commit
+            if any(f.strip() == target_path for f in files):
+                target_commit_count += 1
+                # Count other files in this commit
+                for file in files:
+                    file = file.strip()
+                    if file and file != target_path:
+                        coupling[file] = coupling.get(file, 0) + 1
 
         # Sort by frequency and calculate confidence
         result_list = []
