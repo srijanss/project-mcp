@@ -301,6 +301,41 @@ def test_refresh_index_tool_reindexes_changed_files_and_returns_fresh(tmp_path):
     assert "Gadget" in found.content[0].text
 
 
+def test_build_server_registers_git_tools(tmp_path):
+    server = build_server(tmp_path)
+
+    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert {"get_change_history", "get_hotspots", "get_change_coupling"} <= tool_names
+
+
+def test_build_server_registers_context_pack_tools(tmp_path):
+    server = build_server(tmp_path)
+
+    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert {
+        "get_context_for_symbol",
+        "get_context_for_feature",
+        "get_context_for_bug",
+        "get_context_for_refactor",
+        "get_context_for_architecture",
+    } <= tool_names
+
+
+def test_get_context_for_symbol_tool_call_returns_context(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_context_for_symbol", {"qualified_name": "app.models"})
+    )
+
+    assert result.is_error is False
+    assert "app.models" in result.content[0].text
+
+
 def test_find_symbol_tool_call_sees_edits_made_after_first_index(tmp_path):
     """A tool call must not silently serve stale data (MVP 13)."""
     import time

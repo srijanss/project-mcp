@@ -37,3 +37,14 @@ def test_files_table_has_no_source_body_columns():
 
     columns = {row[1] for row in conn.execute("PRAGMA table_info(files)").fetchall()}
     assert columns.isdisjoint({"content", "source", "body", "source_code"})
+
+
+def test_init_schema_creates_git_facts_table_with_change_count_and_last_changed():
+    conn = sqlite3.connect(":memory:")
+
+    init_schema(conn)
+
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(git_facts)").fetchall()
+    }
+    assert {"file_id", "change_count", "last_changed"} <= columns

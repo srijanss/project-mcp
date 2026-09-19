@@ -5,10 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from project_mcp.tools.symbols import (
+    find_symbol,
     get_symbol_context,
     get_dependencies,
     get_dependents,
 )
+from project_mcp.tools.tests import get_tests_for
+from project_mcp.tools.git import get_change_history, get_hotspots, get_change_coupling
+from project_mcp.db import get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +77,7 @@ def get_context_for_symbol(project_root: Path, qualified_name: str) -> dict[str,
             "used_by": used_by_truncated,
             "used_by_total": used_by_total,
             "is_truncated_dependents": used_by_total > 10,
-            "related_tests": [],
+            "related_tests": get_tests_for(project_root, qualified_name),
             "summary": f"Symbol {qualified_name} with {used_by_total} dependents",
             "recommended_files_to_open": [symbol.get("file")],
         }
@@ -97,10 +101,34 @@ def get_context_for_feature(project_root: Path, query: str) -> dict[str, Any]:
     Returns:
         Context pack with related symbols, tests, and entrypoints.
     """
+    if not Path(project_root).exists():
+        return {
+            "target": query,
+            "type": "feature",
+            "status": "error",
+            "error": f"Project root does not exist: {project_root}",
+        }
+
+    matches = find_symbol(project_root, query)
+    related_tests = [m["qualified_name"] for m in matches if m["file"].startswith("tests/")]
+    related_symbols = [m["qualified_name"] for m in matches if not m["file"].startswith("tests/")]
+    files = sorted({m["file"] for m in matches if not m["file"].startswith("tests/")})
+
+    dependencies = []
+    for qualified_name in related_symbols[:10]:
+        for dep in get_dependencies(project_root, qualified_name):
+            if dep not in dependencies:
+                dependencies.append(dep)
+
     return {
         "target": query,
         "type": "feature",
-        "status": "not_implemented",
+        "related_symbols": related_symbols[:10],
+        "related_symbols_total": len(related_symbols),
+        "related_tests": related_tests[:10],
+        "dependencies": dependencies[:10],
+        "recommended_files_to_open": files[:10],
+        "summary": f"Feature query '{query}' matches {len(related_symbols)} symbol(s) and {len(related_tests)} test(s)",
     }
 
 
@@ -114,10 +142,42 @@ def get_context_for_bug(project_root: Path, query: str) -> dict[str, Any]:
     Returns:
         Context pack with likely problem code, callers, and churn data.
     """
+    if not Path(project_root).exists():
+        return {
+            "target": query,
+            "type": "bug",
+            "status": "error",
+            "error": f"Project root does not exist: {project_root}",
+        }
+
+    matches = find_symbol(project_root, query)
+    related_symbols = [m["qualified_name"] for m in matches if not m["file"].startswith("tests/")]
+    files = sorted({m["file"] for m in matches if not m["file"].startswith("tests/")})
+
+    callers = []
+    for qualified_name in related_symbols[:10]:
+        for dep in get_dependents(project_root, qualified_name):
+            if dep not in callers:
+                callers.append(dep)
+
+    hotspot_paths = {h["path"] for h in get_hotspots(project_root)}
+    churn = []
+    for path in files[:10]:
+        history = get_change_history(project_root, path)
+        churn.append({
+            "path": path,
+            "change_count": history["change_count"],
+            "high_risk": path in hotspot_paths,
+        })
+
     return {
         "target": query,
         "type": "bug",
-        "status": "not_implemented",
+        "related_symbols": related_symbols[:10],
+        "callers": callers[:10],
+        "churn": churn,
+        "recommended_files_to_open": files[:10],
+        "summary": f"Bug query '{query}' matches {len(related_symbols)} symbol(s)",
     }
 
 
@@ -131,10 +191,29 @@ def get_context_for_refactor(project_root: Path, target: str) -> dict[str, Any]:
     Returns:
         Context pack with dependents, tests, and co-change patterns.
     """
+    if not Path(project_root).exists():
+        return {
+            "target": target,
+            "type": "refactor",
+            "status": "error",
+            "error": f"Project root does not exist: {project_root}",
+        }
+
+    dependents = get_dependents(project_root, target)
+    related_tests = get_tests_for(project_root, target)
+
+    symbol_details = get_symbol_context(project_root, target)
+    file_path = symbol_details.get("symbol", {}).get("file") if symbol_details.get("found") else None
+    temporal_coupling = get_change_coupling(project_root, file_path) if file_path else []
+
     return {
         "target": target,
         "type": "refactor",
-        "status": "not_implemented",
+        "dependents": dependents,
+        "related_tests": related_tests,
+        "temporal_coupling": temporal_coupling,
+        "recommended_files_to_open": [file_path] if file_path else [],
+        "summary": f"Refactor target '{target}' has {len(dependents)} dependent(s) and {len(related_tests)} test(s)",
     }
 
 
@@ -148,8 +227,53 @@ def get_context_for_architecture(project_root: Path, area: str) -> dict[str, Any
     Returns:
         Context pack with explicit docs and inferred dependency structure.
     """
+    if not Path(project_root).exists():
+        return {
+            "target": area,
+            "type": "architecture",
+            "status": "error",
+            "error": f"Project root does not exist: {project_root}",
+        }
+
+    matches = find_symbol(project_root, area)
+    files = sorted({m["file"] for m in matches if not m["file"].startswith("tests/")})
+
+    inferred_structure = []
+    for path in files[:10]:
+        if not path.endswith(".py"):
+            continue
+        module_qualified_name = path[: -len(".py")].replace("/", ".")
+        deps = get_dependencies(project_root, module_qualified_name)
+        if deps:
+            inferred_structure.append({
+                "module": path,
+                "depends_on": [dep["target"] for dep in deps],
+            })
+
+    conn = get_connection(project_root)
+    like_query = f"%{area.lower()}%"
+    rows = conn.execute(
+        """
+        SELECT subject, predicate, object, origin, source FROM architecture_facts
+        WHERE LOWER(subject) LIKE ? OR LOWER(object) LIKE ?
+        """,
+        (like_query, like_query),
+    ).fetchall()
+    explicit_facts = [
+        {"subject": subject, "predicate": predicate, "object": obj, "origin": origin, "source": source}
+        for subject, predicate, obj, origin, source in rows
+    ]
+
     return {
         "target": area,
         "type": "architecture",
-        "status": "not_implemented",
+        "structure": {
+            "explicit_facts": explicit_facts,
+            "inferred_structure": inferred_structure,
+        },
+        "recommended_files_to_open": files[:10],
+        "summary": (
+            f"Architecture context for '{area}': {len(explicit_facts)} explicit fact(s), "
+            f"{len(inferred_structure)} inferred module(s)"
+        ),
     }

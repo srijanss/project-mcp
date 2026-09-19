@@ -12,6 +12,7 @@ REQUIRED_TABLES = {
     "architecture_facts",
     "legacy_signals",
     "index_metadata",
+    "git_facts",
 }
 
 _TABLE_DDL = [
@@ -111,6 +112,16 @@ _TABLE_DDL = [
     CREATE TABLE IF NOT EXISTS index_metadata (
         key TEXT PRIMARY KEY,
         value TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS git_facts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+        change_count INTEGER,
+        last_changed TEXT,
+        computed_at TEXT,
+        UNIQUE(file_id)
     )
     """,
 ]

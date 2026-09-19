@@ -53,3 +53,19 @@ def test_load_config_raises_clear_error_for_invalid_toml_syntax(tmp_path):
 
     with pytest.raises(ConfigError, match="invalid config"):
         load_config(tmp_path)
+
+
+def test_load_config_defaults_git_history_limit_to_100(tmp_path):
+    config = load_config(tmp_path)
+
+    assert config.git_history_limit == 100
+
+
+def test_load_config_reads_git_history_limit_override_from_config_toml(tmp_path):
+    project_mcp_dir = tmp_path / ".project-mcp"
+    project_mcp_dir.mkdir()
+    (project_mcp_dir / "config.toml").write_text("git_history_limit = 25\n")
+
+    config = load_config(tmp_path)
+
+    assert config.git_history_limit == 25

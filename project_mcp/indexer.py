@@ -5,6 +5,10 @@ from pathlib import Path
 
 from project_mcp.analyzers.frameworks.django import enrich_django_metadata
 from project_mcp.analyzers.generic.filesystem import discover_files
+from project_mcp.analyzers.generic.git import (
+    get_file_change_count,
+    get_file_last_changed,
+)
 from project_mcp.analyzers.python.parser import (
     extract_imports,
     extract_static_calls,
@@ -388,6 +392,30 @@ def index_python_dependencies(
     conn.commit()
 
 
+def index_git_facts(
+    conn: sqlite3.Connection,
+    project_root: Path,
+    path_to_file_id: dict,
+    config: ProjectConfig | None = None,
+) -> None:
+    """Persist per-file git change history for all indexed files."""
+    for path, file_id in path_to_file_id.items():
+        change_count = get_file_change_count(project_root, path, config=config)
+        last_changed = get_file_last_changed(project_root, path)
+        conn.execute(
+            """
+            INSERT INTO git_facts (file_id, change_count, last_changed, computed_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (file_id) DO UPDATE SET
+                change_count = excluded.change_count,
+                last_changed = excluded.last_changed,
+                computed_at = excluded.computed_at
+            """,
+            (file_id, change_count, last_changed, _now()),
+        )
+    conn.commit()
+
+
 def run_scan(
     conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
 ) -> int:
@@ -475,6 +503,7 @@ def run_scan(
 
     index_python_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
+    index_git_facts(conn, project_root, path_to_file_id, config)
     mark_index_complete(conn)
     return project_id
 
@@ -685,6 +714,7 @@ def refresh_index(
 
     index_python_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
+    index_git_facts(conn, project_root, path_to_file_id, config)
     mark_index_complete(conn)
 
 

@@ -11,6 +11,7 @@ from project_mcp.analyzers.generic.git import (
     get_hotspots,
     get_files_changed_together,
 )
+from project_mcp.config import ProjectConfig
 
 FIXTURES_ROOT = Path(__file__).parent.parent / "fixtures" / "git"
 
@@ -124,30 +125,59 @@ class TestTemporalCoupling:
 class TestGitIntegration:
     """Integrate git analysis into the indexer."""
 
-    def test_index_git_history_during_scan(self):
+    def test_index_git_history_during_scan(self, tmp_path):
         """Store git churn data during project indexing."""
-        # Git analyzer functions are now available and tested
-        # Full integration with run_scan() is MVP 9 follow-up work
-        project_root = Path(__file__).parent.parent.parent
+        from project_mcp.config import load_config
+        from project_mcp.db import get_connection
+        from project_mcp.indexer import run_scan
 
-        # Verify git tools work standalone
-        churn = get_file_change_count(project_root, "project_mcp/indexer.py")
-        assert isinstance(churn, int)
+        fixture_root = _copy_git_fixture("churn-fixture", tmp_path)
+        conn = get_connection(fixture_root)
+        config = load_config(fixture_root)
 
-        hotspots = get_hotspots(project_root, limit=30)
-        assert isinstance(hotspots, list)
+        run_scan(conn, fixture_root, config)
 
-    def test_expose_git_query_tools(self):
+        row = conn.execute(
+            "SELECT gf.change_count, gf.last_changed FROM git_facts gf "
+            "JOIN files f ON f.id = gf.file_id WHERE f.path = ?",
+            ("file1.py",),
+        ).fetchone()
+
+        assert row is not None
+        assert row[0] == 4  # 1 initial + 3 changes, per churn-fixture history
+        datetime.fromisoformat(row[1])
+
+    def test_expose_git_query_tools(self, tmp_path):
         """Expose git history tools to MCP clients."""
-        # Git tools are now defined and working
-        # Wiring into main_stdio/MCP is MVP 9 follow-up work
-        project_root = Path(__file__).parent.parent.parent
+        import asyncio
+        import json
 
-        # Verify all tools are callable
-        assert callable(get_file_change_count)
-        assert callable(get_file_last_changed)
-        assert callable(get_hotspots)
-        assert callable(get_files_changed_together)
+        from project_mcp.main_stdio import build_server
+
+        fixture_root = _copy_git_fixture("churn-fixture", tmp_path)
+        server = build_server(fixture_root)
+
+        history_result = asyncio.run(
+            server.call_tool("get_change_history", {"path": "file1.py"})
+        )
+        hotspots_result = asyncio.run(server.call_tool("get_hotspots", {}))
+        coupling_result = asyncio.run(
+            server.call_tool("get_change_coupling", {"path": "file1.py"})
+        )
+
+        assert history_result.is_error is False
+        history = json.loads(history_result.content[0].text)
+        assert history["change_count"] == 4
+
+        assert hotspots_result.is_error is False
+        hotspots = hotspots_result.structured_content["result"]
+        assert isinstance(hotspots, list)
+        for hotspot in hotspots:
+            assert {"path", "change_count", "last_changed"} <= hotspot.keys()
+
+        assert coupling_result.is_error is False
+        coupling = coupling_result.structured_content["result"]
+        assert isinstance(coupling, list)
 
 
 class TestGitFixtures:
@@ -175,3 +205,74 @@ class TestGitFixtures:
         # b.py was changed together with a.py 4 times out of 5 total a.py commits
         assert b_coupling[0]["co_changes"] == 4
         assert b_coupling[0]["confidence"] == 0.8  # 4/5
+
+
+def test_get_file_change_count_respects_configured_commit_limit(tmp_path):
+    fixture_root = _copy_git_fixture("churn-fixture", tmp_path)
+    config = ProjectConfig(project_root=fixture_root, git_history_limit=2)
+
+    count = get_file_change_count(fixture_root, "file1.py", config=config)
+
+    assert count == 2
+
+
+def test_get_hotspots_respects_configured_commit_limit(tmp_path):
+    fixture_root = _copy_git_fixture("churn-fixture", tmp_path)
+    config = ProjectConfig(project_root=fixture_root, git_history_limit=1)
+
+    hotspots = get_hotspots(fixture_root, threshold=1, config=config)
+
+    file1_hotspot = next((h for h in hotspots if h["path"] == "file1.py"), None)
+    assert file1_hotspot is not None
+    assert file1_hotspot["change_count"] == 1
+
+
+def test_get_files_changed_together_respects_configured_commit_limit(tmp_path):
+    fixture_root = _copy_git_fixture("coupling-fixture", tmp_path)
+    config = ProjectConfig(project_root=fixture_root, git_history_limit=2)
+
+    coupled = get_files_changed_together(fixture_root, "a.py", config=config)
+
+    b_coupling = [f for f in coupled if f["file"] == "b.py"]
+    assert len(b_coupling) > 0
+    assert b_coupling[0]["co_changes"] <= 2
+
+
+def test_tools_get_change_history_uses_projects_configured_history_limit(tmp_path):
+    from project_mcp.tools.git import get_change_history as tool_get_change_history
+
+    fixture_root = _copy_git_fixture("churn-fixture", tmp_path)
+    (fixture_root / ".project-mcp").mkdir()
+    (fixture_root / ".project-mcp" / "config.toml").write_text(
+        "git_history_limit = 2\n"
+    )
+
+    history = tool_get_change_history(fixture_root, "file1.py")
+
+    assert history["change_count"] == 2
+
+
+def test_run_scan_persists_git_facts_using_configured_history_limit(tmp_path):
+    from project_mcp.config import load_config
+    from project_mcp.db import get_connection
+    from project_mcp.indexer import run_scan
+
+    fixture_root = _copy_git_fixture("churn-fixture", tmp_path)
+    (fixture_root / ".project-mcp").mkdir()
+    (fixture_root / ".project-mcp" / "config.toml").write_text(
+        "git_history_limit = 2\n"
+    )
+
+    conn = get_connection(fixture_root)
+    config = load_config(fixture_root)
+
+    run_scan(conn, fixture_root, config)
+
+    row = conn.execute(
+        "SELECT gf.change_count FROM git_facts gf "
+        "JOIN files f ON f.id = gf.file_id WHERE f.path = ?",
+        ("file1.py",),
+    ).fetchone()
+
+    assert row is not None
+    assert row[0] == 2

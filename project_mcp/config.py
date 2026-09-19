@@ -25,6 +25,7 @@ class ProjectConfig:
     test_roots: list[str] = field(default_factory=list)
     architecture_docs: list[str] = field(default_factory=list)
     legacy_paths: list[str] = field(default_factory=list)
+    git_history_limit: int = 100
 
 
 def load_config(project_root: Path) -> ProjectConfig:
@@ -49,4 +50,5 @@ def load_config(project_root: Path) -> ProjectConfig:
         test_roots=raw.get("test_roots", []),
         architecture_docs=raw.get("architecture_docs", []),
         legacy_paths=raw.get("legacy_paths", []),
+        git_history_limit=raw.get("git_history_limit", 100),
     )

@@ -3,18 +3,28 @@
 import subprocess
 from pathlib import Path
 
+from project_mcp.config import ProjectConfig
 
-def get_file_change_count(project_root: Path, file_path: str, limit: int = 100) -> int:
+
+def get_file_change_count(
+    project_root: Path,
+    file_path: str,
+    limit: int = 100,
+    config: ProjectConfig | None = None,
+) -> int:
     """Count how many times a file has been changed in recent history.
 
     Args:
         project_root: Repository root
         file_path: Relative path to the file
-        limit: Maximum number of commits to examine
+        limit: Maximum number of commits to examine (ignored if config is given)
+        config: Project config; when given, config.git_history_limit overrides limit
 
     Returns:
         Number of commits touching this file (0 if file not in git or no history)
     """
+    if config is not None:
+        limit = config.git_history_limit
     try:
         result = subprocess.run(
             ["git", "log", "--oneline", f"-n{limit}", "--", file_path],
@@ -56,17 +66,25 @@ def get_file_last_changed(project_root: Path, file_path: str) -> str | None:
         return None
 
 
-def get_hotspots(project_root: Path, limit: int = 100, threshold: int = 5) -> list[dict]:
+def get_hotspots(
+    project_root: Path,
+    limit: int = 100,
+    threshold: int = 5,
+    config: ProjectConfig | None = None,
+) -> list[dict]:
     """Identify high-churn files (hotspots).
 
     Args:
         project_root: Repository root
-        limit: Maximum commits to examine
+        limit: Maximum commits to examine (ignored if config is given)
         threshold: Minimum change count to be considered a hotspot
+        config: Project config; when given, config.git_history_limit overrides limit
 
     Returns:
         List of hotspot dicts with path, change_count, and last_changed.
     """
+    if config is not None:
+        limit = config.git_history_limit
     try:
         result = subprocess.run(
             ["git", "log", "--name-only", "--pretty=format:", f"-n{limit}"],
@@ -101,18 +119,24 @@ def get_hotspots(project_root: Path, limit: int = 100, threshold: int = 5) -> li
 
 
 def get_files_changed_together(
-    project_root: Path, target_path: str, limit: int = 100
+    project_root: Path,
+    target_path: str,
+    limit: int = 100,
+    config: ProjectConfig | None = None,
 ) -> list[dict]:
     """Find files changed together with a target file (temporal coupling).
 
     Args:
         project_root: Repository root
         target_path: Relative path to the target file
-        limit: Maximum commits to examine
+        limit: Maximum commits to examine (ignored if config is given)
+        config: Project config; when given, config.git_history_limit overrides limit
 
     Returns:
         List of co-changed files with coupling frequency/confidence.
     """
+    if config is not None:
+        limit = config.git_history_limit
     try:
         # Get all commits with all files they changed (no filtering yet)
         result = subprocess.run(

@@ -1,0 +1,27 @@
+exclude = [
+  ".git",
+  ".venv",
+  "venv",
+  "node_modules",
+  "target",
+  "dist",
+  "build",
+  "__pycache__",
+  ".pytest_cache",
+]
+
+source_roots = [
+  "project_mcp",
+]
+
+test_roots = [
+  "tests",
+]
+
+architecture_docs = [
+  "SPEC.md",
+]
+
+legacy_paths = []
+
+git_history_limit = 100

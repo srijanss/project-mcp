@@ -36,6 +36,20 @@ class TestSymbolContext:
 
         assert "related_tests" in context or "tests" in context or context.get("status") == "not_implemented"
 
+    def test_symbol_context_related_tests_lists_covering_test_files(self, tmp_path):
+        """related_tests should list actual test files covering the symbol, not always []."""
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_models.py").write_text(
+            "from app.models import VALUE\n\n\ndef test_value():\n    assert VALUE\n"
+        )
+
+        context = get_context_for_symbol(tmp_path, "app.models")
+
+        test_files = [t["test_file"] for t in context["related_tests"]]
+        assert "tests/test_models.py" in test_files
+
     def test_symbol_context_is_compact(self):
         """Return only essential info, not entire files."""
         project_root = Path(__file__).parent.parent.parent
@@ -113,13 +127,27 @@ class TestFeatureContext:
         assert context["type"] == "feature"
         assert "related_symbols" in context or context.get("status") == "not_implemented"
 
-    def test_feature_query_matches_tests(self):
+    def test_feature_query_matches_tests(self, tmp_path):
         """Locate tests related to feature query."""
-        pytest.skip("RED: implement feature discovery")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_widget.py").write_text(
+            "def test_widget_creation():\n    assert True\n"
+        )
 
-    def test_feature_context_includes_dependencies(self):
+        context = get_context_for_feature(tmp_path, "widget")
+
+        assert any("test_widget" in t for t in context["related_tests"])
+
+    def test_feature_context_includes_dependencies(self, tmp_path):
         """Include imported modules and dependencies."""
-        pytest.skip("RED: implement feature discovery")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+        (tmp_path / "app" / "widget.py").write_text("import app.models\n")
+
+        context = get_context_for_feature(tmp_path, "widget")
+
+        assert "dependencies" in context
+        assert any("models" in dep["target"] for dep in context["dependencies"])
 
 
 class TestBugContext:
@@ -135,13 +163,47 @@ class TestBugContext:
         assert context["type"] == "bug"
         assert "related_symbols" in context or context.get("status") == "not_implemented"
 
-    def test_bug_context_includes_callers(self):
+    def test_bug_context_includes_callers(self, tmp_path):
         """Show functions that call the buggy code."""
-        pytest.skip("RED: implement bug discovery")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "workflow.py").write_text(
+            "def broken():\n    return 1 / 0\n\n\ndef run():\n    return broken()\n"
+        )
 
-    def test_bug_context_includes_churn(self):
+        context = get_context_for_bug(tmp_path, "broken")
+
+        assert "callers" in context
+        assert any("run" in c["source"] for c in context["callers"])
+
+    def test_bug_context_includes_churn(self, tmp_path):
         """Flag high-churn files as higher risk."""
-        pytest.skip("RED: implement bug discovery")
+        import subprocess
+
+        repo = tmp_path
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@example.com"], cwd=repo, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        (repo / "app").mkdir()
+        module = repo / "app" / "flaky.py"
+        for i in range(5):
+            module.write_text(f"def flaky():\n    return {i}\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"change {i}"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+
+        context = get_context_for_bug(repo, "flaky")
+
+        assert "churn" in context
+        flaky_entry = next((c for c in context["churn"] if c["path"] == "app/flaky.py"), None)
+        assert flaky_entry is not None
+        assert flaky_entry["change_count"] >= 5
+        assert flaky_entry["high_risk"] is True
 
 
 class TestRefactorContext:
@@ -157,13 +219,48 @@ class TestRefactorContext:
         assert context["type"] == "refactor"
         assert "dependents" in context or context.get("status") == "not_implemented"
 
-    def test_refactor_context_includes_tests(self):
+    def test_refactor_context_includes_tests(self, tmp_path):
         """Include tests for the refactored code."""
-        pytest.skip("RED: implement refactor impact")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_models.py").write_text(
+            "from app.models import VALUE\n\n\ndef test_value():\n    assert VALUE\n"
+        )
 
-    def test_refactor_context_includes_temporal_coupling(self):
+        context = get_context_for_refactor(tmp_path, "app.models")
+
+        test_files = [t["test_file"] for t in context["related_tests"]]
+        assert "tests/test_models.py" in test_files
+
+    def test_refactor_context_includes_temporal_coupling(self, tmp_path):
         """Flag files changed together (co-change patterns)."""
-        pytest.skip("RED: implement refactor impact")
+        import subprocess
+
+        repo = tmp_path
+        subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "t@example.com"], cwd=repo, check=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
+        (repo / "app").mkdir()
+        a = repo / "app" / "a.py"
+        b = repo / "app" / "b.py"
+        for i in range(3):
+            a.write_text(f"A = {i}\n")
+            b.write_text(f"B = {i}\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-m", f"change {i}"],
+                cwd=repo,
+                check=True,
+                capture_output=True,
+            )
+
+        context = get_context_for_refactor(repo, "app.a")
+
+        coupled_files = [c["file"] for c in context["temporal_coupling"]]
+        assert "app/b.py" in coupled_files
 
 
 class TestArchitectureContext:
@@ -179,13 +276,69 @@ class TestArchitectureContext:
         assert context["type"] == "architecture"
         assert "structure" in context or context.get("status") == "not_implemented"
 
-    def test_architecture_context_includes_inferred_structure(self):
+    def test_architecture_context_includes_inferred_structure(self, tmp_path):
         """Include dependency structure and patterns."""
-        pytest.skip("RED: implement architecture context")
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+        (tmp_path / "app" / "views.py").write_text("import app.models\n")
 
-    def test_architecture_context_distinguishes_sources(self):
+        context = get_context_for_architecture(tmp_path, "views")
+
+        inferred = context["structure"]["inferred_structure"]
+        assert any("models" in dep for module in inferred for dep in module["depends_on"])
+
+    def test_architecture_context_distinguishes_sources(self, tmp_path):
         """Mark whether facts are explicit or inferred."""
-        pytest.skip("RED: implement architecture context")
+        from project_mcp.db import get_connection
+
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "views.py").write_text("VALUE = 1\n")
+
+        conn = get_connection(tmp_path)
+        conn.execute(
+            "INSERT INTO architecture_facts (subject, predicate, object, origin, source) "
+            "VALUES (?, ?, ?, ?, ?)",
+            ("views", "documented_in", "ARCHITECTURE.md", "explicit", "ARCHITECTURE.md"),
+        )
+        conn.commit()
+
+        context = get_context_for_architecture(tmp_path, "views")
+
+        explicit = context["structure"]["explicit_facts"]
+        assert len(explicit) >= 1
+        assert explicit[0]["origin"] == "explicit"
+
+
+class TestOtherContextsHandleNonexistentProjectRoot:
+    """Error handling for a nonexistent project_root, matching get_context_for_symbol."""
+
+    def test_feature_context_handles_nonexistent_project_root(self):
+        context = get_context_for_feature(Path("/nonexistent/path"), "indexer")
+
+        assert context["type"] == "feature"
+        assert context.get("status") in ("error", "invalid_input")
+        assert "error" in context
+
+    def test_bug_context_handles_nonexistent_project_root(self):
+        context = get_context_for_bug(Path("/nonexistent/path"), "indexer")
+
+        assert context["type"] == "bug"
+        assert context.get("status") in ("error", "invalid_input")
+        assert "error" in context
+
+    def test_refactor_context_handles_nonexistent_project_root(self):
+        context = get_context_for_refactor(Path("/nonexistent/path"), "project_mcp.indexer.run_scan")
+
+        assert context["type"] == "refactor"
+        assert context.get("status") in ("error", "invalid_input")
+        assert "error" in context
+
+    def test_architecture_context_handles_nonexistent_project_root(self):
+        context = get_context_for_architecture(Path("/nonexistent/path"), "indexer")
+
+        assert context["type"] == "architecture"
+        assert context.get("status") in ("error", "invalid_input")
+        assert "error" in context
 
 
 class TestSymbolContextErrorCases:
@@ -244,14 +397,32 @@ class TestSymbolContextErrorCases:
 class TestContextPackFormat:
     """Validate context pack structure and formatting."""
 
-    def test_context_pack_has_summary(self):
+    def _all_packs(self, tmp_path):
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "widget.py").write_text("def widget():\n    pass\n")
+
+        return [
+            get_context_for_symbol(tmp_path, "app.widget"),
+            get_context_for_feature(tmp_path, "widget"),
+            get_context_for_bug(tmp_path, "widget"),
+            get_context_for_refactor(tmp_path, "app.widget"),
+            get_context_for_architecture(tmp_path, "widget"),
+        ]
+
+    def test_context_pack_has_summary(self, tmp_path):
         """Every context pack includes a human-readable summary."""
-        pytest.skip("GREEN: validate context pack format")
+        for context in self._all_packs(tmp_path):
+            assert isinstance(context.get("summary"), str)
+            assert len(context["summary"]) > 0
 
-    def test_context_pack_has_recommended_files(self):
+    def test_context_pack_has_recommended_files(self, tmp_path):
         """Include a list of files worth opening first."""
-        pytest.skip("GREEN: validate context pack format")
+        for context in self._all_packs(tmp_path):
+            assert "recommended_files_to_open" in context
+            assert isinstance(context["recommended_files_to_open"], list)
+            assert "app/widget.py" in context["recommended_files_to_open"]
 
-    def test_context_pack_is_compact(self):
+    def test_context_pack_is_compact(self, tmp_path):
         """Verify result is substantially smaller than reading all files."""
-        pytest.skip("GREEN: validate context pack format")
+        for context in self._all_packs(tmp_path):
+            assert len(str(context)) < 5000

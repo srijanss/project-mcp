@@ -879,3 +879,70 @@ def test_ensure_fresh_index_is_a_noop_when_already_fresh(tmp_path):
         for row in conn.execute("SELECT path, indexed_at FROM files").fetchall()
     }
     assert indexed_at_before == indexed_at_after
+
+
+def test_run_scan_persists_git_change_history_for_indexed_files(tmp_path):
+    import subprocess
+
+    project_root = _copy_fixture(tmp_path)
+    subprocess.run(["git", "init"], cwd=project_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=project_root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=project_root,
+        check=True,
+        capture_output=True,
+    )
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+
+    file_id = conn.execute(
+        "SELECT id FROM files WHERE path = ?", ("app/models.py",)
+    ).fetchone()[0]
+    row = conn.execute(
+        "SELECT change_count, last_changed FROM git_facts WHERE file_id = ?",
+        (file_id,),
+    ).fetchone()
+
+    assert row is not None
+    assert row[0] >= 1
+    assert row[1] is not None
+
+
+def test_run_scan_persists_git_facts_using_configured_history_limit(tmp_path):
+    fixture_root = Path(__file__).parent.parent / "fixtures" / "git" / "churn-fixture"
+    project_root = tmp_path / "churn-fixture"
+    shutil.copytree(fixture_root, project_root)
+    (project_root / ".project-mcp").mkdir()
+    (project_root / ".project-mcp" / "config.toml").write_text(
+        "git_history_limit = 2\n"
+    )
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+
+    row = conn.execute(
+        "SELECT gf.change_count FROM git_facts gf "
+        "JOIN files f ON f.id = gf.file_id WHERE f.path = ?",
+        ("file1.py",),
+    ).fetchone()
+
+    assert row is not None
+    assert row[0] == 2

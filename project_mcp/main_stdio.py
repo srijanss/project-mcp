@@ -8,6 +8,11 @@ from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
 from project_mcp.tools.dependencies import normalize_dependency_name
+from project_mcp.tools.git import (
+    get_change_coupling,
+    get_change_history,
+    get_hotspots,
+)
 from project_mcp.tools.project import get_project_overview
 from project_mcp.tools.symbols import (
     find_symbol,
@@ -16,6 +21,13 @@ from project_mcp.tools.symbols import (
     get_symbol_context,
 )
 from project_mcp.tools.tests import get_test_summary, get_tests_for
+from project_mcp.tools.context_packs import (
+    get_context_for_architecture,
+    get_context_for_bug,
+    get_context_for_feature,
+    get_context_for_refactor,
+    get_context_for_symbol,
+)
 
 
 def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> list[dict]:
@@ -114,6 +126,46 @@ def build_server(project_root: Path) -> MCPServer:
         conn = get_connection(project_root)
         refresh_index(conn, project_root, config)
         return get_index_status(conn, project_root, config)
+
+    @server.tool(name="get_change_history")
+    def get_change_history_tool(path: str) -> dict:
+        """Return a file's git change count and last-changed date."""
+        return get_change_history(project_root, path)
+
+    @server.tool(name="get_hotspots")
+    def get_hotspots_tool() -> list[dict]:
+        """Return high-churn files (git hotspots)."""
+        return get_hotspots(project_root)
+
+    @server.tool(name="get_change_coupling")
+    def get_change_coupling_tool(path: str) -> list[dict]:
+        """Return files historically changed together with a target file."""
+        return get_change_coupling(project_root, path)
+
+    @server.tool(name="get_context_for_symbol")
+    def get_context_for_symbol_tool(qualified_name: str) -> dict:
+        """Return a compact context pack for a specific symbol."""
+        return get_context_for_symbol(project_root, qualified_name)
+
+    @server.tool(name="get_context_for_feature")
+    def get_context_for_feature_tool(query: str) -> dict:
+        """Return a compact context pack for a feature query."""
+        return get_context_for_feature(project_root, query)
+
+    @server.tool(name="get_context_for_bug")
+    def get_context_for_bug_tool(query: str) -> dict:
+        """Return a compact context pack for a bug investigation query."""
+        return get_context_for_bug(project_root, query)
+
+    @server.tool(name="get_context_for_refactor")
+    def get_context_for_refactor_tool(target: str) -> dict:
+        """Return a compact context pack for a refactor target."""
+        return get_context_for_refactor(project_root, target)
+
+    @server.tool(name="get_context_for_architecture")
+    def get_context_for_architecture_tool(area: str) -> dict:
+        """Return a compact context pack for an architecture area."""
+        return get_context_for_architecture(project_root, area)
 
     return server
 
