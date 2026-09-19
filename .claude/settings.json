@@ -25,7 +25,7 @@
         ]
       },
       {
-        "matcher": "mcp__outside-in-tdd__init_feature|mcp__outside-in-tdd__drill_down|mcp__outside-in-tdd__write_test|mcp__outside-in-tdd__write_test_skeleton|mcp__outside-in-tdd__write_code|mcp__outside-in-tdd__refactor_code",
+        "matcher": "mcp__outside-in-tdd__init_feature|mcp__outside-in-tdd__drill_down|mcp__outside-in-tdd__write_test|mcp__outside-in-tdd__write_test_skeleton|mcp__outside-in-tdd__write_code",
         "hooks": [
           {
             "type": "command",

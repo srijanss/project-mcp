@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # PreToolUse hook (matcher: outside-in-tdd MCP tools that start a TDD
 # decision point — init_feature, drill_down, write_test, write_test_skeleton,
-# write_code, refactor_code). Enforces that a project-mcp tool (find_symbol,
+# write_code). Enforces that a project-mcp tool (find_symbol,
 # get_symbol_context, get_dependencies, get_dependents, get_project_overview)
 # was called *recently* (within MARKER_TTL_SECONDS) before this decision
 # point, and blocks the call otherwise.
+#
+# refactor_code is deliberately NOT gated: it always follows write_code
+# within the same cycle (RED -> ... -> IMPLEMENT (write_code, gated) ->
+# VERIFY_GREEN -> REFACTOR (refactor_code)), so a fresh consult already
+# happened for this cycle's actual change. Gating it too only produced
+# no-op "no refactor needed" consults that didn't inform anything.
 #
 # Why this exists: a soft additionalContext reminder alone was observed to
 # be followed only once per session (the first research pass), not before
