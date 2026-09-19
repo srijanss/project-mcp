@@ -12,6 +12,7 @@ from project_mcp.tools.symbols import (
 )
 from project_mcp.tools.tests import get_tests_for
 from project_mcp.tools.git import get_change_history, get_hotspots, get_change_coupling
+from project_mcp.tools.legacy import get_legacy_signals
 from project_mcp.db import get_connection
 
 logger = logging.getLogger(__name__)
@@ -206,12 +207,17 @@ def get_context_for_refactor(project_root: Path, target: str) -> dict[str, Any]:
     file_path = symbol_details.get("symbol", {}).get("file") if symbol_details.get("found") else None
     temporal_coupling = get_change_coupling(project_root, file_path) if file_path else []
 
+    legacy_signals = get_legacy_signals(project_root, target)
+    if file_path and file_path != target:
+        legacy_signals = legacy_signals + get_legacy_signals(project_root, file_path)
+
     return {
         "target": target,
         "type": "refactor",
         "dependents": dependents,
         "related_tests": related_tests,
         "temporal_coupling": temporal_coupling,
+        "legacy_signals": legacy_signals,
         "recommended_files_to_open": [file_path] if file_path else [],
         "summary": f"Refactor target '{target}' has {len(dependents)} dependent(s) and {len(related_tests)} test(s)",
     }

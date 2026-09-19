@@ -262,6 +262,31 @@ class TestRefactorContext:
         coupled_files = [c["file"] for c in context["temporal_coupling"]]
         assert "app/b.py" in coupled_files
 
+    def test_refactor_context_includes_legacy_signals(self, tmp_path):
+        """Surface evidence-backed legacy signals (e.g. large_file) for the target."""
+        (tmp_path / "app").mkdir()
+        a = tmp_path / "app" / "a.py"
+        a.write_text("\n".join(f"A{i} = {i}" for i in range(501)) + "\n")
+
+        context = get_context_for_refactor(tmp_path, "app.a")
+
+        assert "legacy_signals" in context
+        signals = [s["signal"] for s in context["legacy_signals"]]
+        assert "large_file" in signals
+
+    def test_refactor_context_legacy_signals_empty_when_none(self, tmp_path):
+        """No legacy evidence should mean an empty list, not a fabricated signal."""
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "clean.py").write_text("VALUE = 1\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_clean.py").write_text(
+            "from app.clean import VALUE\n\n\ndef test_value():\n    assert VALUE == 1\n"
+        )
+
+        context = get_context_for_refactor(tmp_path, "app.clean")
+
+        assert context["legacy_signals"] == []
+
 
 class TestArchitectureContext:
     """Get architecture-relevant context."""
