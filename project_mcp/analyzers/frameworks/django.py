@@ -21,7 +21,9 @@ def detect_django_models(symbols: list[dict], relationships: list[dict]) -> list
     for symbol in symbols:
         if symbol.get("kind") != "class":
             continue
-        bases = symbol.get("bases", [])
+        if "qualified_name" not in symbol:
+            continue
+        bases = symbol.get("bases") or []
         if any(base in model_bases for base in bases):
             result.append({
                 "qualified_name": symbol["qualified_name"],
@@ -73,7 +75,7 @@ def detect_views(symbols: list[dict]) -> list[dict]:
 
         # Check if in views.py file or inherits from View
         in_views_file = ".views." in qualified_name
-        has_view_base = any(base in view_bases for base in symbol.get("bases", []))
+        has_view_base = any(base in view_bases for base in (symbol.get("bases") or []))
 
         if in_views_file or has_view_base:
             if kind in ("function", "class"):

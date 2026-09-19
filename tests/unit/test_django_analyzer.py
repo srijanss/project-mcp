@@ -13,6 +13,31 @@ from project_mcp.analyzers.frameworks.django import (
 )
 
 
+def test_enrich_django_metadata_handles_empty_symbol_and_file_lists():
+    """Empty symbols/files input should return an empty result, not crash."""
+    result = enrich_django_metadata([], [], [])
+
+    assert result == []
+
+
+def test_detect_django_models_skips_symbols_missing_qualified_name():
+    """A matching class symbol with no qualified_name key should be skipped, not crash."""
+    symbols = [
+        {
+            "name": "User",
+            "kind": "class",
+            "start_line": 1,
+            "end_line": 5,
+            "visibility": "public",
+            "bases": ["models.Model"],
+        }
+    ]
+
+    result = detect_django_models(symbols, [])
+
+    assert result == []
+
+
 def test_detect_django_models_identifies_model_subclass():
     """Django analyzer should identify classes inheriting from models.Model."""
     symbols = [
@@ -39,6 +64,25 @@ def test_detect_django_models_identifies_model_subclass():
     assert len(result) == 1
     assert result[0]["qualified_name"] == "myapp.models.User"
     assert result[0]["framework_kind"] == "django_model"
+
+
+def test_detect_django_models_handles_explicit_null_bases():
+    """A symbol with bases explicitly None (not missing) should not crash."""
+    symbols = [
+        {
+            "name": "User",
+            "qualified_name": "myapp.models.User",
+            "kind": "class",
+            "start_line": 1,
+            "end_line": 5,
+            "visibility": "public",
+            "bases": None,
+        }
+    ]
+
+    result = detect_django_models(symbols, [])
+
+    assert result == []
 
 
 def test_detect_django_models_ignores_non_model_classes():
@@ -108,6 +152,25 @@ def test_detect_migrations_marks_files_in_migrations_directory():
     assert "myapp/migrations/__init__.py" in migration_paths
     assert "myapp/migrations/0001_initial.py" in migration_paths
     assert "myapp/migrations/0002_add_field.py" in migration_paths
+
+
+def test_detect_views_handles_explicit_null_bases():
+    """A symbol with bases explicitly None (not missing) should not crash."""
+    symbols = [
+        {
+            "name": "helper",
+            "qualified_name": "myapp.utils.helper",
+            "kind": "function",
+            "start_line": 1,
+            "end_line": 5,
+            "visibility": "public",
+            "bases": None,
+        }
+    ]
+
+    result = detect_views(symbols)
+
+    assert result == []
 
 
 def test_detect_views_identifies_function_named_view():
