@@ -9,6 +9,7 @@ from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
 from project_mcp.tools.dependencies import normalize_dependency_name
 from project_mcp.tools.architecture import get_architecture_context, get_architecture_facts
+from project_mcp.tools.legacy import get_legacy_hotspots, get_legacy_signals
 from project_mcp.tools.git import (
     get_change_coupling,
     get_change_history,
@@ -152,6 +153,16 @@ def build_server(project_root: Path) -> MCPServer:
     def get_architecture_context_tool(area: str | None = None) -> dict:
         """Return explicit architecture facts, optionally filtered to an area."""
         return get_architecture_context(project_root, area)
+
+    @server.tool(name="get_legacy_hotspots")
+    def get_legacy_hotspots_tool(limit: int = 20) -> list[dict]:
+        """Return targets ranked by number of evidence-backed legacy signals."""
+        return get_legacy_hotspots(project_root, limit)
+
+    @server.tool(name="get_legacy_signals")
+    def get_legacy_signals_tool(target: str) -> list[dict]:
+        """Return evidence-backed legacy signals for a single target."""
+        return get_legacy_signals(project_root, target)
 
     @server.tool(name="get_context_for_symbol")
     def get_context_for_symbol_tool(qualified_name: str) -> dict:

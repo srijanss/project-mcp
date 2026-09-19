@@ -69,3 +69,56 @@ def test_load_config_reads_git_history_limit_override_from_config_toml(tmp_path)
     config = load_config(tmp_path)
 
     assert config.git_history_limit == 25
+
+
+def test_load_config_defaults_legacy_thresholds(tmp_path):
+    config = load_config(tmp_path)
+
+    assert config.large_file_lines == 500
+    assert config.large_symbol_lines == 100
+    assert config.high_churn_count == 20
+    assert config.high_fan_in_count == 15
+    assert config.high_fan_out_count == 15
+    assert config.high_temporal_coupling_count == 5
+
+
+def test_load_config_reads_legacy_threshold_overrides_from_config_toml(tmp_path):
+    project_mcp_dir = tmp_path / ".project-mcp"
+    project_mcp_dir.mkdir()
+    (project_mcp_dir / "config.toml").write_text(
+        """
+        large_file_lines = 300
+        large_symbol_lines = 50
+        high_churn_count = 10
+        high_fan_in_count = 8
+        high_fan_out_count = 8
+        high_temporal_coupling_count = 3
+        """
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.large_file_lines == 300
+    assert config.large_symbol_lines == 50
+    assert config.high_churn_count == 10
+    assert config.high_fan_in_count == 8
+    assert config.high_fan_out_count == 8
+    assert config.high_temporal_coupling_count == 3
+
+
+def test_load_config_raises_clear_error_for_negative_legacy_threshold(tmp_path):
+    project_mcp_dir = tmp_path / ".project-mcp"
+    project_mcp_dir.mkdir()
+    (project_mcp_dir / "config.toml").write_text("large_file_lines = -1\n")
+
+    with pytest.raises(ConfigError, match="large_file_lines"):
+        load_config(tmp_path)
+
+
+def test_load_config_raises_clear_error_for_non_integer_legacy_threshold(tmp_path):
+    project_mcp_dir = tmp_path / ".project-mcp"
+    project_mcp_dir.mkdir()
+    (project_mcp_dir / "config.toml").write_text('high_churn_count = "many"\n')
+
+    with pytest.raises(ConfigError, match="high_churn_count"):
+        load_config(tmp_path)

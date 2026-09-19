@@ -317,6 +317,14 @@ def test_build_server_registers_architecture_tools(tmp_path):
     assert {"get_architecture_facts", "get_architecture_context"} <= tool_names
 
 
+def test_build_server_registers_legacy_tools(tmp_path):
+    server = build_server(tmp_path)
+
+    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert {"get_legacy_hotspots", "get_legacy_signals"} <= tool_names
+
+
 def test_build_server_registers_context_pack_tools(tmp_path):
     server = build_server(tmp_path)
 

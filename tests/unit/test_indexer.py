@@ -9,6 +9,7 @@ from project_mcp.indexer import (
     begin_index,
     ensure_fresh_index,
     get_index_status,
+    index_legacy_signals,
     mark_index_complete,
     remove_file,
     run_scan,
@@ -971,3 +972,143 @@ def test_run_scan_persists_explicit_architecture_facts_from_docs(tmp_path):
         "explicit",
         "docs/architecture/payments.md",
     ) in rows
+
+
+def test_run_scan_persists_large_file_legacy_signal(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "big.py").write_text("x = 1\ny = 2\nz = 3\n")
+    (project_root / ".project-mcp").mkdir()
+    (project_root / ".project-mcp" / "config.toml").write_text("large_file_lines = 1\n")
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        "SELECT target, signal, severity, confidence, evidence FROM legacy_signals"
+        " WHERE signal = 'large_file'"
+    ).fetchall()
+
+    assert len(rows) == 1
+    target, signal, severity, confidence, evidence = rows[0]
+    assert target == "app/big.py"
+    assert severity == "medium"
+    assert confidence == "high"
+    assert json.loads(evidence)
+
+
+def test_run_scan_persists_explicit_legacy_path_signal(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app" / "legacy").mkdir(parents=True)
+    (project_root / "app" / "legacy" / "old.py").write_text("x = 1\n")
+    (project_root / ".project-mcp").mkdir()
+    (project_root / ".project-mcp" / "config.toml").write_text(
+        'legacy_paths = ["app/legacy/"]\n'
+    )
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        "SELECT target FROM legacy_signals WHERE signal = 'explicit_legacy_path'"
+    ).fetchall()
+
+    assert ("app/legacy/old.py",) in rows
+
+
+def test_run_scan_persists_weak_test_relationship_signal_for_untested_file(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "__init__.py").write_text("")
+    (project_root / "app" / "untested.py").write_text("def do_thing():\n    pass\n")
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        "SELECT target FROM legacy_signals WHERE signal = 'weak_test_relationship'"
+    ).fetchall()
+
+    assert ("app/untested.py",) in rows
+
+
+def test_run_scan_replaces_legacy_signals_on_rescan_without_duplicating(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "big.py").write_text("x = 1\ny = 2\nz = 3\n")
+    (project_root / ".project-mcp").mkdir()
+    (project_root / ".project-mcp" / "config.toml").write_text("large_file_lines = 1\n")
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        "SELECT target FROM legacy_signals WHERE signal = 'large_file'"
+        " AND target = 'app/big.py'"
+    ).fetchall()
+
+    assert len(rows) == 1
+
+
+def test_run_scan_calls_get_files_changed_together_exactly_once_per_indexed_file(tmp_path):
+    """Characterization test: temporal-coupling detection runs one git subprocess
+    call (via get_files_changed_together) per indexed file — no more, no less.
+    Locks in the current linear-cost design so a future change can't silently
+    make it worse (e.g. calling it per-symbol) without a test noticing."""
+    from unittest.mock import patch
+
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "a.py").write_text("x = 1\n")
+    (project_root / "app" / "b.py").write_text("y = 1\n")
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    with patch(
+        "project_mcp.indexer.get_files_changed_together", return_value=[]
+    ) as mock_coupling:
+        run_scan(conn, project_root, config)
+
+    file_count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
+    assert mock_coupling.call_count == file_count
+
+
+def test_index_legacy_signals_reads_each_file_from_disk_exactly_once_for_line_counts(
+    tmp_path,
+):
+    """Characterization test: line-count computation for structural signals reads
+    each indexed file from disk exactly once per index_legacy_signals call — no
+    caching, but also no redundant re-reads. Locks in the current cost so a
+    future change can't silently multiply the disk I/O without a test noticing."""
+    from unittest.mock import patch
+
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "a.py").write_text("x = 1\n")
+    (project_root / "app" / "b.py").write_text("y = 1\n")
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+    run_scan(conn, project_root, config)
+
+    project_id = conn.execute("SELECT id FROM projects").fetchone()[0]
+    file_rows = conn.execute(
+        "SELECT path, id, file_kind FROM files WHERE project_id = ?", (project_id,)
+    ).fetchall()
+    path_to_file_id = {path: file_id for path, file_id, _ in file_rows}
+    file_kinds = {path: file_kind for path, _, file_kind in file_rows}
+
+    with patch("pathlib.Path.read_text", wraps=Path.read_text, autospec=True) as spy:
+        index_legacy_signals(conn, project_id, project_root, path_to_file_id, file_kinds, config)
+
+    assert spy.call_count == len(path_to_file_id)

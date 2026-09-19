@@ -12,6 +12,15 @@ from project_mcp.analyzers.generic.filesystem import discover_files
 from project_mcp.analyzers.generic.git import (
     get_file_change_count,
     get_file_last_changed,
+    get_files_changed_together,
+)
+from project_mcp.analyzers.generic.legacy import (
+    detect_churn_signals,
+    detect_circular_dependency_signals,
+    detect_fan_signals,
+    detect_structural_signals,
+    detect_temporal_coupling_signals,
+    detect_test_signals,
 )
 from project_mcp.analyzers.python.parser import (
     extract_imports,
@@ -437,6 +446,140 @@ def index_architecture_facts(
     conn.commit()
 
 
+def index_legacy_signals(
+    conn: sqlite3.Connection,
+    project_id: int,
+    project_root: Path,
+    path_to_file_id: dict,
+    file_kinds: dict,
+    config: ProjectConfig,
+) -> None:
+    """Persist evidence-backed legacy signals for all indexed files/symbols.
+
+    path_to_file_id/file_kinds are threaded through from the caller's own
+    scan bookkeeping rather than re-queried, to avoid an extra files-table
+    scan on every index run.
+    """
+    file_id_to_path = {file_id: path for path, file_id in path_to_file_id.items()}
+
+    files_input = []
+    for path in path_to_file_id:
+        try:
+            line_count = len((Path(project_root) / path).read_text().splitlines())
+        except (OSError, UnicodeDecodeError):
+            continue
+        files_input.append({"path": path, "line_count": line_count})
+
+    symbol_rows = conn.execute(
+        """
+        SELECT s.qualified_name, s.start_line, s.end_line
+        FROM symbols s
+        JOIN files f ON f.id = s.file_id
+        WHERE f.project_id = ? AND s.start_line IS NOT NULL AND s.end_line IS NOT NULL
+        """,
+        (project_id,),
+    ).fetchall()
+    symbols_input = [
+        {"qualified_name": qname, "start_line": start, "end_line": end}
+        for qname, start, end in symbol_rows
+    ]
+
+    signals = list(detect_structural_signals(files_input, symbols_input, config))
+
+    import_rows = conn.execute(
+        """
+        SELECT source_entity_id, target_entity_id
+        FROM relationships
+        WHERE relationship_type = 'imports'
+          AND source_entity_type = 'file' AND target_entity_type = 'file'
+        """,
+    ).fetchall()
+
+    fan_out_counts: dict[str, int] = {}
+    fan_in_counts: dict[str, int] = {}
+    edges: list[tuple[str, str]] = []
+    for source_id, target_id in import_rows:
+        source_path = file_id_to_path.get(source_id)
+        target_path = file_id_to_path.get(target_id)
+        if source_path is None or target_path is None:
+            continue
+        fan_out_counts[source_path] = fan_out_counts.get(source_path, 0) + 1
+        fan_in_counts[target_path] = fan_in_counts.get(target_path, 0) + 1
+        edges.append((source_path, target_path))
+
+    fan_targets = [
+        {
+            "target": path,
+            "fan_in": fan_in_counts.get(path, 0),
+            "fan_out": fan_out_counts.get(path, 0),
+        }
+        for path in file_id_to_path.values()
+    ]
+    signals.extend(detect_fan_signals(fan_targets, config=config))
+    signals.extend(detect_circular_dependency_signals(edges))
+
+    churn_rows = conn.execute(
+        """
+        SELECT f.path, g.change_count
+        FROM git_facts g
+        JOIN files f ON f.id = g.file_id
+        WHERE f.project_id = ?
+        """,
+        (project_id,),
+    ).fetchall()
+    churn_targets = [
+        {"target": path, "change_count": change_count or 0}
+        for path, change_count in churn_rows
+    ]
+    signals.extend(detect_churn_signals(churn_targets, config=config))
+
+    coupling_targets = [
+        {
+            "target": path,
+            "coupled_file_count": len(
+                get_files_changed_together(project_root, path, config=config)
+            ),
+        }
+        for path in file_id_to_path.values()
+    ]
+    signals.extend(detect_temporal_coupling_signals(coupling_targets, config=config))
+
+    test_rows = conn.execute(
+        """
+        SELECT target_entity_id, confidence
+        FROM relationships
+        WHERE relationship_type = 'tests' AND target_entity_type = 'file'
+        """,
+    ).fetchall()
+    confidences_by_target: dict[str, list[str]] = {}
+    for target_id, confidence in test_rows:
+        path = file_id_to_path.get(target_id)
+        if path is None:
+            continue
+        confidences_by_target.setdefault(path, []).append(confidence)
+
+    test_targets = [
+        {
+            "target": path,
+            "test_count": len(confidences_by_target.get(path, [])),
+            "confidences": confidences_by_target.get(path, []),
+        }
+        for path in path_to_file_id
+        if file_kinds.get(path) != "test"
+    ]
+    signals.extend(detect_test_signals(test_targets))
+
+    conn.execute("DELETE FROM legacy_signals")
+    conn.executemany(
+        """
+        INSERT INTO legacy_signals (target, signal, severity, confidence, evidence)
+        VALUES (:target, :signal, :severity, :confidence, :evidence)
+        """,
+        [{**signal, "evidence": json.dumps(signal["evidence"])} for signal in signals],
+    )
+    conn.commit()
+
+
 def run_scan(
     conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
 ) -> int:
@@ -526,6 +669,8 @@ def run_scan(
     _enrich_framework_metadata(conn, project_id)
     index_git_facts(conn, project_root, path_to_file_id, config)
     index_architecture_facts(conn, project_root, config)
+    file_kinds = {record["path"]: record["file_kind"] for record in discovered}
+    index_legacy_signals(conn, project_id, project_root, path_to_file_id, file_kinds, config)
     mark_index_complete(conn)
     return project_id
 
@@ -738,6 +883,8 @@ def refresh_index(
     _enrich_framework_metadata(conn, project_id)
     index_git_facts(conn, project_root, path_to_file_id, config)
     index_architecture_facts(conn, project_root, config)
+    file_kinds = {record["path"]: record["file_kind"] for record in discovered}
+    index_legacy_signals(conn, project_id, project_root, path_to_file_id, file_kinds, config)
     mark_index_complete(conn)
 
 
