@@ -289,24 +289,31 @@ class TestArchitectureContext:
 
     def test_architecture_context_distinguishes_sources(self, tmp_path):
         """Mark whether facts are explicit or inferred."""
-        from project_mcp.db import get_connection
-
         (tmp_path / "app").mkdir()
         (tmp_path / "app" / "views.py").write_text("VALUE = 1\n")
-
-        conn = get_connection(tmp_path)
-        conn.execute(
-            "INSERT INTO architecture_facts (subject, predicate, object, origin, source) "
-            "VALUES (?, ?, ?, ?, ?)",
-            ("views", "documented_in", "ARCHITECTURE.md", "explicit", "ARCHITECTURE.md"),
+        (tmp_path / "docs" / "architecture").mkdir(parents=True)
+        (tmp_path / "docs" / "architecture" / "views.md").write_text(
+            "# views\n\n## views depends on models\n\nSome text.\n"
         )
-        conn.commit()
 
         context = get_context_for_architecture(tmp_path, "views")
 
         explicit = context["structure"]["explicit_facts"]
         assert len(explicit) >= 1
         assert explicit[0]["origin"] == "explicit"
+
+    def test_architecture_context_area_with_underscore_does_not_act_as_wildcard(self, tmp_path):
+        """A literal underscore in `area` must not match arbitrary characters like a SQL LIKE '_' wildcard."""
+        (tmp_path / "docs" / "architecture").mkdir(parents=True)
+        (tmp_path / "docs" / "architecture" / "payments.md").write_text(
+            "# payment_methods\n\n## paymentXmethods\n\nSome text.\n"
+        )
+
+        context = get_context_for_architecture(tmp_path, "payment_methods")
+
+        subjects = [fact["subject"] for fact in context["structure"]["explicit_facts"]]
+        assert "payment_methods" in subjects
+        assert "paymentXmethods" not in subjects
 
 
 class TestOtherContextsHandleNonexistentProjectRoot:

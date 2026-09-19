@@ -8,6 +8,7 @@ from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
 from project_mcp.tools.dependencies import normalize_dependency_name
+from project_mcp.tools.architecture import get_architecture_context, get_architecture_facts
 from project_mcp.tools.git import (
     get_change_coupling,
     get_change_history,
@@ -141,6 +142,16 @@ def build_server(project_root: Path) -> MCPServer:
     def get_change_coupling_tool(path: str) -> list[dict]:
         """Return files historically changed together with a target file."""
         return get_change_coupling(project_root, path)
+
+    @server.tool(name="get_architecture_facts")
+    def get_architecture_facts_tool() -> list[dict]:
+        """Return all indexed explicit architecture facts."""
+        return get_architecture_facts(project_root)
+
+    @server.tool(name="get_architecture_context")
+    def get_architecture_context_tool(area: str | None = None) -> dict:
+        """Return explicit architecture facts, optionally filtered to an area."""
+        return get_architecture_context(project_root, area)
 
     @server.tool(name="get_context_for_symbol")
     def get_context_for_symbol_tool(qualified_name: str) -> dict:

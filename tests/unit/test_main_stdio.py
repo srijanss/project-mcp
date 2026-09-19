@@ -309,6 +309,14 @@ def test_build_server_registers_git_tools(tmp_path):
     assert {"get_change_history", "get_hotspots", "get_change_coupling"} <= tool_names
 
 
+def test_build_server_registers_architecture_tools(tmp_path):
+    server = build_server(tmp_path)
+
+    tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
+
+    assert {"get_architecture_facts", "get_architecture_context"} <= tool_names
+
+
 def test_build_server_registers_context_pack_tools(tmp_path):
     server = build_server(tmp_path)
 

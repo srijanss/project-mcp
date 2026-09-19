@@ -4,6 +4,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from project_mcp.analyzers.frameworks.django import enrich_django_metadata
+from project_mcp.analyzers.generic.architecture import (
+    detect_architecture_doc_sources,
+    extract_architecture_facts,
+)
 from project_mcp.analyzers.generic.filesystem import discover_files
 from project_mcp.analyzers.generic.git import (
     get_file_change_count,
@@ -416,6 +420,23 @@ def index_git_facts(
     conn.commit()
 
 
+def index_architecture_facts(
+    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig | None = None
+) -> None:
+    """Persist explicit architecture facts detected from doc sources."""
+    sources = detect_architecture_doc_sources(project_root, config)
+    facts = extract_architecture_facts(project_root, sources)
+    conn.execute("DELETE FROM architecture_facts WHERE origin = 'explicit'")
+    conn.executemany(
+        """
+        INSERT INTO architecture_facts (subject, predicate, object, origin, source)
+        VALUES (:subject, :predicate, :object, :origin, :source)
+        """,
+        facts,
+    )
+    conn.commit()
+
+
 def run_scan(
     conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
 ) -> int:
@@ -504,6 +525,7 @@ def run_scan(
     index_python_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
     index_git_facts(conn, project_root, path_to_file_id, config)
+    index_architecture_facts(conn, project_root, config)
     mark_index_complete(conn)
     return project_id
 
@@ -715,6 +737,7 @@ def refresh_index(
     index_python_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
     index_git_facts(conn, project_root, path_to_file_id, config)
+    index_architecture_facts(conn, project_root, config)
     mark_index_complete(conn)
 
 

@@ -946,3 +946,28 @@ def test_run_scan_persists_git_facts_using_configured_history_limit(tmp_path):
 
     assert row is not None
     assert row[0] == 2
+
+
+def test_run_scan_persists_explicit_architecture_facts_from_docs(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "docs" / "architecture").mkdir(parents=True)
+    (project_root / "docs" / "architecture" / "payments.md").write_text(
+        "# Payments\n\n## Depends on shared\n\nSome text.\n"
+    )
+
+    conn = get_connection(project_root)
+    config = load_config(project_root)
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        "SELECT subject, predicate, object, origin, source FROM architecture_facts"
+    ).fetchall()
+
+    assert (
+        "Depends on shared",
+        "documented_in",
+        "docs/architecture/payments.md",
+        "explicit",
+        "docs/architecture/payments.md",
+    ) in rows

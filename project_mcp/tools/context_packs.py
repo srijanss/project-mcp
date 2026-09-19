@@ -251,11 +251,12 @@ def get_context_for_architecture(project_root: Path, area: str) -> dict[str, Any
             })
 
     conn = get_connection(project_root)
-    like_query = f"%{area.lower()}%"
+    escaped_area = area.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like_query = f"%{escaped_area}%"
     rows = conn.execute(
         """
         SELECT subject, predicate, object, origin, source FROM architecture_facts
-        WHERE LOWER(subject) LIKE ? OR LOWER(object) LIKE ?
+        WHERE LOWER(subject) LIKE ? ESCAPE '\\' OR LOWER(object) LIKE ? ESCAPE '\\'
         """,
         (like_query, like_query),
     ).fetchall()
