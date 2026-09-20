@@ -79,6 +79,8 @@ def get_context_for_symbol(project_root: Path, qualified_name: str) -> dict[str,
             "used_by_total": used_by_total,
             "is_truncated_dependents": used_by_total > 10,
             "related_tests": get_tests_for(project_root, qualified_name),
+            "entrypoints": [],
+            "dependencies": imports_truncated,
             "summary": f"Symbol {qualified_name} with {used_by_total} dependents",
             "recommended_files_to_open": [symbol.get("file")],
         }
@@ -110,7 +112,16 @@ def get_context_for_feature(project_root: Path, query: str) -> dict[str, Any]:
             "error": f"Project root does not exist: {project_root}",
         }
 
-    matches = find_symbol(project_root, query)
+    try:
+        matches = find_symbol(project_root, query)
+    except Exception as e:
+        logger.exception(f"Error getting context for feature {query}: {e}")
+        return {
+            "target": query,
+            "type": "feature",
+            "status": "error",
+            "error": f"Failed to get context: {e}",
+        }
     related_tests = [m["qualified_name"] for m in matches if m["file"].startswith("tests/")]
     related_symbols = [m["qualified_name"] for m in matches if not m["file"].startswith("tests/")]
     files = sorted({m["file"] for m in matches if not m["file"].startswith("tests/")})
@@ -127,6 +138,7 @@ def get_context_for_feature(project_root: Path, query: str) -> dict[str, Any]:
         "related_symbols": related_symbols[:10],
         "related_symbols_total": len(related_symbols),
         "related_tests": related_tests[:10],
+        "entrypoints": [],
         "dependencies": dependencies[:10],
         "recommended_files_to_open": files[:10],
         "summary": f"Feature query '{query}' matches {len(related_symbols)} symbol(s) and {len(related_tests)} test(s)",
