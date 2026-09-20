@@ -16,6 +16,7 @@ dist/
 .tdd-state.json
 .tdd-state.json.lock
 .tdd-features.json.lock
+.tdd-features.json
 .tdd-research.json
 .tdd-research.json.lock
 .tdd-review-findings.json
