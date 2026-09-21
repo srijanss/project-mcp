@@ -1,0 +1,57 @@
+name = "project-mcp"
+version = "0.1.0"
+[runtime]
+type = "python"
+python = ">=3.12"
+[install]
+strategy = "uv"
+entrypoint = "project-mcp"
+
+# What `mcpctl init project-mcp [project]` copies into a consumer project.
+# Only the project-mcp hook scripts are copied (not the whole .agents/ dir):
+# the shared safety hooks and the TDD skills belong to outside-in-tdd-mcp.
+#
+# .mcp.json, .claude/settings.json and .codex/config.toml are shared with
+# outside-in-tdd-mcp, so they are merged into an existing file rather than
+# skipped: what is already there is kept, and only missing entries are added.
+# (Comments in an existing .codex/config.toml are not preserved when merged.)
+[scaffold]
+
+[[scaffold.files]]
+from = ".mcp.json.example"
+to = ".mcp.json"
+merge = "json"
+
+[[scaffold.files]]
+from = ".claude/settings.json.example"
+to = ".claude/settings.json"
+merge = "json"
+
+[[scaffold.files]]
+from = ".codex/config.toml.example"
+to = ".codex/config.toml"
+merge = "toml"
+
+[[scaffold.files]]
+from = ".agents/hooks/project-mcp-session-gate.sh"
+to = ".agents/hooks/project-mcp-session-gate.sh"
+
+[[scaffold.files]]
+from = ".agents/hooks/project-mcp-reminder.sh"
+to = ".agents/hooks/project-mcp-reminder.sh"
+
+[[scaffold.files]]
+from = ".agents/hooks/project-mcp-mark-consulted.sh"
+to = ".agents/hooks/project-mcp-mark-consulted.sh"
+
+[[scaffold.hints]]
+message = "jq must be installed: the project-mcp hooks parse JSON with it."
+
+[[scaffold.hints]]
+message = "Optional: create .project-mcp/config.toml to set source_roots and test_roots for this project (defaults are used without it)."
+
+[[scaffold.hints]]
+message = "Add .project-mcp/index.db and .project-mcp/state.json to .gitignore (generated index state)."
+
+[[scaffold.hints]]
+message = "Restart your client here and run /mcp (Claude Code) to confirm project-mcp is connected."

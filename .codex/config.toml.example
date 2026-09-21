@@ -1,0 +1,7 @@
+# Codex CLI project config for consumer projects (merged into
+# .codex/config.toml by `mcpctl init project-mcp`). The server runs via
+# `mcpctl run` and defaults its project root to the cwd.
+
+[mcp_servers.project-mcp]
+command = "/usr/local/bin/mcpctl"
+args = ["run", "project-mcp"]
