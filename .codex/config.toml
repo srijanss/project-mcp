@@ -89,3 +89,33 @@ matcher = "Edit|Write"
   [[hooks.PreToolUse.hooks]]
   type = "command"
   command = ".agents/hooks/protect-sensitive-files.sh"
+
+# Counterparts to the .claude/settings.json hooks. One entry per matcher
+# (`mcpctl init` merges hook entries by matcher, so a matcher listed twice
+# would be folded together and run its hooks twice).
+
+# Blocks cold source exploration (grep/rg/find/cat) until project-mcp has been
+# consulted once this session.
+[[hooks.PreToolUse]]
+matcher = "Bash"
+
+  [[hooks.PreToolUse.hooks]]
+  type = "command"
+  command = ".agents/hooks/project-mcp-session-gate.sh"
+
+# Reminds the agent to consult project-mcp before each TDD decision point.
+[[hooks.PreToolUse]]
+matcher = "mcp__outside-in-tdd__init_feature|mcp__outside-in-tdd__drill_down|mcp__outside-in-tdd__write_test|mcp__outside-in-tdd__write_test_skeleton|mcp__outside-in-tdd__write_code"
+
+  [[hooks.PreToolUse.hooks]]
+  type = "command"
+  command = ".agents/hooks/project-mcp-reminder.sh"
+
+# Records that project-mcp was consulted, which unlocks the gate and resets the
+# reminder.
+[[hooks.PostToolUse]]
+matcher = "mcp__project-mcp__find_symbol|mcp__project-mcp__get_symbol_context|mcp__project-mcp__get_dependencies|mcp__project-mcp__get_dependents|mcp__project-mcp__get_project_overview"
+
+  [[hooks.PostToolUse.hooks]]
+  type = "command"
+  command = ".agents/hooks/project-mcp-mark-consulted.sh"
