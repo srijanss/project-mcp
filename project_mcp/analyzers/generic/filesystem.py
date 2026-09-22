@@ -20,6 +20,7 @@ LANGUAGE_BY_EXTENSION = {
     ".json": "json",
     ".md": "markdown",
     ".rst": "restructuredtext",
+    ".rs": "rust",
 }
 
 JS_LANGUAGES = {"javascript", "typescript"}
@@ -49,6 +50,8 @@ def classify_file(path: Path) -> dict:
     if language == "python" and _is_test_path(path):
         file_kind = "test"
     elif language in JS_LANGUAGES and _is_js_test_path(path):
+        file_kind = "test"
+    elif language == "rust" and ("tests" in path.parts[:-1] or _is_test_path(path)):
         file_kind = "test"
     elif language in CONFIG_LANGUAGES:
         file_kind = "config"

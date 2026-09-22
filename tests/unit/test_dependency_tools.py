@@ -28,6 +28,61 @@ dependencies = ["requests>=2.31", "rich==13.7.1"]
     ]
 
 
+def test_list_dependencies_reads_declared_cargo_dependencies(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "widget"
+version = "0.1.0"
+
+[dependencies]
+serde = "1.0"
+tokio = { version = "1", features = ["full"] }
+"""
+    )
+
+    assert list_dependencies(tmp_path, ecosystem="rust") == [
+        {
+            "name": "serde",
+            "ecosystem": "rust",
+            "version": "1.0",
+            "version_status": "declared",
+        },
+        {
+            "name": "tokio",
+            "ecosystem": "rust",
+            "version": "1",
+            "version_status": "declared",
+        },
+    ]
+
+
+def test_list_dependencies_prefers_resolved_cargo_lock_versions(tmp_path: Path):
+    (tmp_path / "Cargo.toml").write_text(
+        """[package]
+name = "widget"
+version = "0.1.0"
+
+[dependencies]
+serde = "1.0"
+"""
+    )
+    (tmp_path / "Cargo.lock").write_text(
+        """[[package]]
+name = "serde"
+version = "1.0.197"
+"""
+    )
+
+    assert list_dependencies(tmp_path, ecosystem="rust") == [
+        {
+            "name": "serde",
+            "ecosystem": "rust",
+            "version": "1.0.197",
+            "version_status": "resolved",
+        }
+    ]
+
+
 def test_list_dependencies_reads_a_pyproject_dependency(tmp_path: Path):
     (tmp_path / "pyproject.toml").write_text(
         '[project]\ndependencies = ["requests>=2.31"]\n'

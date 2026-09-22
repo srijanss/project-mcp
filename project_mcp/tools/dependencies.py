@@ -84,24 +84,79 @@ def _resolved_versions(project_root: Path) -> dict[str, str]:
     }
 
 
+def _declared_cargo_dependencies(project_root: Path) -> list[dict]:
+    dependencies = []
+    cargo_toml = project_root / "Cargo.toml"
+    if not cargo_toml.is_file():
+        return dependencies
+
+    for name, spec in _load_toml(cargo_toml).get("dependencies", {}).items():
+        if isinstance(spec, str):
+            version = spec
+        elif isinstance(spec, dict):
+            version = spec.get("version")
+        else:
+            version = None
+        dependencies.append(
+            {
+                "name": name,
+                "ecosystem": "rust",
+                "version": version,
+                "version_status": "unknown" if version is None else "declared",
+            }
+        )
+    return dependencies
+
+
+def _resolved_cargo_versions(project_root: Path) -> dict[str, str]:
+    lockfile = project_root / "Cargo.lock"
+    if not lockfile.is_file():
+        return {}
+    packages = _load_toml(lockfile).get("package", [])
+    return {
+        package["name"]: package["version"]
+        for package in packages
+        if "name" in package and "version" in package
+    }
+
+
 def list_dependencies(project_root: Path, ecosystem: str | None = None) -> list[dict]:
-    if ecosystem not in (None, "python"):
+    if ecosystem not in (None, "python", "rust"):
         return []
 
     root = Path(project_root)
-    resolved = _resolved_versions(root)
-    seen = set()
     result = []
-    for dependency in _declared_dependencies(root):
-        name = dependency["name"]
-        normalized_name = normalize_dependency_name(name)
-        if normalized_name in seen:
-            continue
-        seen.add(normalized_name)
-        if normalized_name in resolved:
-            result.append(_dependency(name, resolved[normalized_name], "resolved"))
-        else:
-            result.append(dependency)
+
+    if ecosystem in (None, "python"):
+        resolved = _resolved_versions(root)
+        seen = set()
+        for dependency in _declared_dependencies(root):
+            name = dependency["name"]
+            normalized_name = normalize_dependency_name(name)
+            if normalized_name in seen:
+                continue
+            seen.add(normalized_name)
+            if normalized_name in resolved:
+                result.append(_dependency(name, resolved[normalized_name], "resolved"))
+            else:
+                result.append(dependency)
+
+    if ecosystem in (None, "rust"):
+        resolved_cargo = _resolved_cargo_versions(root)
+        for dependency in _declared_cargo_dependencies(root):
+            name = dependency["name"]
+            if name in resolved_cargo:
+                result.append(
+                    {
+                        "name": name,
+                        "ecosystem": "rust",
+                        "version": resolved_cargo[name],
+                        "version_status": "resolved",
+                    }
+                )
+            else:
+                result.append(dependency)
+
     return result
 
 

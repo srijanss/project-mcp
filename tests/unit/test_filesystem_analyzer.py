@@ -82,6 +82,26 @@ def test_classifies_unknown_extension_as_source_with_no_language():
     assert result == {"language": None, "file_kind": "source"}
 
 
+def test_classifies_rs_source_file():
+    result = classify_file(Path("src/widget.rs"))
+    assert result == {"language": "rust", "file_kind": "source"}
+
+
+def test_classifies_rs_test_file_by_tests_dir():
+    result = classify_file(Path("tests/widget_test.rs"))
+    assert result == {"language": "rust", "file_kind": "test"}
+
+
+def test_classifies_rs_test_file_by_prefix():
+    result = classify_file(Path("src/test_widget.rs"))
+    assert result == {"language": "rust", "file_kind": "test"}
+
+
+def test_classifies_rs_test_file_by_suffix():
+    result = classify_file(Path("src/widget_test.rs"))
+    assert result == {"language": "rust", "file_kind": "test"}
+
+
 def test_discover_files_finds_expected_project_files(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)

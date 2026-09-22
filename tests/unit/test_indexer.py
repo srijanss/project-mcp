@@ -366,6 +366,103 @@ def test_refresh_index_persists_js_symbols_for_newly_added_file(tmp_path):
     assert rows.get("widget.topLevel") == "javascript"
 
 
+def test_run_scan_persists_rust_symbols_for_discovered_files(tmp_path):
+    project_root = tmp_path / "rust_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "widget.rs").write_text(
+        "struct Widget {\n    name: String,\n}\n\nfn render() -> String {\n    String::new()\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    rows = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT qualified_name, language FROM symbols").fetchall()
+    }
+
+    assert rows.get("src.widget.Widget") == "rust"
+    assert rows.get("src.widget.render") == "rust"
+
+
+def test_refresh_index_persists_rust_symbols_for_newly_added_file(tmp_path):
+    project_root = tmp_path / "rust_project"
+    project_root.mkdir(parents=True)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    (project_root / "widget.rs").write_text("fn render() -> String {\n    String::new()\n}\n")
+    refresh_index(conn, project_root, config)
+
+    rows = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT qualified_name, language FROM symbols").fetchall()
+    }
+
+    assert rows.get("widget.render") == "rust"
+
+
+def test_run_scan_persists_rust_dependencies(tmp_path):
+    project_root = tmp_path / "rust_project"
+    project_root.mkdir(parents=True)
+    (project_root / "Cargo.toml").write_text(
+        '[package]\nname = "widget"\nversion = "0.1.0"\n\n[dependencies]\nserde = "1.0"\n'
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    assert conn.execute(
+        "SELECT name, ecosystem, declared_version, resolved_version FROM dependencies"
+    ).fetchall() == [("serde", "rust", "1.0", None)]
+
+
+def test_run_scan_persists_trait_implementation_relationship_for_same_file_impl(tmp_path):
+    project_root = tmp_path / "rust_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "widget.rs").write_text(
+        "trait Greet {\n"
+        "    fn greet(&self) -> String;\n"
+        "}\n"
+        "\n"
+        "struct Widget {\n"
+        "    name: String,\n"
+        "}\n"
+        "\n"
+        "impl Greet for Widget {\n"
+        "    fn greet(&self) -> String {\n"
+        "        self.name.clone()\n"
+        "    }\n"
+        "}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    trait_symbol_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'src.widget.Greet'"
+    ).fetchone()[0]
+    struct_symbol_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'src.widget.Widget'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'symbol' AND source_entity_id = ?
+          AND target_entity_type = 'symbol' AND target_entity_id = ?
+        """,
+        (struct_symbol_id, trait_symbol_id),
+    ).fetchone()
+
+    assert relationship == ("implements", "high")
+
+
 def test_run_scan_replaces_stale_symbols_when_python_file_changes(tmp_path):
     import time
 

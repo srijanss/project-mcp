@@ -23,6 +23,7 @@ from project_mcp.analyzers.generic.legacy import (
     detect_test_signals,
 )
 from project_mcp.analyzers.javascript.parser import parse_js_source
+from project_mcp.analyzers.rust.parser import extract_rust_impls, parse_rust_source
 from project_mcp.analyzers.python.parser import (
     extract_imports,
     extract_static_calls,
@@ -213,6 +214,82 @@ def index_js_symbols(
         )
     conn.commit()
     return symbols
+
+
+def index_rust_symbols(
+    conn: sqlite3.Connection, file_id: int, path: str, source: str
+) -> list[dict]:
+    symbols = parse_rust_source(path, source)
+    conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
+
+    for symbol in symbols:
+        conn.execute(
+            """
+            INSERT INTO symbols (
+                file_id, name, qualified_name, kind, language,
+                start_line, end_line, visibility
+            ) VALUES (?, ?, ?, ?, 'rust', ?, ?, ?)
+            """,
+            (
+                file_id,
+                symbol["name"],
+                symbol["qualified_name"],
+                symbol["kind"],
+                symbol["start_line"],
+                symbol["end_line"],
+                symbol["visibility"],
+            ),
+        )
+    conn.commit()
+    return symbols
+
+
+def index_rust_impl_relationships(
+    conn: sqlite3.Connection, file_id: int, source: str
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE source_entity_type = 'symbol' AND relationship_type = 'implements'
+          AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
+        """,
+        (file_id,),
+    )
+
+    module_row = conn.execute(
+        "SELECT qualified_name FROM symbols WHERE file_id = ? AND kind = 'module'",
+        (file_id,),
+    ).fetchone()
+    if module_row is None:
+        return
+    module_name = module_row[0]
+
+    for impl in extract_rust_impls("", source):
+        if impl["trait"] is None:
+            continue
+        struct_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, f"{module_name}.{impl['struct']}"),
+        ).fetchone()
+        if struct_row is None:
+            continue
+        trait_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, f"{module_name}.{impl['trait']}"),
+        ).fetchone()
+        if trait_row is None:
+            continue
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'implements', 'high')
+            """,
+            (struct_row[0], trait_row[0]),
+        )
+    conn.commit()
 
 
 def index_python_inheritance_relationships(
@@ -424,6 +501,31 @@ def index_python_dependencies(
             INSERT INTO dependencies (
                 project_id, name, ecosystem, declared_version, resolved_version
             ) VALUES (?, ?, 'python', ?, ?)
+            """,
+            (
+                project_id,
+                dependency["name"],
+                dependency["version"] if status == "declared" else None,
+                dependency["version"] if status == "resolved" else None,
+            ),
+        )
+    conn.commit()
+
+
+def index_rust_dependencies(
+    conn: sqlite3.Connection, project_id: int, project_root: Path
+) -> None:
+    conn.execute(
+        "DELETE FROM dependencies WHERE project_id = ? AND ecosystem = 'rust'",
+        (project_id,),
+    )
+    for dependency in list_dependencies(project_root, ecosystem="rust"):
+        status = dependency["version_status"]
+        conn.execute(
+            """
+            INSERT INTO dependencies (
+                project_id, name, ecosystem, declared_version, resolved_version
+            ) VALUES (?, ?, 'rust', ?, ?)
             """,
             (
                 project_id,
@@ -667,6 +769,10 @@ def run_scan(
         elif record["language"] in ("javascript", "typescript"):
             source = (Path(project_root) / record["path"]).read_text()
             index_js_symbols(conn, file_id, record["path"], source, record["language"])
+        elif record["language"] == "rust":
+            source = (Path(project_root) / record["path"]).read_text()
+            index_rust_symbols(conn, file_id, record["path"], source)
+            index_rust_impl_relationships(conn, file_id, source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -699,6 +805,7 @@ def run_scan(
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
+    index_rust_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
     index_git_facts(conn, project_root, path_to_file_id, config)
     index_architecture_facts(conn, project_root, config)
@@ -888,6 +995,10 @@ def refresh_index(
         elif record["language"] in ("javascript", "typescript"):
             source = (Path(project_root) / record["path"]).read_text()
             index_js_symbols(conn, file_id, record["path"], source, record["language"])
+        elif record["language"] == "rust":
+            source = (Path(project_root) / record["path"]).read_text()
+            index_rust_symbols(conn, file_id, record["path"], source)
+            index_rust_impl_relationships(conn, file_id, source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -916,6 +1027,7 @@ def refresh_index(
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
+    index_rust_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
     index_git_facts(conn, project_root, path_to_file_id, config)
     index_architecture_facts(conn, project_root, config)
