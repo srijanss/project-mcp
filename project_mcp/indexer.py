@@ -22,6 +22,7 @@ from project_mcp.analyzers.generic.legacy import (
     detect_temporal_coupling_signals,
     detect_test_signals,
 )
+from project_mcp.analyzers.javascript.parser import parse_js_source
 from project_mcp.analyzers.python.parser import (
     extract_imports,
     extract_static_calls,
@@ -179,6 +180,35 @@ def index_python_symbols(
                 symbol["end_line"],
                 symbol["visibility"],
                 metadata,
+            ),
+        )
+    conn.commit()
+    return symbols
+
+
+def index_js_symbols(
+    conn: sqlite3.Connection, file_id: int, path: str, source: str, language: str
+) -> list[dict]:
+    symbols = parse_js_source(path, source)
+    conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
+
+    for symbol in symbols:
+        conn.execute(
+            """
+            INSERT INTO symbols (
+                file_id, name, qualified_name, kind, language,
+                start_line, end_line, visibility
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                file_id,
+                symbol["name"],
+                symbol["qualified_name"],
+                symbol["kind"],
+                language,
+                symbol["start_line"],
+                symbol["end_line"],
+                symbol["visibility"],
             ),
         )
     conn.commit()
@@ -634,6 +664,9 @@ def run_scan(
                 )
             index_python_call_relationships(conn, file_id, calls)
             index_python_tests(conn, file_id, record["path"], source)
+        elif record["language"] in ("javascript", "typescript"):
+            source = (Path(project_root) / record["path"]).read_text()
+            index_js_symbols(conn, file_id, record["path"], source, record["language"])
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -852,6 +885,9 @@ def refresh_index(
                 )
             index_python_call_relationships(conn, file_id, calls)
             index_python_tests(conn, file_id, record["path"], source)
+        elif record["language"] in ("javascript", "typescript"):
+            source = (Path(project_root) / record["path"]).read_text()
+            index_js_symbols(conn, file_id, record["path"], source, record["language"])
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:

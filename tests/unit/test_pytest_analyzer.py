@@ -206,6 +206,27 @@ def test_things():
         target_modules = {r["target_module"] for r in relationships}
         assert target_modules == {"mymodule", "othermodule"}
 
+    def test_relative_import_is_not_high_confidence(self):
+        """A relative import (level > 0) can't be resolved without package
+        context, so it must not be treated as high-confidence direct-import
+        evidence — fall back to naming-convention evidence instead."""
+        from project_mcp.analyzers.python.pytest_analyzer import (
+            build_test_relationships,
+        )
+
+        test_source = """\
+from .mymodule import my_function
+
+def test_my_function():
+    assert my_function()
+"""
+        relationships = build_test_relationships("tests/test_mymodule.py", test_source)
+
+        assert len(relationships) == 1
+        assert relationships[0]["target_module"] == "mymodule"
+        assert relationships[0]["confidence"] == "low"
+        assert relationships[0]["evidence"] == ["naming_convention"]
+
     def test_ignores_non_test_files(self):
         """A regular (non-test) Python file yields no test relationships."""
         from project_mcp.analyzers.python.pytest_analyzer import (

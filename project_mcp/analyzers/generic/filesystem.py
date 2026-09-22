@@ -8,6 +8,10 @@ ALWAYS_EXCLUDED_DIRS = {".project-mcp"}
 
 LANGUAGE_BY_EXTENSION = {
     ".py": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
     ".toml": "toml",
     ".cfg": "ini",
     ".ini": "ini",
@@ -17,6 +21,8 @@ LANGUAGE_BY_EXTENSION = {
     ".md": "markdown",
     ".rst": "restructuredtext",
 }
+
+JS_LANGUAGES = {"javascript", "typescript"}
 
 DOCS_LANGUAGES = {"markdown", "restructuredtext"}
 CONFIG_LANGUAGES = {"toml", "ini", "yaml", "json"}
@@ -29,11 +35,20 @@ def _is_test_path(path: Path) -> bool:
     return stem.startswith("test_") or stem.endswith("_test")
 
 
+def _is_js_test_path(path: Path) -> bool:
+    if "tests" in path.parts[:-1] or "__tests__" in path.parts[:-1]:
+        return True
+    stem = path.stem
+    return stem.endswith(".test") or stem.endswith(".spec")
+
+
 def classify_file(path: Path) -> dict:
     path = Path(path)
     language = LANGUAGE_BY_EXTENSION.get(path.suffix)
 
     if language == "python" and _is_test_path(path):
+        file_kind = "test"
+    elif language in JS_LANGUAGES and _is_js_test_path(path):
         file_kind = "test"
     elif language in CONFIG_LANGUAGES:
         file_kind = "config"

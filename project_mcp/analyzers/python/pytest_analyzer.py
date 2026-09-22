@@ -119,6 +119,10 @@ def find_test_source_refs(path: str, source: str) -> list[dict]:
     """Find source module symbols referenced by a test.
 
     Analyzes test code to identify what functions/classes it calls or uses.
+    Not currently called by build_test_relationships: it pairs every
+    referenced name with every imported module rather than the specific
+    module that defines it, so it isn't reliable enough yet to feed the
+    "symbol_reference" evidence type used there.
 
     Args:
         path: Test file path
@@ -204,7 +208,7 @@ def build_test_relationships(path: str, source: str) -> list[dict]:
     seen_modules = set()
     for imp in imports:
         module = imp.get("module")
-        if not module or module in seen_modules:
+        if not module or imp.get("level", 0) != 0 or module in seen_modules:
             continue
         seen_modules.add(module)
         imported_modules.append(module)

@@ -8,7 +8,7 @@ dist/
 .venv/
 
 # per-project generated index state (see SPEC.md "Per-project storage")
-.project-mcp/index.db
+.project-mcp/index.db*
 .project-mcp/state.json
 
 # this repo's own dev-time TDD/session state

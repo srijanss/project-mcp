@@ -11,6 +11,7 @@ from project_mcp.indexer import (
     get_index_status,
     index_legacy_signals,
     mark_index_complete,
+    refresh_index,
     remove_file,
     run_scan,
     upsert_file,
@@ -322,6 +323,47 @@ def test_run_scan_persists_python_symbols_for_discovered_files(tmp_path):
     assert "app.models" in qualified_names
     assert "app.models.Widget" in qualified_names
     assert "app.models.Widget.__init__" in qualified_names
+
+
+def test_run_scan_persists_js_symbols_for_discovered_files(tmp_path):
+    project_root = tmp_path / "js_project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "widget.js").write_text(
+        "function topLevel(x) {\n  return x;\n}\n\nclass Widget {\n  render() {\n    return 1;\n  }\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    rows = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT qualified_name, language FROM symbols").fetchall()
+    }
+
+    assert rows.get("app.widget.topLevel") == "javascript"
+    assert rows.get("app.widget.Widget") == "javascript"
+
+
+def test_refresh_index_persists_js_symbols_for_newly_added_file(tmp_path):
+    project_root = tmp_path / "js_project"
+    project_root.mkdir(parents=True)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    (project_root / "widget.js").write_text(
+        "function topLevel(x) {\n  return x;\n}\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    rows = {
+        row[0]: row[1]
+        for row in conn.execute("SELECT qualified_name, language FROM symbols").fetchall()
+    }
+
+    assert rows.get("widget.topLevel") == "javascript"
 
 
 def test_run_scan_replaces_stale_symbols_when_python_file_changes(tmp_path):

@@ -47,6 +47,36 @@ def test_classifies_markdown_as_docs():
     assert result == {"language": "markdown", "file_kind": "docs"}
 
 
+def test_classifies_js_source_file():
+    result = classify_file(Path("app/widget.js"))
+    assert result == {"language": "javascript", "file_kind": "source"}
+
+
+def test_classifies_jsx_source_file():
+    result = classify_file(Path("app/Widget.jsx"))
+    assert result == {"language": "javascript", "file_kind": "source"}
+
+
+def test_classifies_ts_source_file():
+    result = classify_file(Path("app/widget.ts"))
+    assert result == {"language": "typescript", "file_kind": "source"}
+
+
+def test_classifies_tsx_source_file():
+    result = classify_file(Path("app/Widget.tsx"))
+    assert result == {"language": "typescript", "file_kind": "source"}
+
+
+def test_classifies_js_test_file_by_suffix():
+    result = classify_file(Path("app/widget.test.js"))
+    assert result == {"language": "javascript", "file_kind": "test"}
+
+
+def test_classifies_js_spec_file_by_suffix():
+    result = classify_file(Path("app/widget.spec.ts"))
+    assert result == {"language": "typescript", "file_kind": "test"}
+
+
 def test_classifies_unknown_extension_as_source_with_no_language():
     result = classify_file(Path("app/data.bin"))
     assert result == {"language": None, "file_kind": "source"}
