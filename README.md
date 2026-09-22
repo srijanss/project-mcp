@@ -19,16 +19,20 @@ support are added as analyzers (see below).
 
 ## Supported languages and frameworks
 
-v1 scope is **Python + Django only**:
-
 - Python: symbols, imports, static calls, pytest test discovery, dependency
   manifests (`pyproject.toml`, `uv.lock`, `requirements*.txt`).
 - Django: framework metadata enrichment.
+- JavaScript/TypeScript: generic symbols (functions, classes, methods,
+  components), imports, exports. Framework-specific enrichment (React,
+  Astro, etc.) is not yet implemented.
+- Rust: symbols (modules, structs, enums, traits, functions, impl blocks),
+  `use` relationships, trait-implementation relationships, and Cargo
+  dependency manifests (`Cargo.toml`, `Cargo.lock`).
 - Language-neutral: filesystem discovery, git history, architecture docs,
   legacy signals.
 
-JavaScript/TypeScript, Rust, npm/cargo dependencies, and React/Astro
-enrichment are deferred to post-v1 adapters and are not indexed today.
+npm dependency manifests and React/Astro framework enrichment are deferred
+to post-v1 adapters and are not indexed today.
 
 ## Setup
 
