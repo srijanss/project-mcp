@@ -1,5 +1,5 @@
 name = "project-mcp"
-version = "0.1.0"
+version = "0.1.1"
 [runtime]
 type = "python"
 python = ">=3.12"
@@ -16,6 +16,7 @@ entrypoint = "project-mcp"
 # skipped: what is already there is kept, and only missing entries are added.
 # (Comments in an existing .codex/config.toml are not preserved when merged.)
 [scaffold]
+requires = ["jq"]  # the hooks parse JSON with it; `mcpctl init` warns if it is missing
 
 [[scaffold.files]]
 from = ".mcp.json.example"
@@ -43,9 +44,6 @@ to = ".agents/hooks/project-mcp-reminder.sh"
 [[scaffold.files]]
 from = ".agents/hooks/project-mcp-mark-consulted.sh"
 to = ".agents/hooks/project-mcp-mark-consulted.sh"
-
-[[scaffold.hints]]
-message = "jq must be installed: the project-mcp hooks parse JSON with it."
 
 [[scaffold.hints]]
 message = "Optional: create .project-mcp/config.toml to set source_roots and test_roots for this project (defaults are used without it)."
