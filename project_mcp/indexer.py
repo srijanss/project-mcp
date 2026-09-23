@@ -955,6 +955,7 @@ def refresh_index(
     discovered = discover_files(project_root, config)
     discovered_paths = set()
     changed_python_files = {}
+    changed_paths = set()
     for record in discovered:
         discovered_paths.add(record["path"])
         previous = existing_rows.get(record["path"])
@@ -963,6 +964,7 @@ def refresh_index(
             record["mtime_ns"],
         ):
             continue
+        changed_paths.add(record["path"])
         file_id = upsert_file(
             conn,
             project_id,
@@ -1029,7 +1031,12 @@ def refresh_index(
     index_python_dependencies(conn, project_id, project_root)
     index_rust_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
-    index_git_facts(conn, project_root, path_to_file_id, config)
+    changed_file_ids = {
+        path: path_to_file_id[path]
+        for path in changed_paths
+        if path in path_to_file_id
+    }
+    index_git_facts(conn, project_root, changed_file_ids, config)
     index_architecture_facts(conn, project_root, config)
     file_kinds = {record["path"]: record["file_kind"] for record in discovered}
     index_legacy_signals(conn, project_id, project_root, path_to_file_id, file_kinds, config)
