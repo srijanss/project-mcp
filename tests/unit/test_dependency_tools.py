@@ -372,6 +372,36 @@ def test_get_dependency_version_is_case_sensitive_for_npm(tmp_path: Path):
     }
 
 
+def test_list_dependencies_resolves_scoped_npm_package(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        """{
+  "name": "widget",
+  "dependencies": {
+    "@org/pkg": "^2.0.0"
+  }
+}
+"""
+    )
+    (tmp_path / "package-lock.json").write_text(
+        """{
+  "packages": {
+    "": {"name": "widget"},
+    "node_modules/@org/pkg": {"version": "2.0.1"}
+  }
+}
+"""
+    )
+
+    assert list_dependencies(tmp_path, ecosystem="npm") == [
+        {
+            "name": "@org/pkg",
+            "ecosystem": "npm",
+            "version": "2.0.1",
+            "version_status": "resolved",
+        }
+    ]
+
+
 def test_requirement_includes_are_not_followed_twice(tmp_path: Path):
     (tmp_path / "requirements.txt").write_text("-r constraints.in\n")
     (tmp_path / "constraints.in").write_text("-r requirements.txt\npytest>=8\n")

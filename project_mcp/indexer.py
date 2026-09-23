@@ -1,4 +1,5 @@
 import json
+import posixpath
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,8 +23,12 @@ from project_mcp.analyzers.generic.legacy import (
     detect_temporal_coupling_signals,
     detect_test_signals,
 )
-from project_mcp.analyzers.javascript.parser import parse_js_source
-from project_mcp.analyzers.rust.parser import extract_rust_impls, parse_rust_source
+from project_mcp.analyzers.javascript.parser import extract_js_imports, parse_js_source
+from project_mcp.analyzers.rust.parser import (
+    extract_rust_impls,
+    extract_rust_use,
+    parse_rust_source,
+)
 from project_mcp.analyzers.python.parser import (
     extract_imports,
     extract_static_calls,
@@ -210,6 +215,59 @@ def index_js_symbols(
     return symbols
 
 
+_JS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx")
+
+
+def _resolve_js_module_candidates(importer_path: str, module: str) -> list[str]:
+    if not module.startswith("."):
+        return []
+    base = posixpath.normpath(posixpath.join(posixpath.dirname(importer_path), module))
+    candidates = [base + ext for ext in _JS_EXTENSIONS]
+    candidates.extend(f"{base}/index{ext}" for ext in _JS_EXTENSIONS)
+    return candidates
+
+
+def index_js_import_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    path: str,
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND relationship_type = 'imports'
+        """,
+        (file_id,),
+    )
+
+    for imp in imports:
+        if imp.get("dynamic") or not imp.get("module"):
+            continue
+        target_file_id = next(
+            (
+                path_to_file_id.get(candidate)
+                for candidate in _resolve_js_module_candidates(path, imp["module"])
+                if path_to_file_id.get(candidate) is not None
+            ),
+            None,
+        )
+        if target_file_id is None or target_file_id == file_id:
+            continue
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('file', ?, 'file', ?, 'imports', 'high')
+            """,
+            (file_id, target_file_id),
+        )
+
+
 def index_rust_symbols(
     conn: sqlite3.Connection, file_id: int, path: str, source: str
 ) -> list[dict]:
@@ -281,6 +339,63 @@ def index_rust_impl_relationships(
             ) VALUES ('symbol', ?, 'symbol', ?, 'implements', 'high')
             """,
             (struct_row[0], trait_row[0]),
+        )
+
+
+def _resolve_rust_use_candidates(importer_path: str, use_path: str) -> list[str]:
+    if use_path != "crate" and not use_path.startswith("crate::"):
+        return []
+
+    segments = importer_path.split("/")
+    if "src" not in segments:
+        return []
+    src_index = segments.index("src")
+    crate_root = "/".join(segments[: src_index + 1])
+
+    module_segments = use_path.split("::")[1:]
+    if not module_segments:
+        return [f"{crate_root}/lib.rs", f"{crate_root}/main.rs"]
+
+    module_path = "/".join([crate_root, *module_segments])
+    return [f"{module_path}.rs", f"{module_path}/mod.rs"]
+
+
+def index_rust_use_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    path: str,
+    uses: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND relationship_type = 'imports'
+        """,
+        (file_id,),
+    )
+
+    for use in uses:
+        target_file_id = next(
+            (
+                path_to_file_id.get(candidate)
+                for candidate in _resolve_rust_use_candidates(path, use["path"])
+                if path_to_file_id.get(candidate) is not None
+            ),
+            None,
+        )
+        if target_file_id is None or target_file_id == file_id:
+            continue
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('file', ?, 'file', ?, 'imports', 'high')
+            """,
+            (file_id, target_file_id),
         )
 
 
@@ -735,6 +850,8 @@ def run_scan(
     discovered = discover_files(project_root, config)
     discovered_paths = set()
     changed_python_files = {}
+    changed_js_files = {}
+    changed_rust_files = {}
     for record in discovered:
         discovered_paths.add(record["path"])
         previous = existing_rows.get(record["path"])
@@ -775,10 +892,12 @@ def run_scan(
         elif record["language"] in ("javascript", "typescript"):
             source = (Path(project_root) / record["path"]).read_text()
             index_js_symbols(conn, file_id, record["path"], source, record["language"])
+            changed_js_files[record["path"]] = extract_js_imports(record["path"], source)
         elif record["language"] == "rust":
             source = (Path(project_root) / record["path"]).read_text()
             index_rust_symbols(conn, file_id, record["path"], source)
             index_rust_impl_relationships(conn, file_id, source)
+            changed_rust_files[record["path"]] = extract_rust_use(record["path"], source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -809,6 +928,41 @@ def run_scan(
                 imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
+
+    js_new_file_added = any(path not in existing_rows for path in changed_js_files)
+    if js_new_file_added:
+        js_paths_to_refresh = [
+            path for path in path_to_file_id
+            if Path(path).suffix in (".js", ".jsx", ".ts", ".tsx")
+        ]
+    else:
+        js_paths_to_refresh = list(changed_js_files)
+
+    for path in js_paths_to_refresh:
+        file_id = path_to_file_id[path]
+        if path in changed_js_files:
+            imports = changed_js_files[path]
+        else:
+            source = (Path(project_root) / path).read_text()
+            imports = extract_js_imports(path, source)
+        index_js_import_relationships(conn, file_id, path, imports, path_to_file_id)
+
+    rust_new_file_added = any(path not in existing_rows for path in changed_rust_files)
+    if rust_new_file_added:
+        rust_paths_to_refresh = [
+            path for path in path_to_file_id if Path(path).suffix == ".rs"
+        ]
+    else:
+        rust_paths_to_refresh = list(changed_rust_files)
+
+    for path in rust_paths_to_refresh:
+        file_id = path_to_file_id[path]
+        if path in changed_rust_files:
+            uses = changed_rust_files[path]
+        else:
+            source = (Path(project_root) / path).read_text()
+            uses = extract_rust_use(path, source)
+        index_rust_use_relationships(conn, file_id, path, uses, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
     index_rust_dependencies(conn, project_id, project_root)
@@ -961,6 +1115,8 @@ def refresh_index(
     discovered = discover_files(project_root, config)
     discovered_paths = set()
     changed_python_files = {}
+    changed_js_files = {}
+    changed_rust_files = {}
     changed_paths = set()
     for record in discovered:
         discovered_paths.add(record["path"])
@@ -1003,10 +1159,12 @@ def refresh_index(
         elif record["language"] in ("javascript", "typescript"):
             source = (Path(project_root) / record["path"]).read_text()
             index_js_symbols(conn, file_id, record["path"], source, record["language"])
+            changed_js_files[record["path"]] = extract_js_imports(record["path"], source)
         elif record["language"] == "rust":
             source = (Path(project_root) / record["path"]).read_text()
             index_rust_symbols(conn, file_id, record["path"], source)
             index_rust_impl_relationships(conn, file_id, source)
+            changed_rust_files[record["path"]] = extract_rust_use(record["path"], source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -1033,6 +1191,41 @@ def refresh_index(
                 imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
+
+    js_new_file_added = any(path not in existing_rows for path in changed_js_files)
+    if js_new_file_added:
+        js_paths_to_refresh = [
+            path for path in path_to_file_id
+            if Path(path).suffix in (".js", ".jsx", ".ts", ".tsx")
+        ]
+    else:
+        js_paths_to_refresh = list(changed_js_files)
+
+    for path in js_paths_to_refresh:
+        file_id = path_to_file_id[path]
+        if path in changed_js_files:
+            imports = changed_js_files[path]
+        else:
+            source = (Path(project_root) / path).read_text()
+            imports = extract_js_imports(path, source)
+        index_js_import_relationships(conn, file_id, path, imports, path_to_file_id)
+
+    rust_new_file_added = any(path not in existing_rows for path in changed_rust_files)
+    if rust_new_file_added:
+        rust_paths_to_refresh = [
+            path for path in path_to_file_id if Path(path).suffix == ".rs"
+        ]
+    else:
+        rust_paths_to_refresh = list(changed_rust_files)
+
+    for path in rust_paths_to_refresh:
+        file_id = path_to_file_id[path]
+        if path in changed_rust_files:
+            uses = changed_rust_files[path]
+        else:
+            source = (Path(project_root) / path).read_text()
+            uses = extract_rust_use(path, source)
+        index_rust_use_relationships(conn, file_id, path, uses, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
     index_rust_dependencies(conn, project_id, project_root)

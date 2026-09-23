@@ -345,6 +345,157 @@ def test_run_scan_persists_js_symbols_for_discovered_files(tmp_path):
     assert rows.get("app.widget.Widget") == "javascript"
 
 
+def test_run_scan_persists_js_import_relationship_for_resolvable_relative_import(tmp_path):
+    project_root = tmp_path / "js_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "App.js").write_text(
+        "import Button from './Button';\n"
+    )
+    (project_root / "src" / "Button.js").write_text(
+        "export default function Button() {\n  return null;\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/App.js'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/Button.js'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
+
+
+def test_run_scan_does_not_persist_js_import_relationship_for_dynamic_import(tmp_path):
+    project_root = tmp_path / "js_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "App.js").write_text(
+        "const Button = await import('./Button');\n"
+    )
+    (project_root / "src" / "Button.js").write_text(
+        "export default function Button() {\n  return null;\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/App.js'"
+    ).fetchone()[0]
+
+    relationships = conn.execute(
+        "SELECT * FROM relationships WHERE source_entity_type = 'file' AND source_entity_id = ?",
+        (source_file_id,),
+    ).fetchall()
+
+    assert relationships == []
+
+
+def test_refresh_index_resolves_js_import_once_target_file_is_added(tmp_path):
+    project_root = tmp_path / "js_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "App.js").write_text(
+        "import Button from './Button';\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    (project_root / "src" / "Button.js").write_text(
+        "export default function Button() {\n  return null;\n}\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/App.js'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/Button.js'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
+
+
+def test_run_scan_does_not_persist_js_self_import_relationship(tmp_path):
+    project_root = tmp_path / "js_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "Button.js").write_text(
+        "import './Button';\n\nexport default function Button() {\n  return null;\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/Button.js'"
+    ).fetchone()[0]
+
+    relationships = conn.execute(
+        "SELECT * FROM relationships WHERE source_entity_type = 'file' AND source_entity_id = ?",
+        (file_id,),
+    ).fetchall()
+
+    assert relationships == []
+
+
+def test_run_scan_persists_js_import_relationship_for_multi_level_relative_import(tmp_path):
+    project_root = tmp_path / "js_project"
+    (project_root / "src" / "components").mkdir(parents=True)
+    (project_root / "shared").mkdir(parents=True)
+    (project_root / "src" / "components" / "App.js").write_text(
+        "import { helper } from '../../shared/utils';\n"
+    )
+    (project_root / "shared" / "utils.js").write_text(
+        "export function helper() {\n  return 1;\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/components/App.js'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'shared/utils.js'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
+
+
 def test_refresh_index_persists_js_symbols_for_newly_added_file(tmp_path):
     project_root = tmp_path / "js_project"
     project_root.mkdir(parents=True)
@@ -435,6 +586,151 @@ def test_run_scan_persists_npm_dependencies(tmp_path):
     assert conn.execute(
         "SELECT name, ecosystem, declared_version, resolved_version FROM dependencies"
     ).fetchall() == [("left-pad", "npm", "^1.3.0", None)]
+
+
+def test_run_scan_persists_resolved_npm_dependencies(tmp_path):
+    project_root = tmp_path / "npm_project"
+    project_root.mkdir(parents=True)
+    (project_root / "package.json").write_text(
+        '{"name": "widget", "dependencies": {"left-pad": "^1.3.0"}}'
+    )
+    (project_root / "package-lock.json").write_text(
+        """{
+  "packages": {
+    "": {"name": "widget"},
+    "node_modules/left-pad": {"version": "1.3.0"}
+  }
+}
+"""
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    assert conn.execute(
+        "SELECT name, ecosystem, declared_version, resolved_version FROM dependencies"
+    ).fetchall() == [("left-pad", "npm", None, "1.3.0")]
+
+
+def test_run_scan_persists_rust_use_relationship_for_resolvable_crate_module(tmp_path):
+    project_root = tmp_path / "rust_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "lib.rs").write_text(
+        "use crate::widget::Widget;\n"
+    )
+    (project_root / "src" / "widget.rs").write_text(
+        "pub struct Widget {\n    name: String,\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/lib.rs'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/widget.rs'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
+
+
+def test_run_scan_persists_rust_use_relationship_for_nested_crate_module(tmp_path):
+    project_root = tmp_path / "rust_project"
+    (project_root / "src" / "foo").mkdir(parents=True)
+    (project_root / "src" / "lib.rs").write_text(
+        "use crate::foo::bar::Bar;\n"
+    )
+    (project_root / "src" / "foo" / "bar.rs").write_text(
+        "pub struct Bar {\n    name: String,\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/lib.rs'"
+    ).fetchone()[0]
+    target_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/foo/bar.rs'"
+    ).fetchone()[0]
+
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'file' AND target_entity_id = ?
+        """,
+        (source_file_id, target_file_id),
+    ).fetchone()
+
+    assert relationship == ("imports", "high")
+
+
+def test_run_scan_does_not_persist_rust_use_relationship_when_file_has_no_src_segment(tmp_path):
+    project_root = tmp_path / "rust_project"
+    project_root.mkdir(parents=True)
+    (project_root / "lib.rs").write_text(
+        "use crate::widget::Widget;\n"
+    )
+    (project_root / "widget.rs").write_text(
+        "pub struct Widget {\n    name: String,\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'lib.rs'"
+    ).fetchone()[0]
+
+    relationships = conn.execute(
+        "SELECT * FROM relationships WHERE source_entity_type = 'file' AND source_entity_id = ?",
+        (source_file_id,),
+    ).fetchall()
+
+    assert relationships == []
+
+
+def test_run_scan_does_not_persist_rust_use_relationship_for_external_or_relative_module_paths(tmp_path):
+    project_root = tmp_path / "rust_project"
+    (project_root / "src").mkdir(parents=True)
+    (project_root / "src" / "lib.rs").write_text(
+        "use std::collections::HashMap;\n"
+        "use self::widget::Widget;\n"
+        "use super::other::Thing;\n"
+    )
+    (project_root / "src" / "widget.rs").write_text(
+        "pub struct Widget {\n    name: String,\n}\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    source_file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'src/lib.rs'"
+    ).fetchone()[0]
+
+    relationships = conn.execute(
+        "SELECT * FROM relationships WHERE source_entity_type = 'file' AND source_entity_id = ?",
+        (source_file_id,),
+    ).fetchall()
+
+    assert relationships == []
 
 
 def test_run_scan_persists_trait_implementation_relationship_for_same_file_impl(tmp_path):
