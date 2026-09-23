@@ -58,7 +58,6 @@ def begin_index(conn: sqlite3.Connection, project_root: Path) -> int:
         ON CONFLICT (key) DO UPDATE SET value = excluded.value
         """
     )
-    conn.commit()
     return row[0]
 
 
@@ -101,7 +100,6 @@ def upsert_file(
             _now(),
         ),
     )
-    conn.commit()
     row = conn.execute(
         "SELECT id FROM files WHERE project_id = ? AND path = ?",
         (project_id, path),
@@ -138,7 +136,6 @@ def remove_file(conn: sqlite3.Connection, project_id: int, path: str) -> None:
         )
 
     conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
-    conn.commit()
 
 
 def index_python_symbols(
@@ -158,7 +155,6 @@ def index_python_symbols(
     conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
 
     if len(symbols) == 1 and symbols[0].get("kind") == "parse_error":
-        conn.commit()
         return symbols
 
     for symbol in symbols:
@@ -183,7 +179,6 @@ def index_python_symbols(
                 metadata,
             ),
         )
-    conn.commit()
     return symbols
 
 
@@ -212,7 +207,6 @@ def index_js_symbols(
                 symbol["visibility"],
             ),
         )
-    conn.commit()
     return symbols
 
 
@@ -240,7 +234,6 @@ def index_rust_symbols(
                 symbol["visibility"],
             ),
         )
-    conn.commit()
     return symbols
 
 
@@ -289,7 +282,6 @@ def index_rust_impl_relationships(
             """,
             (struct_row[0], trait_row[0]),
         )
-    conn.commit()
 
 
 def index_python_inheritance_relationships(
@@ -332,7 +324,6 @@ def index_python_inheritance_relationships(
                 """,
                 (class_symbol_id, base_row[0]),
             )
-    conn.commit()
 
 
 def index_python_call_relationships(
@@ -369,7 +360,6 @@ def index_python_call_relationships(
             """,
             (caller_row[0], callee_row[0]),
         )
-    conn.commit()
 
 
 def index_python_import_relationships(
@@ -412,7 +402,6 @@ def index_python_import_relationships(
             """,
             (file_id, target_file_id),
         )
-    conn.commit()
 
 
 def index_python_test_relationships(
@@ -451,7 +440,6 @@ def index_python_test_relationships(
                 json.dumps(relationship["evidence"]),
             ),
         )
-    conn.commit()
 
 
 def index_python_tests(
@@ -467,7 +455,6 @@ def index_python_tests(
             """,
             (file_id, test["kind"], "pytest"),
         )
-    conn.commit()
 
 
 def mark_index_complete(conn: sqlite3.Connection) -> None:
@@ -509,7 +496,6 @@ def index_python_dependencies(
                 dependency["version"] if status == "resolved" else None,
             ),
         )
-    conn.commit()
 
 
 def index_rust_dependencies(
@@ -534,7 +520,6 @@ def index_rust_dependencies(
                 dependency["version"] if status == "resolved" else None,
             ),
         )
-    conn.commit()
 
 
 def index_git_facts(
@@ -558,7 +543,6 @@ def index_git_facts(
             """,
             (file_id, change_count, last_changed, _now()),
         )
-    conn.commit()
 
 
 def index_architecture_facts(
@@ -575,7 +559,6 @@ def index_architecture_facts(
         """,
         facts,
     )
-    conn.commit()
 
 
 def index_legacy_signals(
@@ -709,7 +692,6 @@ def index_legacy_signals(
         """,
         [{**signal, "evidence": json.dumps(signal["evidence"])} for signal in signals],
     )
-    conn.commit()
 
 
 def run_scan(
@@ -870,7 +852,6 @@ def _enrich_framework_metadata(conn: sqlite3.Connection, project_id: int) -> Non
                 AND file_id IN (SELECT id FROM files WHERE project_id = ?)""",
                 (enrichment.get("framework_kind"), enrichment["qualified_name"], project_id),
             )
-    conn.commit()
 
 
 def _detect_stale_index(

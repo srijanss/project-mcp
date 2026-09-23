@@ -1,4 +1,5 @@
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 
@@ -318,4 +319,40 @@ def test_refresh_index_skips_git_facts_for_unchanged_files(tmp_path, monkeypatch
     assert recomputed_paths == [], (
         "refresh_index recomputed git facts for unchanged files: "
         f"{recomputed_paths}"
+    )
+
+
+class _CommitCountingConnection(sqlite3.Connection):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.commit_count = 0
+
+    def commit(self):
+        self.commit_count += 1
+        return super().commit()
+
+
+def test_refresh_index_commits_once_for_multiple_changed_files(tmp_path):
+    """Refreshing several changed files should batch into a single commit,
+    not one commit per file."""
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+    db_path = project_root / ".project-mcp" / "index.db"
+    conn.close()
+
+    time.sleep(0.01)
+    models_file = project_root / "app" / "models.py"
+    models_file.write_text(models_file.read_text() + "\n\nclass AnotherModel:\n    pass\n")
+    init_file = project_root / "app" / "__init__.py"
+    init_file.write_text(init_file.read_text() + "\n# touched\n")
+
+    counting_conn = sqlite3.connect(db_path, factory=_CommitCountingConnection)
+    refresh_index(counting_conn, project_root, config)
+
+    assert counting_conn.commit_count == 1, (
+        f"refresh_index committed {counting_conn.commit_count} times for 2 changed "
+        "files, expected a single batched commit"
     )
