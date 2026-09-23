@@ -1,3 +1,4 @@
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -120,8 +121,49 @@ def _resolved_cargo_versions(project_root: Path) -> dict[str, str]:
     }
 
 
+def _load_json(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid {path.name}") from exc
+
+
+def _declared_npm_dependencies(project_root: Path) -> list[dict]:
+    dependencies = []
+    package_json = project_root / "package.json"
+    if not package_json.is_file():
+        return dependencies
+
+    manifest = _load_json(package_json)
+    for name, version in manifest.get("dependencies", {}).items():
+        dependencies.append(
+            {
+                "name": name,
+                "ecosystem": "npm",
+                "version": version,
+                "version_status": "unknown" if not version else "declared",
+            }
+        )
+    return dependencies
+
+
+def _resolved_npm_versions(project_root: Path) -> dict[str, str]:
+    lockfile = project_root / "package-lock.json"
+    if not lockfile.is_file():
+        return {}
+    packages = _load_json(lockfile).get("packages", {})
+    resolved = {}
+    for path, info in packages.items():
+        if not path.startswith("node_modules/"):
+            continue
+        name = path.rsplit("node_modules/", 1)[-1]
+        if "version" in info:
+            resolved[name] = info["version"]
+    return resolved
+
+
 def list_dependencies(project_root: Path, ecosystem: str | None = None) -> list[dict]:
-    if ecosystem not in (None, "python", "rust"):
+    if ecosystem not in (None, "python", "rust", "npm"):
         return []
 
     root = Path(project_root)
@@ -157,6 +199,22 @@ def list_dependencies(project_root: Path, ecosystem: str | None = None) -> list[
             else:
                 result.append(dependency)
 
+    if ecosystem in (None, "npm"):
+        resolved_npm = _resolved_npm_versions(root)
+        for dependency in _declared_npm_dependencies(root):
+            name = dependency["name"]
+            if name in resolved_npm:
+                result.append(
+                    {
+                        "name": name,
+                        "ecosystem": "npm",
+                        "version": resolved_npm[name],
+                        "version_status": "resolved",
+                    }
+                )
+            else:
+                result.append(dependency)
+
     return result
 
 
@@ -164,7 +222,11 @@ def get_dependency_version(
     project_root: Path, name: str, ecosystem: str | None = None
 ) -> dict:
     for dependency in list_dependencies(project_root, ecosystem):
-        if normalize_dependency_name(dependency["name"]) == normalize_dependency_name(name):
+        if dependency["ecosystem"] == "python":
+            matches = normalize_dependency_name(dependency["name"]) == normalize_dependency_name(name)
+        else:
+            matches = dependency["name"] == name
+        if matches:
             return dependency
     root = Path(project_root)
     if not _declared_dependencies(root) and ecosystem in (None, "python"):

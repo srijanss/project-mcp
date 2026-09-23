@@ -290,10 +290,120 @@ def test_requirements_file_includes_another_requirements_file(tmp_path: Path):
     assert list_dependencies(tmp_path)[0]["name"] == "pytest"
 
 
+def test_list_dependencies_prefers_resolved_npm_lock_versions(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        """{
+  "name": "widget",
+  "dependencies": {
+    "left-pad": "^1.3.0"
+  }
+}
+"""
+    )
+    (tmp_path / "package-lock.json").write_text(
+        """{
+  "packages": {
+    "": {"name": "widget"},
+    "node_modules/left-pad": {"version": "1.3.0"}
+  }
+}
+"""
+    )
+
+    assert list_dependencies(tmp_path, ecosystem="npm") == [
+        {
+            "name": "left-pad",
+            "ecosystem": "npm",
+            "version": "1.3.0",
+            "version_status": "resolved",
+        }
+    ]
+
+
+def test_get_dependency_version_reads_npm_lock(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        """{
+  "name": "widget",
+  "dependencies": {
+    "left-pad": "^1.3.0"
+  }
+}
+"""
+    )
+    (tmp_path / "package-lock.json").write_text(
+        """{
+  "packages": {
+    "": {"name": "widget"},
+    "node_modules/left-pad": {"version": "1.3.0"}
+  }
+}
+"""
+    )
+
+    assert get_dependency_version(tmp_path, "left-pad") == {
+        "name": "left-pad",
+        "ecosystem": "npm",
+        "version": "1.3.0",
+        "version_status": "resolved",
+    }
+    assert get_dependency_version(tmp_path, "missing") == {"status": "not_found"}
+
+
+def test_list_dependencies_reports_an_invalid_package_json(tmp_path: Path):
+    (tmp_path / "package.json").write_text("{invalid json")
+
+    with pytest.raises(ValueError, match="invalid package.json"):
+        list_dependencies(tmp_path)
+
+
+def test_get_dependency_version_is_case_sensitive_for_npm(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        '{"name": "widget", "dependencies": {"React": "18.2.0"}}'
+    )
+
+    assert get_dependency_version(tmp_path, "react", ecosystem="npm") == {
+        "status": "not_found"
+    }
+    assert get_dependency_version(tmp_path, "React", ecosystem="npm") == {
+        "name": "React",
+        "ecosystem": "npm",
+        "version": "18.2.0",
+        "version_status": "declared",
+    }
+
+
 def test_requirement_includes_are_not_followed_twice(tmp_path: Path):
     (tmp_path / "requirements.txt").write_text("-r constraints.in\n")
     (tmp_path / "constraints.in").write_text("-r requirements.txt\npytest>=8\n")
 
     assert [dependency["name"] for dependency in list_dependencies(tmp_path)] == [
         "pytest"
+    ]
+
+
+def test_list_dependencies_reads_declared_npm_dependencies(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        """{
+  "name": "widget",
+  "dependencies": {
+    "left-pad": "^1.3.0",
+    "react": "18.2.0"
+  }
+}
+"""
+    )
+
+    assert list_dependencies(tmp_path, ecosystem="npm") == [
+        {
+            "name": "left-pad",
+            "ecosystem": "npm",
+            "version": "^1.3.0",
+            "version_status": "declared",
+        },
+        {
+            "name": "react",
+            "ecosystem": "npm",
+            "version": "18.2.0",
+            "version_status": "declared",
+        },
     ]

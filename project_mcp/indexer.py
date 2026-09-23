@@ -522,6 +522,30 @@ def index_rust_dependencies(
         )
 
 
+def index_npm_dependencies(
+    conn: sqlite3.Connection, project_id: int, project_root: Path
+) -> None:
+    conn.execute(
+        "DELETE FROM dependencies WHERE project_id = ? AND ecosystem = 'npm'",
+        (project_id,),
+    )
+    for dependency in list_dependencies(project_root, ecosystem="npm"):
+        status = dependency["version_status"]
+        conn.execute(
+            """
+            INSERT INTO dependencies (
+                project_id, name, ecosystem, declared_version, resolved_version
+            ) VALUES (?, ?, 'npm', ?, ?)
+            """,
+            (
+                project_id,
+                dependency["name"],
+                dependency["version"] if status == "declared" else None,
+                dependency["version"] if status == "resolved" else None,
+            ),
+        )
+
+
 def index_git_facts(
     conn: sqlite3.Connection,
     project_root: Path,
@@ -788,6 +812,7 @@ def run_scan(
 
     index_python_dependencies(conn, project_id, project_root)
     index_rust_dependencies(conn, project_id, project_root)
+    index_npm_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
     index_git_facts(conn, project_root, path_to_file_id, config)
     index_architecture_facts(conn, project_root, config)
@@ -1011,6 +1036,7 @@ def refresh_index(
 
     index_python_dependencies(conn, project_id, project_root)
     index_rust_dependencies(conn, project_id, project_root)
+    index_npm_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
     changed_file_ids = {
         path: path_to_file_id[path]

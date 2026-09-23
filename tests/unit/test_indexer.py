@@ -421,6 +421,22 @@ def test_run_scan_persists_rust_dependencies(tmp_path):
     ).fetchall() == [("serde", "rust", "1.0", None)]
 
 
+def test_run_scan_persists_npm_dependencies(tmp_path):
+    project_root = tmp_path / "npm_project"
+    project_root.mkdir(parents=True)
+    (project_root / "package.json").write_text(
+        '{"name": "widget", "dependencies": {"left-pad": "^1.3.0"}}'
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    assert conn.execute(
+        "SELECT name, ecosystem, declared_version, resolved_version FROM dependencies"
+    ).fetchall() == [("left-pad", "npm", "^1.3.0", None)]
+
+
 def test_run_scan_persists_trait_implementation_relationship_for_same_file_impl(tmp_path):
     project_root = tmp_path / "rust_project"
     (project_root / "src").mkdir(parents=True)
