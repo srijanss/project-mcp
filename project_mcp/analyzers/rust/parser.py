@@ -107,16 +107,21 @@ def _collect_use_statements(source: str) -> list[tuple[int, str]]:
             continue
 
         start_line_no = i + 1
-        buffer = lines[i][start_match.end():]
-        depth = buffer.count("{") - buffer.count("}")
+        first_fragment = lines[i][start_match.end():]
+        parts = [first_fragment]
+        depth = first_fragment.count("{") - first_fragment.count("}")
+        has_semicolon = ";" in first_fragment
         j = i
-        while not (depth == 0 and ";" in buffer):
+        while not (depth == 0 and has_semicolon):
             j += 1
             if j >= n:
                 break
-            buffer += " " + lines[j]
-            depth = buffer.count("{") - buffer.count("}")
+            fragment = lines[j]
+            parts.append(fragment)
+            depth += fragment.count("{") - fragment.count("}")
+            has_semicolon = has_semicolon or ";" in fragment
 
+        buffer = " ".join(parts)
         semi_idx = buffer.find(";")
         if semi_idx != -1:
             statements.append((start_line_no, buffer[:semi_idx].strip()))

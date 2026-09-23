@@ -1,3 +1,5 @@
+import time
+
 from project_mcp.analyzers.rust.parser import (
     extract_rust_impls,
     extract_rust_use,
@@ -218,3 +220,33 @@ def test_extract_rust_impls_handles_nested_generic_bounds():
     by_line = {i["line"]: i for i in impls}
 
     assert by_line[2] == {"struct": "Widget", "trait": None, "line": 2}
+
+
+def _use_block_source(item_count):
+    items = "\n".join(f"    item{i}," for i in range(item_count))
+    return f"use crate::{{\n{items}\n}};\n"
+
+
+def _timed_extract(item_count):
+    source = _use_block_source(item_count)
+    start = time.perf_counter()
+    uses = extract_rust_use("src/widget.rs", source)
+    elapsed = time.perf_counter() - start
+    return elapsed, uses
+
+
+def test_extract_rust_use_handles_large_multiline_use_block_efficiently():
+    small_elapsed, small_uses = _timed_extract(3000)
+    large_elapsed, large_uses = _timed_extract(12000)
+
+    assert len(small_uses) == 1
+    assert len(small_uses[0]["names"]) == 3000
+    assert len(large_uses) == 1
+    assert len(large_uses[0]["names"]) == 12000
+
+    ratio = large_elapsed / max(small_elapsed, 1e-6)
+    assert ratio < 8, (
+        f"quadrupling the multi-line use block size slowed parsing by "
+        f"{ratio:.1f}x ({small_elapsed:.3f}s -> {large_elapsed:.3f}s), "
+        "expected near-linear (~4x) growth"
+    )
