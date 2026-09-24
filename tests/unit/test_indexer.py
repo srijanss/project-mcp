@@ -15,6 +15,7 @@ from project_mcp.indexer import (
     mark_index_complete,
     refresh_index,
     remove_file,
+    resolve_relative_imports,
     run_scan,
     upsert_file,
 )
@@ -977,17 +978,54 @@ def test_run_scan_does_not_reparse_unchanged_python_files_for_import_relationshi
     run_scan(conn, project_root, config)
 
     calls = []
-    original_extract_imports = indexer_module.extract_imports
+    original_analyze = indexer_module.analyze_python_source
 
     def spy(path, source):
         calls.append(path)
-        return original_extract_imports(path, source)
+        return original_analyze(path, source)
 
-    monkeypatch.setattr(indexer_module, "extract_imports", spy)
+    monkeypatch.setattr(indexer_module, "analyze_python_source", spy)
 
     run_scan(conn, project_root, config)
 
     assert calls == []
+
+
+def test_run_scan_parses_each_non_test_python_file_once(tmp_path, monkeypatch):
+    import ast
+    from collections import Counter
+
+    project_root = _copy_fixture(tmp_path)
+    (project_root / "app" / "helpers.py").write_text(
+        "LIMIT = 1\n\n\ndef helper():\n    return LIMIT\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "from .helpers import helper\n\n\ndef run():\n    return helper()\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    parsed = Counter()
+    original_parse = ast.parse
+
+    def counting_parse(source, filename="<unknown>", *args, **kwargs):
+        parsed[filename] += 1
+        return original_parse(source, filename, *args, **kwargs)
+
+    monkeypatch.setattr(ast, "parse", counting_parse)
+
+    run_scan(conn, project_root, config)
+    first_scan = {path: n for path, n in parsed.items() if "test" not in path}
+    parsed.clear()
+    (project_root / "app" / "helpers.py").write_text(
+        "LIMIT = 2\n\n\ndef helper():\n    return LIMIT\n"
+    )
+    refresh_index(conn, project_root, config)
+    refreshed = {path: n for path, n in parsed.items() if "test" not in path}
+
+    assert first_scan["app/service.py"] == 1
+    assert set(first_scan.values()) == {1}
+    # The unchanged importer is re-linked to the edited file, parsed once too.
+    assert refreshed == {"app/helpers.py": 1, "app/service.py": 1}
 
 
 def test_run_scan_resolves_from_package_submodule_import(tmp_path):
@@ -1415,6 +1453,100 @@ def test_run_scan_persists_references_to_module_constants(tmp_path):
     assert _reference_confidence(
         conn, "app.receipts.show", "app.worker.Card.number"
     ) == [("low",)]
+
+
+def test_resolve_relative_imports_rewrites_them_as_absolute_modules():
+    imports = [
+        {"module": "os", "names": [], "level": 0, "line": 1},
+        {"module": "helpers", "names": ["helper"], "level": 1, "line": 2,
+         "aliases": {"h": "helper"}},
+        {"module": None, "names": ["utils"], "level": 1, "line": 3},
+        {"module": "shared", "names": ["X"], "level": 2, "line": 4},
+        {"module": None, "names": ["deep"], "level": 4, "line": 5},
+    ]
+
+    assert resolve_relative_imports("app/jobs/nightly.py", imports) == [
+        {"module": "os", "names": [], "level": 0, "line": 1},
+        {"module": "app.jobs.helpers", "names": ["helper"], "level": 0, "line": 2,
+         "aliases": {"h": "helper"}},
+        {"module": "app.jobs", "names": ["utils"], "level": 0, "line": 3},
+        {"module": "app.shared", "names": ["X"], "level": 0, "line": 4},
+        {"module": None, "names": ["deep"], "level": 4, "line": 5},
+    ]
+    assert resolve_relative_imports(
+        "app/__init__.py",
+        [{"module": "models", "names": ["Widget"], "level": 1, "line": 1}],
+    ) == [{"module": "app.models", "names": ["Widget"], "level": 0, "line": 1}]
+
+
+def test_run_scan_resolves_relative_imports_for_calls_constants_and_file_imports(
+    tmp_path,
+):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "helpers.py").write_text(
+        "MAX_RETRIES = 3\n"
+        "\n"
+        "\n"
+        "def helper():\n"
+        "    return 1\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "from .helpers import helper, MAX_RETRIES\n"
+        "from . import helpers\n"
+        "\n"
+        "\n"
+        "def by_name():\n"
+        "    return helper(), MAX_RETRIES\n"
+        "\n"
+        "\n"
+        "def by_module():\n"
+        "    return helpers.helper()\n"
+    )
+    (project_root / "app" / "jobs").mkdir()
+    (project_root / "app" / "jobs" / "nightly.py").write_text(
+        "from ..helpers import helper\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    return helper()\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    callers = conn.execute(
+        """
+        SELECT s.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND t.qualified_name = 'app.helpers.helper'
+        ORDER BY s.qualified_name
+        """
+    ).fetchall()
+    importers = conn.execute(
+        """
+        SELECT s.path FROM relationships r
+        JOIN files s ON s.id = r.source_entity_id
+        JOIN files t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'imports'
+          AND r.source_entity_type = 'file' AND r.target_entity_type = 'file'
+          AND t.path = 'app/helpers.py'
+        ORDER BY s.path
+        """
+    ).fetchall()
+
+    assert callers == [
+        ("app.jobs.nightly.run", "high"),
+        ("app.service.by_module", "high"),
+        ("app.service.by_name", "high"),
+    ]
+    assert _reference_confidence(
+        conn, "app.service.by_name", "app.helpers.MAX_RETRIES"
+    ) == [("high",)]
+    assert importers == [("app/jobs/nightly.py",), ("app/service.py",)]
 
 
 def test_run_scan_persists_static_call_relationship_from_method_to_module_function(

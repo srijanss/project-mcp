@@ -18,12 +18,15 @@ def _base_repr(node: ast.expr):
 
 
 def parse_python_source(path: str, source: str) -> list[dict]:
-    module_name = _module_qualified_name(path)
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError as exc:
         return [{"kind": "parse_error", "path": path, "error": str(exc)}]
+    return _symbols_from_tree(path, tree)
 
+
+def _symbols_from_tree(path: str, tree: ast.AST) -> list[dict]:
+    module_name = _module_qualified_name(path)
     symbols = [
         {
             "name": module_name,
@@ -92,7 +95,10 @@ def parse_python_source(path: str, source: str) -> list[dict]:
 
 
 def extract_imports(path: str, source: str) -> list[dict]:
-    tree = ast.parse(source, filename=path)
+    return _imports_from_tree(ast.parse(source, filename=path))
+
+
+def _imports_from_tree(tree: ast.AST) -> list[dict]:
     imports = []
 
     for node in ast.walk(tree):
@@ -128,8 +134,7 @@ def extract_imports(path: str, source: str) -> list[dict]:
 class _ScopeTrackingVisitor(ast.NodeVisitor):
     """Tracks the enclosing class and function qualified names while walking."""
 
-    def __init__(self, module_name: str, results: list):
-        self.results = results
+    def __init__(self, module_name: str):
         self.callers: list[str] = []
         self.scopes = [module_name]
         self.class_scopes: list[str] = []
@@ -151,31 +156,6 @@ class _ScopeTrackingVisitor(ast.NodeVisitor):
     visit_AsyncFunctionDef = visit_FunctionDef
 
 
-def _walk_scopes(path: str, source: str, visitor_class, results: list) -> list:
-    try:
-        tree = ast.parse(source, filename=path)
-    except SyntaxError:
-        return []
-    visitor_class(_module_qualified_name(path), results).visit(tree)
-    return results
-
-
-def extract_static_calls(path: str, source: str) -> list[dict]:
-    class CallVisitor(_ScopeTrackingVisitor):
-        def visit_Call(self, node):
-            if self.callers and isinstance(node.func, ast.Name):
-                self.results.append(
-                    {
-                        "caller": self.callers[-1],
-                        "callee": node.func.id,
-                        "line": node.lineno,
-                    }
-                )
-            self.generic_visit(node)
-
-    return _walk_scopes(path, source, CallVisitor, [])
-
-
 def _dotted_name(node: ast.expr) -> str | None:
     if isinstance(node, ast.Name):
         return node.id
@@ -185,35 +165,42 @@ def _dotted_name(node: ast.expr) -> str | None:
     return None
 
 
-def extract_attribute_calls(path: str, source: str) -> list[dict]:
-    class AttributeCallVisitor(_ScopeTrackingVisitor):
-        def visit_Call(self, node):
-            if self.callers and isinstance(node.func, ast.Attribute):
+class _ReferenceCollector(_ScopeTrackingVisitor):
+    """Collects every usage kind the indexer needs in a single tree walk."""
+
+    def __init__(self, module_name: str):
+        super().__init__(module_name)
+        self.calls: list[dict] = []
+        self.attribute_calls: list[dict] = []
+        self.self_references: list[dict] = []
+        self.foreign_accesses: list[dict] = []
+        self.name_loads: list[dict] = []
+
+    def visit_Call(self, node):
+        if self.callers:
+            caller = self.callers[-1]
+            if isinstance(node.func, ast.Name):
+                self.calls.append(
+                    {"caller": caller, "callee": node.func.id, "line": node.lineno}
+                )
+            elif isinstance(node.func, ast.Attribute):
                 obj = _dotted_name(node.func.value)
                 if obj is not None:
-                    self.results.append(
+                    self.attribute_calls.append(
                         {
-                            "caller": self.callers[-1],
+                            "caller": caller,
                             "object": obj,
                             "attribute": node.func.attr,
                             "line": node.lineno,
                         }
                     )
-            self.generic_visit(node)
+        self.generic_visit(node)
 
-    return _walk_scopes(path, source, AttributeCallVisitor, [])
-
-
-def extract_self_attribute_references(path: str, source: str) -> list[dict]:
-    class ReferenceVisitor(_ScopeTrackingVisitor):
-        def visit_Attribute(self, node):
-            if (
-                self.callers
-                and self.class_scopes
-                and isinstance(node.value, ast.Name)
-                and node.value.id == "self"
-            ):
-                self.results.append(
+    def visit_Attribute(self, node):
+        if self.callers:
+            is_self = isinstance(node.value, ast.Name) and node.value.id == "self"
+            if is_self and self.class_scopes:
+                self.self_references.append(
                     {
                         "referrer": self.callers[-1],
                         "class": self.class_scopes[-1],
@@ -221,38 +208,78 @@ def extract_self_attribute_references(path: str, source: str) -> list[dict]:
                         "line": node.lineno,
                     }
                 )
-            self.generic_visit(node)
-
-    return _walk_scopes(path, source, ReferenceVisitor, [])
-
-
-def extract_foreign_attribute_accesses(path: str, source: str) -> list[dict]:
-    class AccessVisitor(_ScopeTrackingVisitor):
-        def visit_Attribute(self, node):
-            is_self = isinstance(node.value, ast.Name) and node.value.id == "self"
-            if self.callers and not is_self:
-                self.results.append(
+            if not is_self:
+                self.foreign_accesses.append(
                     {
                         "referrer": self.callers[-1],
                         "attribute": node.attr,
                         "line": node.lineno,
                     }
                 )
-            self.generic_visit(node)
+        self.generic_visit(node)
 
-    return _walk_scopes(path, source, AccessVisitor, [])
+    def visit_Name(self, node):
+        if self.callers and isinstance(node.ctx, ast.Load):
+            self.name_loads.append(
+                {"referrer": self.callers[-1], "name": node.id, "line": node.lineno}
+            )
+
+
+def _collect(path: str, tree: ast.AST | None) -> _ReferenceCollector:
+    collector = _ReferenceCollector(_module_qualified_name(path))
+    if tree is not None:
+        collector.visit(tree)
+    return collector
+
+
+def _parse_or_none(path: str, source: str) -> ast.AST | None:
+    try:
+        return ast.parse(source, filename=path)
+    except SyntaxError:
+        return None
+
+
+def analyze_python_source(path: str, source: str) -> dict:
+    """Run every python extraction on one parse of `source`."""
+    try:
+        tree = ast.parse(source, filename=path)
+    except SyntaxError as exc:
+        return {
+            "symbols": [{"kind": "parse_error", "path": path, "error": str(exc)}],
+            "imports": [],
+            "calls": [],
+            "attribute_calls": [],
+            "self_references": [],
+            "foreign_accesses": [],
+            "name_loads": [],
+        }
+    collector = _collect(path, tree)
+    return {
+        "symbols": _symbols_from_tree(path, tree),
+        "imports": _imports_from_tree(tree),
+        "calls": collector.calls,
+        "attribute_calls": collector.attribute_calls,
+        "self_references": collector.self_references,
+        "foreign_accesses": collector.foreign_accesses,
+        "name_loads": collector.name_loads,
+    }
+
+
+def extract_static_calls(path: str, source: str) -> list[dict]:
+    return _collect(path, _parse_or_none(path, source)).calls
+
+
+def extract_attribute_calls(path: str, source: str) -> list[dict]:
+    return _collect(path, _parse_or_none(path, source)).attribute_calls
+
+
+def extract_self_attribute_references(path: str, source: str) -> list[dict]:
+    return _collect(path, _parse_or_none(path, source)).self_references
+
+
+def extract_foreign_attribute_accesses(path: str, source: str) -> list[dict]:
+    return _collect(path, _parse_or_none(path, source)).foreign_accesses
 
 
 def extract_name_loads(path: str, source: str) -> list[dict]:
-    class NameLoadVisitor(_ScopeTrackingVisitor):
-        def visit_Name(self, node):
-            if self.callers and isinstance(node.ctx, ast.Load):
-                self.results.append(
-                    {
-                        "referrer": self.callers[-1],
-                        "name": node.id,
-                        "line": node.lineno,
-                    }
-                )
-
-    return _walk_scopes(path, source, NameLoadVisitor, [])
+    return _collect(path, _parse_or_none(path, source)).name_loads

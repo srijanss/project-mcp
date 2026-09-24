@@ -30,12 +30,7 @@ from project_mcp.analyzers.rust.parser import (
     parse_rust_source,
 )
 from project_mcp.analyzers.python.parser import (
-    extract_attribute_calls,
-    extract_foreign_attribute_accesses,
-    extract_imports,
-    extract_name_loads,
-    extract_self_attribute_references,
-    extract_static_calls,
+    analyze_python_source,
     parse_python_source,
 )
 from project_mcp.analyzers.python.pytest_analyzer import (
@@ -148,9 +143,14 @@ def remove_file(conn: sqlite3.Connection, project_id: int, path: str) -> None:
 
 
 def index_python_symbols(
-    conn: sqlite3.Connection, file_id: int, path: str, source: str
+    conn: sqlite3.Connection,
+    file_id: int,
+    path: str,
+    source: str,
+    symbols: list[dict] | None = None,
 ) -> list[dict]:
-    symbols = parse_python_source(path, source)
+    if symbols is None:
+        symbols = parse_python_source(path, source)
     conn.execute(
         """
         DELETE FROM relationships
@@ -527,6 +527,7 @@ def index_python_import_relationships(
         (file_id,),
     )
 
+    seen = set()
     for imp in imports:
         if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
             continue
@@ -540,8 +541,9 @@ def index_python_import_relationships(
              if path_to_file_id.get(path) is not None),
             None,
         )
-        if target_file_id is None:
+        if target_file_id is None or target_file_id in seen:
             continue
+        seen.add(target_file_id)
         conn.execute(
             """
             INSERT INTO relationships (
@@ -552,6 +554,33 @@ def index_python_import_relationships(
             """,
             (file_id, target_file_id),
         )
+
+
+def resolve_relative_imports(path: str, imports: list[dict]) -> list[dict]:
+    """Rewrite `from .x import y` imports of the file at `path` as absolute ones.
+
+    Imports that climb above the project root are left relative, so the
+    resolvers that only accept level-0 imports skip them.
+    """
+    package = list(Path(path).parent.parts)
+    resolved = []
+    for imp in imports:
+        level = imp["level"]
+        if level == 0 or level > len(package):
+            resolved.append(imp)
+            continue
+        base = package[: len(package) - level + 1]
+        if imp["module"]:
+            base = base + [imp["module"]]
+        resolved.append({**imp, "module": ".".join(base), "level": 0})
+    return resolved
+
+
+def _analyze_python_file(path: str, source: str) -> dict:
+    """Parse a python file once, with its relative imports made absolute."""
+    analysis = analyze_python_source(path, source)
+    analysis["imports"] = resolve_relative_imports(path, analysis["imports"])
+    return analysis
 
 
 def _imported_names(imports: list[dict]) -> dict[str, tuple[str, str]]:
@@ -790,6 +819,26 @@ def index_python_constant_reference_relationships(
         )
 
 
+def _index_python_cross_file_edges(
+    conn: sqlite3.Connection, file_id: int, analysis: dict, path_to_file_id: dict
+) -> None:
+    """Recompute the edges from this file's symbols into other files."""
+    index_python_cross_module_call_relationships(
+        conn,
+        file_id,
+        analysis["calls"],
+        analysis["imports"],
+        path_to_file_id,
+        analysis["attribute_calls"],
+    )
+    index_python_cross_file_attribute_relationships(
+        conn, file_id, analysis["foreign_accesses"]
+    )
+    index_python_constant_reference_relationships(
+        conn, file_id, analysis["name_loads"], analysis["imports"], path_to_file_id
+    )
+
+
 def refresh_cross_module_edges_for_importers(
     conn: sqlite3.Connection,
     project_root: Path,
@@ -825,23 +874,8 @@ def refresh_cross_module_edges_for_importers(
         if path is None or path in refreshed_paths:
             continue
         source = (Path(project_root) / path).read_text()
-        try:
-            imports = extract_imports(path, source)
-        except SyntaxError:
-            imports = []
-        index_python_cross_module_call_relationships(
-            conn,
-            importer_id,
-            extract_static_calls(path, source),
-            imports,
-            path_to_file_id,
-            extract_attribute_calls(path, source),
-        )
-        index_python_cross_file_attribute_relationships(
-            conn, importer_id, extract_foreign_attribute_accesses(path, source)
-        )
-        index_python_constant_reference_relationships(
-            conn, importer_id, extract_name_loads(path, source), imports, path_to_file_id
+        _index_python_cross_file_edges(
+            conn, importer_id, _analyze_python_file(path, source), path_to_file_id
         )
 
 
@@ -1199,16 +1233,11 @@ def run_scan(
 
         if record["language"] == "python":
             source = (Path(project_root) / record["path"]).read_text()
-            symbols = index_python_symbols(conn, file_id, record["path"], source)
-            calls = extract_static_calls(record["path"], source)
-            attribute_references = extract_self_attribute_references(
-                record["path"], source
+            analysis = _analyze_python_file(record["path"], source)
+            changed_python_files[record["path"]] = (source, analysis)
+            symbols = index_python_symbols(
+                conn, file_id, record["path"], source, analysis["symbols"]
             )
-            try:
-                imports = extract_imports(record["path"], source)
-            except SyntaxError:
-                imports = []
-            changed_python_files[record["path"]] = imports
 
             classes = [s for s in symbols if s.get("kind") == "class"]
             if classes:
@@ -1216,9 +1245,9 @@ def run_scan(
                 index_python_inheritance_relationships(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
-            index_python_call_relationships(conn, file_id, calls)
+            index_python_call_relationships(conn, file_id, analysis["calls"])
             index_python_attribute_relationships(
-                conn, file_id, attribute_references
+                conn, file_id, analysis["self_references"]
             )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
@@ -1250,29 +1279,15 @@ def run_scan(
 
     for path in paths_to_refresh:
         file_id = path_to_file_id[path]
-        source = (Path(project_root) / path).read_text()
         if path in changed_python_files:
-            imports = changed_python_files[path]
+            source, analysis = changed_python_files[path]
         else:
-            try:
-                imports = extract_imports(path, source)
-            except SyntaxError:
-                imports = []
-        index_python_import_relationships(conn, file_id, imports, path_to_file_id)
-        index_python_cross_module_call_relationships(
-            conn,
-            file_id,
-            extract_static_calls(path, source),
-            imports,
-            path_to_file_id,
-            extract_attribute_calls(path, source),
+            source = (Path(project_root) / path).read_text()
+            analysis = _analyze_python_file(path, source)
+        index_python_import_relationships(
+            conn, file_id, analysis["imports"], path_to_file_id
         )
-        index_python_cross_file_attribute_relationships(
-            conn, file_id, extract_foreign_attribute_accesses(path, source)
-        )
-        index_python_constant_reference_relationships(
-            conn, file_id, extract_name_loads(path, source), imports, path_to_file_id
-        )
+        _index_python_cross_file_edges(conn, file_id, analysis, path_to_file_id)
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     js_new_file_added = any(path not in existing_rows for path in changed_js_files)
@@ -1486,16 +1501,11 @@ def refresh_index(
 
         if record["language"] == "python":
             source = (Path(project_root) / record["path"]).read_text()
-            symbols = index_python_symbols(conn, file_id, record["path"], source)
-            calls = extract_static_calls(record["path"], source)
-            attribute_references = extract_self_attribute_references(
-                record["path"], source
+            analysis = _analyze_python_file(record["path"], source)
+            changed_python_files[record["path"]] = (source, analysis)
+            symbols = index_python_symbols(
+                conn, file_id, record["path"], source, analysis["symbols"]
             )
-            try:
-                imports = extract_imports(record["path"], source)
-            except SyntaxError:
-                imports = []
-            changed_python_files[record["path"]] = imports
 
             classes = [s for s in symbols if s.get("kind") == "class"]
             if classes:
@@ -1503,9 +1513,9 @@ def refresh_index(
                 index_python_inheritance_relationships(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
-            index_python_call_relationships(conn, file_id, calls)
+            index_python_call_relationships(conn, file_id, analysis["calls"])
             index_python_attribute_relationships(
-                conn, file_id, attribute_references
+                conn, file_id, analysis["self_references"]
             )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
@@ -1533,29 +1543,15 @@ def refresh_index(
 
     for path in paths_to_refresh:
         file_id = path_to_file_id[path]
-        source = (Path(project_root) / path).read_text()
         if path in changed_python_files:
-            imports = changed_python_files[path]
+            source, analysis = changed_python_files[path]
         else:
-            try:
-                imports = extract_imports(path, source)
-            except SyntaxError:
-                imports = []
-        index_python_import_relationships(conn, file_id, imports, path_to_file_id)
-        index_python_cross_module_call_relationships(
-            conn,
-            file_id,
-            extract_static_calls(path, source),
-            imports,
-            path_to_file_id,
-            extract_attribute_calls(path, source),
+            source = (Path(project_root) / path).read_text()
+            analysis = _analyze_python_file(path, source)
+        index_python_import_relationships(
+            conn, file_id, analysis["imports"], path_to_file_id
         )
-        index_python_cross_file_attribute_relationships(
-            conn, file_id, extract_foreign_attribute_accesses(path, source)
-        )
-        index_python_constant_reference_relationships(
-            conn, file_id, extract_name_loads(path, source), imports, path_to_file_id
-        )
+        _index_python_cross_file_edges(conn, file_id, analysis, path_to_file_id)
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     refresh_cross_module_edges_for_importers(

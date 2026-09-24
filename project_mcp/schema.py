@@ -7,7 +7,9 @@ import sqlite3
 # 3: module constants and references to them are now indexed, and
 #    `from x import a as b` aliases resolve for calls and constants, and
 #    `mod.func()` calls resolve through `import mod` / `import mod as m`.
-CURRENT_SCHEMA_VERSION = 3
+# 4: relative imports (`from .x import y`) resolve for imports, calls and
+#    constants, and repeated imports of one file yield a single edge.
+CURRENT_SCHEMA_VERSION = 4
 
 REQUIRED_TABLES = {
     "projects",

@@ -1,4 +1,5 @@
 from project_mcp.analyzers.python.parser import (
+    analyze_python_source,
     extract_attribute_calls,
     extract_foreign_attribute_accesses,
     extract_imports,
@@ -180,6 +181,66 @@ def test_extract_name_loads_finds_bare_names_read_inside_functions():
         {"referrer": "app.job.run", "name": "helper", "line": 8},
         {"referrer": "app.job.run", "name": "total", "line": 8},
     ]
+
+
+ANALYSIS_SOURCE = (
+    "import app.helpers as h\n"
+    "from app.settings import LIMIT\n"
+    "\n"
+    "MAX = 3\n"
+    "\n"
+    "\n"
+    "class Payment:\n"
+    "    status = 'new'\n"
+    "\n"
+    "    def run(self, other):\n"
+    "        h.helper(self.status, other.amount)\n"
+    "        return local(LIMIT, MAX)\n"
+    "\n"
+    "\n"
+    "def local(a, b):\n"
+    "    return a + b\n"
+)
+
+
+def test_analyze_python_source_matches_each_extractor_with_one_parse(monkeypatch):
+    import ast
+
+    path = "app/payment.py"
+    expected = {
+        "symbols": parse_python_source(path, ANALYSIS_SOURCE),
+        "imports": extract_imports(path, ANALYSIS_SOURCE),
+        "calls": extract_static_calls(path, ANALYSIS_SOURCE),
+        "attribute_calls": extract_attribute_calls(path, ANALYSIS_SOURCE),
+        "self_references": extract_self_attribute_references(path, ANALYSIS_SOURCE),
+        "foreign_accesses": extract_foreign_attribute_accesses(path, ANALYSIS_SOURCE),
+        "name_loads": extract_name_loads(path, ANALYSIS_SOURCE),
+    }
+    parses = []
+    original_parse = ast.parse
+
+    def counting_parse(*args, **kwargs):
+        parses.append(1)
+        return original_parse(*args, **kwargs)
+
+    monkeypatch.setattr(ast, "parse", counting_parse)
+
+    assert analyze_python_source(path, ANALYSIS_SOURCE) == expected
+    assert len(parses) == 1
+
+
+def test_analyze_python_source_reports_syntax_error_with_empty_extractions():
+    analysis = analyze_python_source("app/broken.py", "def broken(:\n    pass\n")
+
+    assert analysis["symbols"][0]["kind"] == "parse_error"
+    assert {key: value for key, value in analysis.items() if key != "symbols"} == {
+        "imports": [],
+        "calls": [],
+        "attribute_calls": [],
+        "self_references": [],
+        "foreign_accesses": [],
+        "name_loads": [],
+    }
 
 
 def test_parse_python_source_returns_error_marker_for_syntax_error():
