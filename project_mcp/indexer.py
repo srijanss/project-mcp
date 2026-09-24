@@ -30,6 +30,7 @@ from project_mcp.analyzers.rust.parser import (
     parse_rust_source,
 )
 from project_mcp.analyzers.python.parser import (
+    extract_foreign_attribute_accesses,
     extract_imports,
     extract_self_attribute_references,
     extract_static_calls,
@@ -551,6 +552,189 @@ def index_python_import_relationships(
         )
 
 
+def index_python_cross_module_call_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    calls: list[dict],
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'calls'
+          AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
+          AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
+          AND target_entity_id NOT IN (SELECT id FROM symbols WHERE file_id = ?)
+        """,
+        (file_id, file_id),
+    )
+
+    imported_from: dict[str, str] = {}
+    for imp in imports:
+        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
+            continue
+        for name in imp.get("names", []):
+            imported_from[name] = imp["module"]
+
+    seen = set()
+    for call in calls:
+        module = imported_from.get(call["callee"])
+        if module is None:
+            continue
+        target_file_id = path_to_file_id.get(module.replace(".", "/") + ".py")
+        if target_file_id is None:
+            continue
+        caller_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, call["caller"]),
+        ).fetchone()
+        callee_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (target_file_id, f"{module}.{call['callee']}"),
+        ).fetchone()
+        if caller_row is None or callee_row is None:
+            continue
+        if (caller_row[0], callee_row[0]) in seen:
+            continue
+        seen.add((caller_row[0], callee_row[0]))
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
+            """,
+            (caller_row[0], callee_row[0]),
+        )
+
+
+def index_python_cross_file_attribute_relationships(
+    conn: sqlite3.Connection, file_id: int, accesses: list[dict]
+) -> None:
+    """Link `obj.<name>` accesses to a field defined in a module this file imports.
+
+    Types are not inferred, so these edges are heuristic and low confidence.
+    """
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'references'
+          AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
+          AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
+          AND target_entity_id NOT IN (SELECT id FROM symbols WHERE file_id = ?)
+        """,
+        (file_id, file_id),
+    )
+
+    imported_file_ids = [
+        row[0]
+        for row in conn.execute(
+            """
+            SELECT target_entity_id FROM relationships
+            WHERE relationship_type = 'imports'
+              AND source_entity_type = 'file' AND target_entity_type = 'file'
+              AND source_entity_id = ?
+            """,
+            (file_id,),
+        )
+    ]
+    if not imported_file_ids:
+        return
+    placeholders = ",".join("?" * len(imported_file_ids))
+    fields_by_name: dict[str, list[int]] = {}
+    for field_id, name in conn.execute(
+        f"SELECT id, name FROM symbols WHERE kind = 'field' "
+        f"AND file_id IN ({placeholders}) ORDER BY id",
+        imported_file_ids,
+    ):
+        fields_by_name.setdefault(name, []).append(field_id)
+    # An attribute name defined by several imported fields is ambiguous
+    # without type information, so it is left unlinked.
+    field_ids = {
+        name: ids[0] for name, ids in fields_by_name.items() if len(ids) == 1
+    }
+
+    symbol_ids: dict[str, int] = {}
+    for symbol_id, qualified_name in conn.execute(
+        "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id",
+        (file_id,),
+    ):
+        symbol_ids.setdefault(qualified_name, symbol_id)
+
+    seen = set()
+    for access in accesses:
+        referrer_id = symbol_ids.get(access["referrer"])
+        field_id = field_ids.get(access["attribute"])
+        if referrer_id is None or field_id is None:
+            continue
+        if (referrer_id, field_id) in seen:
+            continue
+        seen.add((referrer_id, field_id))
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'low')
+            """,
+            (referrer_id, field_id),
+        )
+
+
+def refresh_cross_module_edges_for_importers(
+    conn: sqlite3.Connection,
+    project_root: Path,
+    changed_paths: list[str],
+    refreshed_paths: list[str],
+    path_to_file_id: dict,
+) -> None:
+    """Recompute cross-module edges for unchanged files importing a changed file.
+
+    A changed file's symbols are recreated, which drops the calls and
+    attribute-reference edges that pointed into it from files that
+    themselves did not change.
+    """
+    changed_ids = [path_to_file_id[p] for p in changed_paths if p in path_to_file_id]
+    if not changed_ids:
+        return
+    placeholders = ",".join("?" * len(changed_ids))
+    importer_ids = {
+        row[0]
+        for row in conn.execute(
+            f"""
+            SELECT DISTINCT source_entity_id FROM relationships
+            WHERE relationship_type = 'imports'
+              AND source_entity_type = 'file' AND target_entity_type = 'file'
+              AND target_entity_id IN ({placeholders})
+            """,
+            changed_ids,
+        )
+    }
+    id_to_path = {file_id: path for path, file_id in path_to_file_id.items()}
+    for importer_id in importer_ids:
+        path = id_to_path.get(importer_id)
+        if path is None or path in refreshed_paths:
+            continue
+        source = (Path(project_root) / path).read_text()
+        try:
+            imports = extract_imports(path, source)
+        except SyntaxError:
+            imports = []
+        index_python_cross_module_call_relationships(
+            conn,
+            importer_id,
+            extract_static_calls(path, source),
+            imports,
+            path_to_file_id,
+        )
+        index_python_cross_file_attribute_relationships(
+            conn, importer_id, extract_foreign_attribute_accesses(path, source)
+        )
+
+
 def index_python_test_relationships(
     conn: sqlite3.Connection,
     file_id: int,
@@ -965,6 +1149,16 @@ def run_scan(
             except SyntaxError:
                 imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
+        index_python_cross_module_call_relationships(
+            conn,
+            file_id,
+            extract_static_calls(path, source),
+            imports,
+            path_to_file_id,
+        )
+        index_python_cross_file_attribute_relationships(
+            conn, file_id, extract_foreign_attribute_accesses(path, source)
+        )
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     js_new_file_added = any(path not in existing_rows for path in changed_js_files)
@@ -1234,7 +1428,21 @@ def refresh_index(
             except SyntaxError:
                 imports = []
         index_python_import_relationships(conn, file_id, imports, path_to_file_id)
+        index_python_cross_module_call_relationships(
+            conn,
+            file_id,
+            extract_static_calls(path, source),
+            imports,
+            path_to_file_id,
+        )
+        index_python_cross_file_attribute_relationships(
+            conn, file_id, extract_foreign_attribute_accesses(path, source)
+        )
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
+
+    refresh_cross_module_edges_for_importers(
+        conn, project_root, list(changed_python_files), paths_to_refresh, path_to_file_id
+    )
 
     js_new_file_added = any(path not in existing_rows for path in changed_js_files)
     if js_new_file_added:

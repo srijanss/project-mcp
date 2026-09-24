@@ -128,6 +128,209 @@ def test_refresh_index_removes_stale_references_when_edit_drops_access(tmp_path)
     ) == []
 
 
+def _calls_between(conn, source_name: str, target_name: str) -> list[tuple]:
+    return conn.execute(
+        """
+        SELECT r.relationship_type, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND r.relationship_type = 'calls'
+          AND s.qualified_name = ? AND t.qualified_name = ?
+        """,
+        (source_name, target_name),
+    ).fetchall()
+
+
+def _write_cross_module_project(project_root: Path, service_body: str = "helper()") -> None:
+    (project_root / "app" / "helpers.py").write_text(
+        "def helper():\n"
+        "    return 1\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "from app.helpers import helper\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        f"    return {service_body}\n"
+    )
+
+
+def test_refresh_index_persists_cross_module_calls_for_edited_caller(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    _write_cross_module_project(project_root, service_body="1")
+    run_scan(conn, project_root, config)
+    assert _calls_between(conn, "app.service.run", "app.helpers.helper") == []
+
+    time.sleep(0.01)
+    _write_cross_module_project(project_root, service_body="helper()")
+    refresh_index(conn, project_root, config)
+
+    assert _calls_between(conn, "app.service.run", "app.helpers.helper") == [
+        ("calls", "high")
+    ]
+
+
+def test_refresh_index_keeps_cross_module_calls_when_callee_file_is_edited(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    _write_cross_module_project(project_root)
+    run_scan(conn, project_root, config)
+    assert _calls_between(conn, "app.service.run", "app.helpers.helper") == [
+        ("calls", "high")
+    ]
+
+    time.sleep(0.01)
+    (project_root / "app" / "helpers.py").write_text(
+        "def helper():\n"
+        "    return 2\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    assert _calls_between(conn, "app.service.run", "app.helpers.helper") == [
+        ("calls", "high")
+    ]
+
+
+def test_refresh_index_does_not_duplicate_cross_module_calls_to_unchanged_files(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "helpers.py").write_text("def helper():\n    return 1\n")
+    (project_root / "app" / "other.py").write_text("def other():\n    return 1\n")
+    (project_root / "app" / "service.py").write_text(
+        "from app.helpers import helper\n"
+        "from app.other import other\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    other()\n"
+        "    return helper()\n"
+    )
+    run_scan(conn, project_root, config)
+
+    time.sleep(0.01)
+    (project_root / "app" / "helpers.py").write_text("def helper():\n    return 2\n")
+    refresh_index(conn, project_root, config)
+
+    assert _calls_between(conn, "app.service.run", "app.other.other") == [
+        ("calls", "high")
+    ]
+    assert _calls_between(conn, "app.service.run", "app.helpers.helper") == [
+        ("calls", "high")
+    ]
+
+
+def test_refresh_index_removes_cross_module_call_when_edit_drops_it(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    _write_cross_module_project(project_root, service_body="helper()")
+    run_scan(conn, project_root, config)
+    assert _calls_between(conn, "app.service.run", "app.helpers.helper") == [
+        ("calls", "high")
+    ]
+
+    time.sleep(0.01)
+    _write_cross_module_project(project_root, service_body="1")
+    refresh_index(conn, project_root, config)
+
+    assert _calls_between(conn, "app.service.run", "app.helpers.helper") == []
+
+
+FIELD = "app.payments.Payment.gateway_captured_card_number"
+
+
+def _write_cross_file_attribute_project(project_root: Path, access: str = "payment.gateway_captured_card_number") -> None:
+    (project_root / "app" / "payments.py").write_text(
+        "class Payment:\n"
+        "    gateway_captured_card_number = None\n"
+    )
+    (project_root / "app" / "receipts.py").write_text(
+        "from app.payments import Payment\n"
+        "\n"
+        "\n"
+        "def show(payment):\n"
+        f"    return {access}\n"
+    )
+
+
+def test_refresh_index_persists_cross_file_attribute_reference_for_edited_accessor(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    _write_cross_file_attribute_project(project_root, access="1")
+    run_scan(conn, project_root, config)
+    assert _references_between(conn, "app.receipts.show", FIELD) == []
+
+    time.sleep(0.01)
+    _write_cross_file_attribute_project(project_root)
+    refresh_index(conn, project_root, config)
+
+    assert _references_between(conn, "app.receipts.show", FIELD) == [
+        ("references", "low")
+    ]
+
+
+def test_refresh_index_keeps_cross_file_attribute_reference_when_field_file_is_edited(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    _write_cross_file_attribute_project(project_root)
+    run_scan(conn, project_root, config)
+    assert _references_between(conn, "app.receipts.show", FIELD) == [
+        ("references", "low")
+    ]
+
+    time.sleep(0.01)
+    (project_root / "app" / "payments.py").write_text(
+        "class Payment:\n"
+        "    gateway_captured_card_number = 'x'\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    assert _references_between(conn, "app.receipts.show", FIELD) == [
+        ("references", "low")
+    ]
+
+
+def test_refresh_index_does_not_duplicate_cross_file_attribute_references(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "payments.py").write_text(
+        "class Payment:\n    gateway_captured_card_number = None\n"
+    )
+    (project_root / "app" / "orders.py").write_text(
+        "class Order:\n    total_price = None\n"
+    )
+    (project_root / "app" / "receipts.py").write_text(
+        "from app.payments import Payment\n"
+        "from app.orders import Order\n"
+        "\n"
+        "\n"
+        "def show(thing):\n"
+        "    return (thing.gateway_captured_card_number, thing.total_price)\n"
+    )
+    run_scan(conn, project_root, config)
+
+    time.sleep(0.01)
+    (project_root / "app" / "payments.py").write_text(
+        "class Payment:\n    gateway_captured_card_number = 'x'\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    assert _references_between(conn, "app.receipts.show", FIELD) == [
+        ("references", "low")
+    ]
+    assert _references_between(
+        conn, "app.receipts.show", "app.orders.Order.total_price"
+    ) == [("references", "low")]
+
+
 def test_refresh_index_detects_deleted_file(tmp_path):
     """Deleted file should be removed from index and relationships cleaned up."""
     project_root = _copy_fixture(tmp_path)

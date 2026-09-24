@@ -1,5 +1,5 @@
 from project_mcp.db import get_connection
-from project_mcp.schema import REQUIRED_TABLES
+from project_mcp.schema import CURRENT_SCHEMA_VERSION, REQUIRED_TABLES
 
 
 def test_get_connection_creates_index_db_file(tmp_path):
@@ -89,4 +89,28 @@ def test_get_connection_invalidates_stale_schema_version(tmp_path):
     reopened.close()
 
     assert file_rows == []
-    assert version == ("1",)
+    assert version == (str(CURRENT_SCHEMA_VERSION),)
+
+
+def test_get_connection_rebuilds_index_written_before_cross_module_edges(tmp_path):
+    """Version 1 indexes lack cross-module calls and attribute references.
+
+    Incremental refresh only re-indexes changed files, so without a rebuild an
+    upgraded install would keep a partially old graph while reporting 'fresh'.
+    """
+    (tmp_path / ".project-mcp").mkdir()
+
+    conn = get_connection(tmp_path)
+    conn.execute(
+        "INSERT INTO projects (root_path, created_at) VALUES ('/tmp/x', '2026-01-01')"
+    )
+    conn.execute("INSERT INTO files (project_id, path) VALUES (1, 'old.py')")
+    conn.execute("UPDATE index_metadata SET value = '1' WHERE key = 'schema_version'")
+    conn.commit()
+    conn.close()
+
+    reopened = get_connection(tmp_path)
+    file_rows = reopened.execute("SELECT * FROM files").fetchall()
+    reopened.close()
+
+    assert file_rows == []

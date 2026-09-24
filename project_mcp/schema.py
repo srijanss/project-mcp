@@ -1,6 +1,10 @@
 import sqlite3
 
-CURRENT_SCHEMA_VERSION = 1
+# Bumped whenever the *meaning* of indexed data changes, not just its tables:
+# get_connection() discards an index written under an older version, so an
+# upgrade rebuilds it instead of mixing old and new relationship kinds.
+# 2: cross-module calls and attribute references (fields) are now indexed.
+CURRENT_SCHEMA_VERSION = 2
 
 REQUIRED_TABLES = {
     "projects",

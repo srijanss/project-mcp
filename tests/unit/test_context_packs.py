@@ -384,24 +384,21 @@ class TestSymbolContextErrorCases:
         assert context.get("status") in ("error", "invalid_input")
         assert "error" in context
 
-    def test_symbol_context_edge_case_zero_dependents(self):
+    def test_symbol_context_edge_case_zero_dependents(self, tmp_path):
         """Handle symbols with no dependents gracefully.
 
-        NOTE: this asserts against project-mcp's own live dependency graph
-        (project_root points at the repo itself), so the expected count
-        drifts whenever a new caller of the target symbol is added
-        elsewhere in this codebase — as happened when MVP 13's
-        ensure_fresh_index() started calling run_scan(). This test needs a
-        stable, isolated fixture instead of the live repo; tracked as MVP 12
-        test-quality follow-up rather than fixed here.
+        Uses an isolated fixture: asserting against project-mcp's own live
+        dependency graph drifted whenever a new caller of the target symbol
+        appeared (MVP 13's ensure_fresh_index(), then cross-module call
+        indexing, which made run_scan grow to dozens of dependents).
         """
-        project_root = Path(__file__).parent.parent.parent
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "lonely.py").write_text("def lonely():\n    return 1\n")
 
-        context = get_context_for_symbol(project_root, "project_mcp.indexer.run_scan")
+        context = get_context_for_symbol(tmp_path, "app.lonely.lonely")
 
         assert context["type"] == "symbol"
-        assert "used_by_total" in context
-        assert context["used_by_total"] >= 0
+        assert context["used_by_total"] == 0
         assert context.get("is_truncated_dependents") is False
 
     def test_symbol_context_truncation_metadata_accuracy(self):

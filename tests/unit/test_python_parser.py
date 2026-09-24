@@ -1,4 +1,5 @@
 from project_mcp.analyzers.python.parser import (
+    extract_foreign_attribute_accesses,
     extract_imports,
     extract_self_attribute_references,
     extract_static_calls,
@@ -105,6 +106,32 @@ def test_extract_self_attribute_references_finds_self_accesses_in_methods():
             "attribute": "amount",
             "line": 6,
         },
+    ]
+
+
+def test_extract_foreign_attribute_accesses_finds_non_self_accesses_in_functions():
+    source = (
+        "def report(payment, other):\n"
+        "    total = payment.amount\n"
+        "    other.status = 'x'\n"
+        "    return self_like.note\n"
+        "\n"
+        "\n"
+        "class Handler:\n"
+        "    def run(self, payment):\n"
+        "        return self.helper() + payment.amount\n"
+        "\n"
+        "\n"
+        "unrelated = config.debug\n"
+    )
+
+    accesses = extract_foreign_attribute_accesses("app/report.py", source)
+
+    assert accesses == [
+        {"referrer": "app.report.report", "attribute": "amount", "line": 2},
+        {"referrer": "app.report.report", "attribute": "status", "line": 3},
+        {"referrer": "app.report.report", "attribute": "note", "line": 4},
+        {"referrer": "app.report.Handler.run", "attribute": "amount", "line": 9},
     ]
 
 

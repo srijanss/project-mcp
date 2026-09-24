@@ -114,36 +114,49 @@ def extract_imports(path: str, source: str) -> list[dict]:
     return imports
 
 
-def extract_static_calls(path: str, source: str) -> list[dict]:
-    module_name = _module_qualified_name(path)
+class _ScopeTrackingVisitor(ast.NodeVisitor):
+    """Tracks the enclosing class and function qualified names while walking."""
+
+    def __init__(self, module_name: str):
+        self.callers: list[str] = []
+        self.scopes = [module_name]
+        self.class_scopes: list[str] = []
+
+    def visit_ClassDef(self, node):
+        qualified_name = f"{self.scopes[-1]}.{node.name}"
+        self.scopes.append(qualified_name)
+        self.class_scopes.append(qualified_name)
+        self.generic_visit(node)
+        self.class_scopes.pop()
+        self.scopes.pop()
+
+    def visit_FunctionDef(self, node):
+        prefix = self.callers[-1] if self.callers else self.scopes[-1]
+        self.callers.append(f"{prefix}.{node.name}")
+        self.generic_visit(node)
+        self.callers.pop()
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+
+def _walk_scopes(path: str, source: str, visitor_class, results: list) -> list:
     try:
         tree = ast.parse(source, filename=path)
     except SyntaxError:
         return []
+    visitor_class(_module_qualified_name(path), results).visit(tree)
+    return results
 
-    calls = []
 
-    class CallVisitor(ast.NodeVisitor):
-        def __init__(self):
-            self.callers = []
-            self.scopes = [module_name]
-
-        def visit_ClassDef(self, node):
-            self.scopes.append(f"{self.scopes[-1]}.{node.name}")
-            self.generic_visit(node)
-            self.scopes.pop()
-
-        def visit_FunctionDef(self, node):
-            prefix = self.callers[-1] if self.callers else self.scopes[-1]
-            self.callers.append(f"{prefix}.{node.name}")
-            self.generic_visit(node)
-            self.callers.pop()
-
-        visit_AsyncFunctionDef = visit_FunctionDef
+def extract_static_calls(path: str, source: str) -> list[dict]:
+    class CallVisitor(_ScopeTrackingVisitor):
+        def __init__(self, module_name, results):
+            super().__init__(module_name)
+            self.results = results
 
         def visit_Call(self, node):
             if self.callers and isinstance(node.func, ast.Name):
-                calls.append(
+                self.results.append(
                     {
                         "caller": self.callers[-1],
                         "callee": node.func.id,
@@ -152,40 +165,14 @@ def extract_static_calls(path: str, source: str) -> list[dict]:
                 )
             self.generic_visit(node)
 
-    CallVisitor().visit(tree)
-    return calls
+    return _walk_scopes(path, source, CallVisitor, [])
 
 
 def extract_self_attribute_references(path: str, source: str) -> list[dict]:
-    module_name = _module_qualified_name(path)
-    try:
-        tree = ast.parse(source, filename=path)
-    except SyntaxError:
-        return []
-
-    references = []
-
-    class ReferenceVisitor(ast.NodeVisitor):
-        def __init__(self):
-            self.callers = []
-            self.scopes = [module_name]
-            self.class_scopes = []
-
-        def visit_ClassDef(self, node):
-            qualified_name = f"{self.scopes[-1]}.{node.name}"
-            self.scopes.append(qualified_name)
-            self.class_scopes.append(qualified_name)
-            self.generic_visit(node)
-            self.class_scopes.pop()
-            self.scopes.pop()
-
-        def visit_FunctionDef(self, node):
-            prefix = self.callers[-1] if self.callers else self.scopes[-1]
-            self.callers.append(f"{prefix}.{node.name}")
-            self.generic_visit(node)
-            self.callers.pop()
-
-        visit_AsyncFunctionDef = visit_FunctionDef
+    class ReferenceVisitor(_ScopeTrackingVisitor):
+        def __init__(self, module_name, results):
+            super().__init__(module_name)
+            self.results = results
 
         def visit_Attribute(self, node):
             if (
@@ -194,7 +181,7 @@ def extract_self_attribute_references(path: str, source: str) -> list[dict]:
                 and isinstance(node.value, ast.Name)
                 and node.value.id == "self"
             ):
-                references.append(
+                self.results.append(
                     {
                         "referrer": self.callers[-1],
                         "class": self.class_scopes[-1],
@@ -204,5 +191,25 @@ def extract_self_attribute_references(path: str, source: str) -> list[dict]:
                 )
             self.generic_visit(node)
 
-    ReferenceVisitor().visit(tree)
-    return references
+    return _walk_scopes(path, source, ReferenceVisitor, [])
+
+
+def extract_foreign_attribute_accesses(path: str, source: str) -> list[dict]:
+    class AccessVisitor(_ScopeTrackingVisitor):
+        def __init__(self, module_name, results):
+            super().__init__(module_name)
+            self.results = results
+
+        def visit_Attribute(self, node):
+            is_self = isinstance(node.value, ast.Name) and node.value.id == "self"
+            if self.callers and not is_self:
+                self.results.append(
+                    {
+                        "referrer": self.callers[-1],
+                        "attribute": node.attr,
+                        "line": node.lineno,
+                    }
+                )
+            self.generic_visit(node)
+
+    return _walk_scopes(path, source, AccessVisitor, [])
