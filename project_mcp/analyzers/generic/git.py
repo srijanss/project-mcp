@@ -66,6 +66,75 @@ def get_file_last_changed(project_root: Path, file_path: str) -> str | None:
         return None
 
 
+def collect_git_file_stats(
+    project_root: Path,
+    paths: list[str],
+    limit: int = 100,
+    config: ProjectConfig | None = None,
+) -> dict[str, dict]:
+    """Change count, last change date and co-changed file count for many files.
+
+    Reads the history once, instead of the three `git log` runs per file that
+    get_file_change_count, get_file_last_changed and get_files_changed_together
+    need, and reports the same values they do.
+
+    Returns:
+        {path: {"change_count", "last_changed", "coupled_file_count"}}
+    """
+    if config is not None:
+        limit = config.git_history_limit
+    wanted = set(paths)
+    change_counts = dict.fromkeys(wanted, 0)
+    last_changed: dict[str, str] = {}
+    coupled: dict[str, set[str]] = {path: set() for path in wanted}
+
+    for position, (date, files) in enumerate(_read_git_history(project_root)):
+        in_window = position < limit
+        for file in files & wanted:
+            if change_counts[file] < limit:
+                change_counts[file] += 1
+            last_changed.setdefault(file, date)
+            if in_window:
+                coupled[file].update(files)
+
+    return {
+        path: {
+            "change_count": change_counts[path],
+            "last_changed": last_changed.get(path),
+            "coupled_file_count": len(coupled[path] - {path}),
+        }
+        for path in paths
+    }
+
+
+_COMMIT_MARKER = "\x00"
+
+
+def _read_git_history(project_root: Path) -> list[tuple[str, set[str]]]:
+    """Every commit, newest first, as (author date, files changed)."""
+    try:
+        result = subprocess.run(
+            # %x00 makes git print the NUL marker, which no path can contain.
+            ["git", "log", "--name-only", "--format=%x00%aI"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (FileNotFoundError, NotADirectoryError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+
+    commits: list[tuple[str, set[str]]] = []
+    for line in result.stdout.split("\n"):
+        if line.startswith(_COMMIT_MARKER):
+            commits.append((line[len(_COMMIT_MARKER):].strip(), set()))
+        elif commits and line.strip():
+            commits[-1][1].add(line.strip())
+    return commits
+
+
 def get_hotspots(
     project_root: Path,
     limit: int = 100,

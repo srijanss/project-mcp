@@ -6,6 +6,7 @@ from datetime import datetime
 import shutil
 
 from project_mcp.analyzers.generic.git import (
+    collect_git_file_stats,
     get_file_change_count,
     get_file_last_changed,
     get_hotspots,
@@ -205,6 +206,71 @@ class TestGitFixtures:
         # b.py was changed together with a.py 4 times out of 5 total a.py commits
         assert b_coupling[0]["co_changes"] == 4
         assert b_coupling[0]["confidence"] == 0.8  # 4/5
+
+
+def _per_file_git_stats(project_root: Path, paths: list[str], limit: int) -> dict:
+    return {
+        path: {
+            "change_count": get_file_change_count(project_root, path, limit=limit),
+            "last_changed": get_file_last_changed(project_root, path),
+            "coupled_file_count": len(
+                get_files_changed_together(project_root, path, limit=limit)
+            ),
+        }
+        for path in paths
+    }
+
+
+@pytest.mark.parametrize("limit", [2, 10])
+@pytest.mark.parametrize("fixture_name", ["churn-fixture", "coupling-fixture"])
+def test_collect_git_file_stats_matches_per_file_queries_on_fixtures(
+    tmp_path, fixture_name, limit
+):
+    fixture_root = _copy_git_fixture(fixture_name, tmp_path)
+    paths = ["file1.py", "a.py", "b.py", "missing.py"]
+
+    stats = collect_git_file_stats(fixture_root, paths, limit=limit)
+
+    assert stats == _per_file_git_stats(fixture_root, paths, limit)
+
+
+def test_collect_git_file_stats_matches_per_file_queries_on_this_repo():
+    import subprocess
+
+    project_root = Path(__file__).parent.parent.parent
+    tracked = subprocess.run(
+        ["git", "ls-files", "project_mcp", "tests/unit"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    paths = [path for path in tracked if path.endswith(".py")][:25]
+
+    stats = collect_git_file_stats(project_root, paths, limit=5)
+
+    assert stats == _per_file_git_stats(project_root, paths, 5)
+
+
+def test_collect_git_file_stats_uses_configured_limit(tmp_path):
+    fixture_root = _copy_git_fixture("churn-fixture", tmp_path)
+    config = ProjectConfig(project_root=fixture_root, git_history_limit=2)
+
+    stats = collect_git_file_stats(fixture_root, ["file1.py"], config=config)
+
+    assert stats["file1.py"]["change_count"] == 2
+
+
+def test_collect_git_file_stats_without_git_history_reports_empty_facts():
+    stats = collect_git_file_stats(Path("/nonexistent/path"), ["some_file.py"])
+
+    assert stats == {
+        "some_file.py": {
+            "change_count": 0,
+            "last_changed": None,
+            "coupled_file_count": 0,
+        }
+    }
 
 
 def test_get_file_change_count_respects_configured_commit_limit(tmp_path):

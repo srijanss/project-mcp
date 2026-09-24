@@ -10,11 +10,7 @@ from project_mcp.analyzers.generic.architecture import (
     extract_architecture_facts,
 )
 from project_mcp.analyzers.generic.filesystem import discover_files
-from project_mcp.analyzers.generic.git import (
-    get_file_change_count,
-    get_file_last_changed,
-    get_files_changed_together,
-)
+from project_mcp.analyzers.generic.git import collect_git_file_stats
 from project_mcp.analyzers.generic.legacy import (
     detect_churn_signals,
     detect_circular_dependency_signals,
@@ -448,26 +444,22 @@ def index_python_inheritance_relationships(
 def index_python_call_relationships(
     conn: sqlite3.Connection, file_id: int, calls: list[dict]
 ) -> None:
-    module_row = conn.execute(
-        "SELECT qualified_name FROM symbols WHERE file_id = ? AND kind = 'module'",
+    symbol_ids: dict[str, int] = {}
+    module_name = None
+    for symbol_id, qualified_name, kind in conn.execute(
+        "SELECT id, qualified_name, kind FROM symbols WHERE file_id = ? ORDER BY id",
         (file_id,),
-    ).fetchone()
-    if module_row is None:
+    ):
+        symbol_ids.setdefault(qualified_name, symbol_id)
+        if kind == "module" and module_name is None:
+            module_name = qualified_name
+    if module_name is None:
         return
-    module_name = module_row[0]
 
     for call in calls:
-        caller_row = conn.execute(
-            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
-            (file_id, call["caller"]),
-        ).fetchone()
-        if caller_row is None:
-            continue
-        callee_row = conn.execute(
-            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
-            (file_id, f"{module_name}.{call['callee']}"),
-        ).fetchone()
-        if callee_row is None:
+        caller_id = symbol_ids.get(call["caller"])
+        callee_id = symbol_ids.get(f"{module_name}.{call['callee']}")
+        if caller_id is None or callee_id is None:
             continue
         conn.execute(
             """
@@ -477,7 +469,69 @@ def index_python_call_relationships(
                 relationship_type, confidence
             ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
             """,
-            (caller_row[0], callee_row[0]),
+            (caller_id, callee_id),
+        )
+
+
+def index_python_self_call_relationships(
+    conn: sqlite3.Connection, file_id: int, self_calls: list[dict], symbols: list[dict]
+) -> None:
+    """Link `self.method()` calls to the method on the caller's class.
+
+    A method the class doesn't define is looked up on its base classes in the
+    same file, depth-first and left to right.
+    """
+    symbol_ids: dict[str, int] = {}
+    for symbol_id, qualified_name in conn.execute(
+        "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id",
+        (file_id,),
+    ):
+        symbol_ids.setdefault(qualified_name, symbol_id)
+    module_name = next(
+        (s["qualified_name"] for s in symbols if s.get("kind") == "module"), None
+    )
+    methods = {s["qualified_name"] for s in symbols if s.get("kind") == "method"}
+    class_bases = {
+        s["qualified_name"]: [
+            f"{module_name}.{base}"
+            for base in s["bases"]
+            if isinstance(base, str) and "." not in base
+        ]
+        for s in symbols
+        if s.get("kind") == "class"
+    }
+
+    def resolve(class_name: str, method: str, visited: set[str]) -> str | None:
+        if class_name in visited or class_name not in class_bases:
+            return None
+        visited.add(class_name)
+        if f"{class_name}.{method}" in methods:
+            return f"{class_name}.{method}"
+        for base in class_bases[class_name]:
+            found = resolve(base, method, visited)
+            if found is not None:
+                return found
+        return None
+
+    seen = set()
+    for call in self_calls:
+        caller_id = symbol_ids.get(call["caller"])
+        target = resolve(call["class"], call["method"], set())
+        callee_id = symbol_ids.get(target) if target is not None else None
+        if caller_id is None or callee_id is None:
+            continue
+        if (caller_id, callee_id) in seen:
+            continue
+        seen.add((caller_id, callee_id))
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
+            """,
+            (caller_id, callee_id),
         )
 
 
@@ -1022,15 +1076,12 @@ def index_npm_dependencies(
 
 
 def index_git_facts(
-    conn: sqlite3.Connection,
-    project_root: Path,
-    path_to_file_id: dict,
-    config: ProjectConfig | None = None,
+    conn: sqlite3.Connection, path_to_file_id: dict, git_stats: dict
 ) -> None:
-    """Persist per-file git change history for all indexed files."""
+    """Persist per-file git change history (from collect_git_file_stats)."""
     for path, file_id in path_to_file_id.items():
-        change_count = get_file_change_count(project_root, path, config=config)
-        last_changed = get_file_last_changed(project_root, path)
+        change_count = git_stats[path]["change_count"]
+        last_changed = git_stats[path]["last_changed"]
         conn.execute(
             """
             INSERT INTO git_facts (file_id, change_count, last_changed, computed_at)
@@ -1067,13 +1118,19 @@ def index_legacy_signals(
     path_to_file_id: dict,
     file_kinds: dict,
     config: ProjectConfig,
+    git_stats: dict | None = None,
 ) -> None:
     """Persist evidence-backed legacy signals for all indexed files/symbols.
 
     path_to_file_id/file_kinds are threaded through from the caller's own
     scan bookkeeping rather than re-queried, to avoid an extra files-table
-    scan on every index run.
+    scan on every index run. git_stats is the caller's collect_git_file_stats
+    result for every path, read here when not given.
     """
+    if git_stats is None:
+        git_stats = collect_git_file_stats(
+            project_root, list(path_to_file_id), config=config
+        )
     file_id_to_path = {file_id: path for path, file_id in path_to_file_id.items()}
 
     files_input = []
@@ -1150,9 +1207,7 @@ def index_legacy_signals(
     coupling_targets = [
         {
             "target": path,
-            "coupled_file_count": len(
-                get_files_changed_together(project_root, path, config=config)
-            ),
+            "coupled_file_count": git_stats[path]["coupled_file_count"],
         }
         for path in file_id_to_path.values()
     ]
@@ -1246,6 +1301,9 @@ def run_scan(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
             index_python_call_relationships(conn, file_id, analysis["calls"])
+            index_python_self_call_relationships(
+                conn, file_id, analysis["self_calls"], symbols
+            )
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]
             )
@@ -1329,10 +1387,13 @@ def run_scan(
     index_rust_dependencies(conn, project_id, project_root)
     index_npm_dependencies(conn, project_id, project_root)
     _enrich_framework_metadata(conn, project_id)
-    index_git_facts(conn, project_root, path_to_file_id, config)
+    git_stats = collect_git_file_stats(project_root, list(path_to_file_id), config=config)
+    index_git_facts(conn, path_to_file_id, git_stats)
     index_architecture_facts(conn, project_root, config)
     file_kinds = {record["path"]: record["file_kind"] for record in discovered}
-    index_legacy_signals(conn, project_id, project_root, path_to_file_id, file_kinds, config)
+    index_legacy_signals(
+        conn, project_id, project_root, path_to_file_id, file_kinds, config, git_stats
+    )
     mark_index_complete(conn)
     return project_id
 
@@ -1514,6 +1575,9 @@ def refresh_index(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
             index_python_call_relationships(conn, file_id, analysis["calls"])
+            index_python_self_call_relationships(
+                conn, file_id, analysis["self_calls"], symbols
+            )
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]
             )
@@ -1602,10 +1666,13 @@ def refresh_index(
         for path in changed_paths
         if path in path_to_file_id
     }
-    index_git_facts(conn, project_root, changed_file_ids, config)
+    git_stats = collect_git_file_stats(project_root, list(path_to_file_id), config=config)
+    index_git_facts(conn, changed_file_ids, git_stats)
     index_architecture_facts(conn, project_root, config)
     file_kinds = {record["path"]: record["file_kind"] for record in discovered}
-    index_legacy_signals(conn, project_id, project_root, path_to_file_id, file_kinds, config)
+    index_legacy_signals(
+        conn, project_id, project_root, path_to_file_id, file_kinds, config, git_stats
+    )
     mark_index_complete(conn)
 
 

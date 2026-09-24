@@ -173,24 +173,43 @@ class _ReferenceCollector(_ScopeTrackingVisitor):
         self.calls: list[dict] = []
         self.attribute_calls: list[dict] = []
         self.self_references: list[dict] = []
+        self.self_calls: list[dict] = []
         self.foreign_accesses: list[dict] = []
         self.name_loads: list[dict] = []
+        # `self.x` nodes that are called; they become self_calls, not references.
+        self._called_self_attributes: set[int] = set()
 
     def visit_Call(self, node):
         if self.callers:
             caller = self.callers[-1]
-            if isinstance(node.func, ast.Name):
-                self.calls.append(
-                    {"caller": caller, "callee": node.func.id, "line": node.lineno}
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "self"
+                and self.class_scopes
+            ):
+                self._called_self_attributes.add(id(func))
+                self.self_calls.append(
+                    {
+                        "caller": caller,
+                        "class": self.class_scopes[-1],
+                        "method": func.attr,
+                        "line": node.lineno,
+                    }
                 )
-            elif isinstance(node.func, ast.Attribute):
-                obj = _dotted_name(node.func.value)
+            if isinstance(func, ast.Name):
+                self.calls.append(
+                    {"caller": caller, "callee": func.id, "line": node.lineno}
+                )
+            elif isinstance(func, ast.Attribute):
+                obj = _dotted_name(func.value)
                 if obj is not None:
                     self.attribute_calls.append(
                         {
                             "caller": caller,
                             "object": obj,
-                            "attribute": node.func.attr,
+                            "attribute": func.attr,
                             "line": node.lineno,
                         }
                     )
@@ -199,7 +218,8 @@ class _ReferenceCollector(_ScopeTrackingVisitor):
     def visit_Attribute(self, node):
         if self.callers:
             is_self = isinstance(node.value, ast.Name) and node.value.id == "self"
-            if is_self and self.class_scopes:
+            is_call = id(node) in self._called_self_attributes
+            if is_self and self.class_scopes and not is_call:
                 self.self_references.append(
                     {
                         "referrer": self.callers[-1],
@@ -250,6 +270,7 @@ def analyze_python_source(path: str, source: str) -> dict:
             "calls": [],
             "attribute_calls": [],
             "self_references": [],
+            "self_calls": [],
             "foreign_accesses": [],
             "name_loads": [],
         }
@@ -260,6 +281,7 @@ def analyze_python_source(path: str, source: str) -> dict:
         "calls": collector.calls,
         "attribute_calls": collector.attribute_calls,
         "self_references": collector.self_references,
+        "self_calls": collector.self_calls,
         "foreign_accesses": collector.foreign_accesses,
         "name_loads": collector.name_loads,
     }
@@ -275,6 +297,10 @@ def extract_attribute_calls(path: str, source: str) -> list[dict]:
 
 def extract_self_attribute_references(path: str, source: str) -> list[dict]:
     return _collect(path, _parse_or_none(path, source)).self_references
+
+
+def extract_self_method_calls(path: str, source: str) -> list[dict]:
+    return _collect(path, _parse_or_none(path, source)).self_calls
 
 
 def extract_foreign_attribute_accesses(path: str, source: str) -> list[dict]:

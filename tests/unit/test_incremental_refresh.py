@@ -579,8 +579,8 @@ def test_refresh_index_cleans_relationships_on_delete(tmp_path):
     assert orphan_rels == 0
 
 
-def test_refresh_index_skips_git_facts_for_unchanged_files(tmp_path, monkeypatch):
-    """Unchanged files should not trigger new git-log subprocess calls during refresh."""
+def test_refresh_index_skips_git_facts_for_unchanged_files(tmp_path):
+    """Refresh leaves the stored git facts of unchanged files untouched."""
     import subprocess
 
     project_root = _copy_fixture(tmp_path)
@@ -609,25 +609,18 @@ def test_refresh_index_skips_git_facts_for_unchanged_files(tmp_path, monkeypatch
     conn = get_connection(project_root)
     run_scan(conn, project_root, config)
 
-    import project_mcp.indexer as indexer_module
+    def git_fact_rows():
+        return conn.execute(
+            "SELECT file_id, change_count, last_changed, computed_at FROM git_facts"
+        ).fetchall()
 
-    recomputed_paths = []
-    original_get_file_change_count = indexer_module.get_file_change_count
-
-    def tracking_get_file_change_count(project_root_arg, path, **kwargs):
-        recomputed_paths.append(path)
-        return original_get_file_change_count(project_root_arg, path, **kwargs)
-
-    monkeypatch.setattr(
-        indexer_module, "get_file_change_count", tracking_get_file_change_count
-    )
+    rows_before = git_fact_rows()
 
     time.sleep(0.01)
     refresh_index(conn, project_root, config)
 
-    assert recomputed_paths == [], (
-        "refresh_index recomputed git facts for unchanged files: "
-        f"{recomputed_paths}"
+    assert git_fact_rows() == rows_before, (
+        "refresh_index rewrote git facts for unchanged files"
     )
 
 

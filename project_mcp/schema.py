@@ -9,7 +9,9 @@ import sqlite3
 #    `mod.func()` calls resolve through `import mod` / `import mod as m`.
 # 4: relative imports (`from .x import y`) resolve for imports, calls and
 #    constants, and repeated imports of one file yield a single edge.
-CURRENT_SCHEMA_VERSION = 4
+# 5: `self.method()` is a `calls` edge (not `references`) and resolves to
+#    methods inherited from base classes in the same file.
+CURRENT_SCHEMA_VERSION = 5
 
 REQUIRED_TABLES = {
     "projects",

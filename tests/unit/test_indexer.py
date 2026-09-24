@@ -12,6 +12,7 @@ from project_mcp.indexer import (
     get_index_status,
     index_legacy_signals,
     index_python_attribute_relationships,
+    index_python_call_relationships,
     mark_index_complete,
     refresh_index,
     remove_file,
@@ -1188,6 +1189,47 @@ def test_index_python_attribute_relationships_looks_up_symbols_once_per_file(tmp
     assert len(symbol_lookups) <= 1
 
 
+def test_index_python_call_relationships_looks_up_symbols_once_per_file(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    helpers = [f"helper_{i}" for i in range(30)]
+    source = (
+        "".join(f"def {name}():\n    return {i}\n\n" for i, name in enumerate(helpers))
+        + "def run():\n"
+        + "".join(f"    {name}()\n" for name in helpers)
+    )
+    (project_root / "app" / "jobs.py").write_text(source)
+    run_scan(conn, project_root, config)
+    file_id = conn.execute("SELECT id FROM files WHERE path = 'app/jobs.py'").fetchone()[0]
+    calls = [
+        {"caller": "app.jobs.run", "callee": name, "line": 1} for name in helpers
+    ] + [{"caller": "app.jobs.run", "callee": "not_defined", "line": 1}]
+    conn.execute(
+        "DELETE FROM relationships WHERE relationship_type = 'calls'"
+    )
+
+    statements = []
+    conn.set_trace_callback(statements.append)
+    index_python_call_relationships(conn, file_id, calls)
+    conn.set_trace_callback(None)
+
+    symbol_lookups = [s for s in statements if "FROM symbols" in s]
+    assert len(symbol_lookups) <= 1
+    callees = {
+        row[0]
+        for row in conn.execute(
+            """
+            SELECT t.qualified_name FROM relationships r
+            JOIN symbols s ON s.id = r.source_entity_id
+            JOIN symbols t ON t.id = r.target_entity_id
+            WHERE r.relationship_type = 'calls' AND s.qualified_name = 'app.jobs.run'
+            """
+        )
+    }
+    assert callees == {f"app.jobs.{name}" for name in helpers}
+
+
 def test_run_scan_persists_call_relationship_across_modules_via_from_import(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)
@@ -2011,28 +2053,91 @@ def test_run_scan_replaces_legacy_signals_on_rescan_without_duplicating(tmp_path
     assert len(rows) == 1
 
 
-def test_run_scan_calls_get_files_changed_together_exactly_once_per_indexed_file(tmp_path):
-    """Characterization test: temporal-coupling detection runs one git subprocess
-    call (via get_files_changed_together) per indexed file — no more, no less.
-    Locks in the current linear-cost design so a future change can't silently
-    make it worse (e.g. calling it per-symbol) without a test noticing."""
-    from unittest.mock import patch
+def _git(project_root, *args):
+    import subprocess
+
+    subprocess.run(
+        ["git", *args], cwd=project_root, check=True, capture_output=True
+    )
+
+
+def test_run_scan_reads_git_history_in_one_pass_with_per_file_results(
+    tmp_path, monkeypatch
+):
+    """A scan reads git history with a single `git log`, however many files
+    there are, and stores the same facts the per-file git queries report."""
+    import subprocess
+
+    from project_mcp.analyzers.generic import git as git_module
+    from project_mcp.analyzers.generic.git import (
+        get_file_change_count,
+        get_file_last_changed,
+        get_files_changed_together,
+    )
 
     project_root = tmp_path / "project"
     (project_root / "app").mkdir(parents=True)
-    (project_root / "app" / "a.py").write_text("x = 1\n")
-    (project_root / "app" / "b.py").write_text("y = 1\n")
+    names = [f"app/m{i}.py" for i in range(8)]
+    _git(project_root, "init")
+    _git(project_root, "config", "user.email", "test@example.com")
+    _git(project_root, "config", "user.name", "Test")
+    for name in names:
+        (project_root / name).write_text("x = 1\n")
+    _git(project_root, "add", ".")
+    _git(project_root, "commit", "-m", "initial")
+    for name in names[:7]:
+        (project_root / name).write_text("x = 2\n")
+    _git(project_root, "commit", "-am", "wide change")
+    (project_root / names[0]).write_text("x = 3\n")
+    _git(project_root, "commit", "-am", "narrow change")
+    (project_root / "app" / "untracked.py").write_text("x = 1\n")
+
+    config = load_config(project_root)
+    expected_facts = {
+        path: (
+            get_file_change_count(project_root, path, config=config),
+            get_file_last_changed(project_root, path),
+        )
+        for path in names + ["app/untracked.py"]
+    }
+    expected_coupled = {
+        path
+        for path in names + ["app/untracked.py"]
+        if len(get_files_changed_together(project_root, path, config=config))
+        > config.high_temporal_coupling_count
+    }
+
+    git_logs = []
+    real_run = subprocess.run
+
+    def counting_run(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "log"]:
+            git_logs.append(cmd)
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(git_module.subprocess, "run", counting_run)
 
     conn = get_connection(project_root)
-    config = load_config(project_root)
+    run_scan(conn, project_root, config)
 
-    with patch(
-        "project_mcp.indexer.get_files_changed_together", return_value=[]
-    ) as mock_coupling:
-        run_scan(conn, project_root, config)
-
-    file_count = conn.execute("SELECT COUNT(*) FROM files").fetchone()[0]
-    assert mock_coupling.call_count == file_count
+    assert len(git_logs) == 1
+    facts = {
+        path: (count, last_changed)
+        for path, count, last_changed in conn.execute(
+            "SELECT f.path, g.change_count, g.last_changed"
+            " FROM git_facts g JOIN files f ON f.id = g.file_id"
+        ).fetchall()
+    }
+    assert facts == expected_facts
+    coupled = {
+        row[0]
+        for row in conn.execute(
+            "SELECT target FROM legacy_signals"
+            " WHERE signal = 'high_temporal_coupling'"
+        ).fetchall()
+    }
+    assert coupled == expected_coupled
+    assert expected_coupled  # the fixture history must actually trigger it
 
 
 def test_index_legacy_signals_reads_each_file_from_disk_exactly_once_for_line_counts(
@@ -2064,3 +2169,51 @@ def test_index_legacy_signals_reads_each_file_from_disk_exactly_once_for_line_co
         index_legacy_signals(conn, project_id, project_root, path_to_file_id, file_kinds, config)
 
     assert spy.call_count == len(path_to_file_id)
+
+
+def test_run_scan_links_self_method_calls_to_own_and_inherited_methods(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "svc.py").write_text(
+        "class Base:\n"
+        "    def shared(self):\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "class Service(Base):\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def helper(self):\n"
+        "        return self.status\n"
+        "\n"
+        "    def run(self):\n"
+        "        self.shared()\n"
+        "        self.missing()\n"
+        "        return self.helper()\n"
+        "\n"
+        "    def nested(self):\n"
+        "        def inner():\n"
+        "            return self.helper()\n"
+        "        return inner\n"
+    )
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, load_config(project_root))
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, r.relationship_type, r.confidence, t.qualified_name
+        FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND r.relationship_type IN ('calls', 'references')
+        ORDER BY 1, 4
+        """
+    ).fetchall()
+    assert edges == [
+        ("app.svc.Service.helper", "references", "high", "app.svc.Service.status"),
+        ("app.svc.Service.nested.inner", "calls", "high", "app.svc.Service.helper"),
+        ("app.svc.Service.run", "calls", "high", "app.svc.Base.shared"),
+        ("app.svc.Service.run", "calls", "high", "app.svc.Service.helper"),
+    ]
