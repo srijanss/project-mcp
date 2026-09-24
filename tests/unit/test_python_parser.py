@@ -1,6 +1,7 @@
 from project_mcp.analyzers.python.parser import (
     extract_foreign_attribute_accesses,
     extract_imports,
+    extract_name_loads,
     extract_self_attribute_references,
     extract_static_calls,
     parse_python_source,
@@ -132,6 +133,51 @@ def test_extract_foreign_attribute_accesses_finds_non_self_accesses_in_functions
         {"referrer": "app.report.report", "attribute": "status", "line": 3},
         {"referrer": "app.report.report", "attribute": "note", "line": 4},
         {"referrer": "app.report.Handler.run", "attribute": "amount", "line": 9},
+    ]
+
+
+def test_parse_python_source_extracts_module_level_upper_case_constants():
+    source = (
+        "MAX_RETRIES = 3\n"
+        "TIMEOUT: float = 1.5\n"
+        "_PRIVATE_LIMIT = 9\n"
+        "logger = get_logger()\n"
+        "\n"
+        "def run():\n"
+        "    LOCAL_CAP = 2\n"
+    )
+
+    symbols = parse_python_source("app/settings.py", source)
+    constants = {s["qualified_name"]: s for s in symbols if s["kind"] == "constant"}
+
+    assert set(constants) == {
+        "app.settings.MAX_RETRIES",
+        "app.settings.TIMEOUT",
+        "app.settings._PRIVATE_LIMIT",
+    }
+    assert constants["app.settings.MAX_RETRIES"]["start_line"] == 1
+    assert constants["app.settings._PRIVATE_LIMIT"]["visibility"] == "private"
+
+
+def test_extract_name_loads_finds_bare_names_read_inside_functions():
+    source = (
+        "LIMIT = 3\n"
+        "TOP = LIMIT\n"
+        "\n"
+        "\n"
+        "def run(x):\n"
+        "    total = LIMIT + x\n"
+        "    LIMIT_LOCAL = 1\n"
+        "    return helper(total)\n"
+    )
+
+    loads = extract_name_loads("app/job.py", source)
+
+    assert loads == [
+        {"referrer": "app.job.run", "name": "LIMIT", "line": 6},
+        {"referrer": "app.job.run", "name": "x", "line": 6},
+        {"referrer": "app.job.run", "name": "helper", "line": 8},
+        {"referrer": "app.job.run", "name": "total", "line": 8},
     ]
 
 

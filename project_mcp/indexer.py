@@ -32,6 +32,7 @@ from project_mcp.analyzers.rust.parser import (
 from project_mcp.analyzers.python.parser import (
     extract_foreign_attribute_accesses,
     extract_imports,
+    extract_name_loads,
     extract_self_attribute_references,
     extract_static_calls,
     parse_python_source,
@@ -620,7 +621,7 @@ def index_python_cross_file_attribute_relationships(
     conn.execute(
         """
         DELETE FROM relationships
-        WHERE relationship_type = 'references'
+        WHERE relationship_type = 'references' AND confidence = 'low'
           AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
           AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
           AND target_entity_id NOT IN (SELECT id FROM symbols WHERE file_id = ?)
@@ -684,6 +685,71 @@ def index_python_cross_file_attribute_relationships(
         )
 
 
+def index_python_constant_reference_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    loads: list[dict],
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    """Link bare-name reads to module constants, local or `from`-imported."""
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'references'
+          AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
+          AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
+          AND target_entity_id IN (SELECT id FROM symbols WHERE kind = 'constant')
+        """,
+        (file_id,),
+    )
+
+    symbol_ids: dict[str, int] = {}
+    constant_ids: dict[str, int] = {}
+    for symbol_id, name, qualified_name, kind in conn.execute(
+        "SELECT id, name, qualified_name, kind FROM symbols WHERE file_id = ? ORDER BY id",
+        (file_id,),
+    ):
+        symbol_ids.setdefault(qualified_name, symbol_id)
+        if kind == "constant":
+            constant_ids.setdefault(name, symbol_id)
+
+    for imp in imports:
+        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
+            continue
+        target_file_id = path_to_file_id.get(imp["module"].replace(".", "/") + ".py")
+        if target_file_id is None:
+            continue
+        for name in imp.get("names", []):
+            row = conn.execute(
+                "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ? "
+                "AND kind = 'constant'",
+                (target_file_id, f"{imp['module']}.{name}"),
+            ).fetchone()
+            if row is not None:
+                constant_ids[name] = row[0]
+
+    seen = set()
+    for load in loads:
+        referrer_id = symbol_ids.get(load["referrer"])
+        constant_id = constant_ids.get(load["name"])
+        if referrer_id is None or constant_id is None:
+            continue
+        if (referrer_id, constant_id) in seen:
+            continue
+        seen.add((referrer_id, constant_id))
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'high')
+            """,
+            (referrer_id, constant_id),
+        )
+
+
 def refresh_cross_module_edges_for_importers(
     conn: sqlite3.Connection,
     project_root: Path,
@@ -732,6 +798,9 @@ def refresh_cross_module_edges_for_importers(
         )
         index_python_cross_file_attribute_relationships(
             conn, importer_id, extract_foreign_attribute_accesses(path, source)
+        )
+        index_python_constant_reference_relationships(
+            conn, importer_id, extract_name_loads(path, source), imports, path_to_file_id
         )
 
 
@@ -1159,6 +1228,9 @@ def run_scan(
         index_python_cross_file_attribute_relationships(
             conn, file_id, extract_foreign_attribute_accesses(path, source)
         )
+        index_python_constant_reference_relationships(
+            conn, file_id, extract_name_loads(path, source), imports, path_to_file_id
+        )
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 
     js_new_file_added = any(path not in existing_rows for path in changed_js_files)
@@ -1437,6 +1509,9 @@ def refresh_index(
         )
         index_python_cross_file_attribute_relationships(
             conn, file_id, extract_foreign_attribute_accesses(path, source)
+        )
+        index_python_constant_reference_relationships(
+            conn, file_id, extract_name_loads(path, source), imports, path_to_file_id
         )
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
 

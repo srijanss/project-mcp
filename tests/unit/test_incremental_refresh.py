@@ -331,6 +331,34 @@ def test_refresh_index_does_not_duplicate_cross_file_attribute_references(tmp_pa
     ) == [("references", "low")]
 
 
+def test_refresh_index_keeps_constant_references_when_constant_file_is_edited(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "settings.py").write_text("MAX_RETRIES = 3\n")
+    (project_root / "app" / "limits.py").write_text("TIMEOUT = 5\n")
+    (project_root / "app" / "worker.py").write_text(
+        "from app.settings import MAX_RETRIES\n"
+        "from app.limits import TIMEOUT\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    return MAX_RETRIES, TIMEOUT\n"
+    )
+    run_scan(conn, project_root, config)
+
+    time.sleep(0.01)
+    (project_root / "app" / "settings.py").write_text("MAX_RETRIES = 4\n")
+    refresh_index(conn, project_root, config)
+
+    assert _references_between(
+        conn, "app.worker.run", "app.settings.MAX_RETRIES"
+    ) == [("references", "high")]
+    assert _references_between(conn, "app.worker.run", "app.limits.TIMEOUT") == [
+        ("references", "high")
+    ]
+
+
 def test_refresh_index_detects_deleted_file(tmp_path):
     """Deleted file should be removed from index and relationships cleaned up."""
     project_root = _copy_fixture(tmp_path)

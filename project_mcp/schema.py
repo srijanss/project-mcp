@@ -4,7 +4,8 @@ import sqlite3
 # get_connection() discards an index written under an older version, so an
 # upgrade rebuilds it instead of mixing old and new relationship kinds.
 # 2: cross-module calls and attribute references (fields) are now indexed.
-CURRENT_SCHEMA_VERSION = 2
+# 3: module constants and references to them are now indexed.
+CURRENT_SCHEMA_VERSION = 3
 
 REQUIRED_TABLES = {
     "projects",

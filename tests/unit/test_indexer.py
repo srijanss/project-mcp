@@ -1273,6 +1273,60 @@ def test_run_scan_skips_attribute_reference_to_field_in_module_not_imported(tmp_
     assert count == 0
 
 
+def _reference_confidence(conn, source_name: str, target_name: str):
+    return conn.execute(
+        """
+        SELECT r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'references'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND s.qualified_name = ? AND t.qualified_name = ?
+        """,
+        (source_name, target_name),
+    ).fetchall()
+
+
+def test_run_scan_persists_references_to_module_constants(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "settings.py").write_text(
+        "MAX_RETRIES = 3\n"
+        "\n"
+        "\n"
+        "def limit():\n"
+        "    return MAX_RETRIES\n"
+    )
+    (project_root / "app" / "worker.py").write_text(
+        "from app.settings import MAX_RETRIES\n"
+        "\n"
+        "\n"
+        "class Card:\n"
+        "    number = None\n"
+        "\n"
+        "\n"
+        "def run(card):\n"
+        "    return MAX_RETRIES, card.number\n"
+    )
+    (project_root / "app" / "receipts.py").write_text(
+        "from app.worker import Card\n"
+        "\n"
+        "\n"
+        "def show(card):\n"
+        "    return card.number\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    constant = "app.settings.MAX_RETRIES"
+    assert _reference_confidence(conn, "app.settings.limit", constant) == [("high",)]
+    assert _reference_confidence(conn, "app.worker.run", constant) == [("high",)]
+    assert _reference_confidence(
+        conn, "app.receipts.show", "app.worker.Card.number"
+    ) == [("low",)]
+
+
 def test_run_scan_persists_static_call_relationship_from_method_to_module_function(
     tmp_path,
 ):

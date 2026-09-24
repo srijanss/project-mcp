@@ -64,16 +64,23 @@ def parse_python_source(path: str, source: str) -> list[dict]:
                     }
                 )
                 visit_body(node.body, qualified_name, in_class=False)
-            elif in_class and isinstance(node, (ast.Assign, ast.AnnAssign)):
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                at_module_level = qualified_prefix == module_name
+                if not (in_class or at_module_level):
+                    continue
                 targets = node.targets if isinstance(node, ast.Assign) else [node.target]
                 for target in targets:
                     if not isinstance(target, ast.Name):
+                        continue
+                    # Only UPPER_CASE module names count as constants; other
+                    # module-level assignments are mostly runtime objects.
+                    if not in_class and not target.id.lstrip("_").isupper():
                         continue
                     symbols.append(
                         {
                             "name": target.id,
                             "qualified_name": f"{qualified_prefix}.{target.id}",
-                            "kind": "field",
+                            "kind": "field" if in_class else "constant",
                             "start_line": node.lineno,
                             "end_line": node.end_lineno,
                             "visibility": _visibility(target.id),
@@ -117,7 +124,8 @@ def extract_imports(path: str, source: str) -> list[dict]:
 class _ScopeTrackingVisitor(ast.NodeVisitor):
     """Tracks the enclosing class and function qualified names while walking."""
 
-    def __init__(self, module_name: str):
+    def __init__(self, module_name: str, results: list):
+        self.results = results
         self.callers: list[str] = []
         self.scopes = [module_name]
         self.class_scopes: list[str] = []
@@ -150,10 +158,6 @@ def _walk_scopes(path: str, source: str, visitor_class, results: list) -> list:
 
 def extract_static_calls(path: str, source: str) -> list[dict]:
     class CallVisitor(_ScopeTrackingVisitor):
-        def __init__(self, module_name, results):
-            super().__init__(module_name)
-            self.results = results
-
         def visit_Call(self, node):
             if self.callers and isinstance(node.func, ast.Name):
                 self.results.append(
@@ -170,10 +174,6 @@ def extract_static_calls(path: str, source: str) -> list[dict]:
 
 def extract_self_attribute_references(path: str, source: str) -> list[dict]:
     class ReferenceVisitor(_ScopeTrackingVisitor):
-        def __init__(self, module_name, results):
-            super().__init__(module_name)
-            self.results = results
-
         def visit_Attribute(self, node):
             if (
                 self.callers
@@ -196,10 +196,6 @@ def extract_self_attribute_references(path: str, source: str) -> list[dict]:
 
 def extract_foreign_attribute_accesses(path: str, source: str) -> list[dict]:
     class AccessVisitor(_ScopeTrackingVisitor):
-        def __init__(self, module_name, results):
-            super().__init__(module_name)
-            self.results = results
-
         def visit_Attribute(self, node):
             is_self = isinstance(node.value, ast.Name) and node.value.id == "self"
             if self.callers and not is_self:
@@ -213,3 +209,18 @@ def extract_foreign_attribute_accesses(path: str, source: str) -> list[dict]:
             self.generic_visit(node)
 
     return _walk_scopes(path, source, AccessVisitor, [])
+
+
+def extract_name_loads(path: str, source: str) -> list[dict]:
+    class NameLoadVisitor(_ScopeTrackingVisitor):
+        def visit_Name(self, node):
+            if self.callers and isinstance(node.ctx, ast.Load):
+                self.results.append(
+                    {
+                        "referrer": self.callers[-1],
+                        "name": node.id,
+                        "line": node.lineno,
+                    }
+                )
+
+    return _walk_scopes(path, source, NameLoadVisitor, [])
