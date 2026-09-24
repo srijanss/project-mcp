@@ -47,7 +47,7 @@ def find_symbol(project_root: Path, query: str) -> list[dict]:
         JOIN files f ON f.id = s.file_id
         WHERE f.project_id = ?
           AND (LOWER(s.name) LIKE ? OR LOWER(s.qualified_name) LIKE ?)
-        ORDER BY s.qualified_name
+        ORDER BY (s.kind = 'field'), s.qualified_name
         """,
         (project_id, like_query, like_query),
     ).fetchall()

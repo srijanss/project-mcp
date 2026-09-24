@@ -31,6 +31,7 @@ from project_mcp.analyzers.rust.parser import (
 )
 from project_mcp.analyzers.python.parser import (
     extract_imports,
+    extract_self_attribute_references,
     extract_static_calls,
     parse_python_source,
 )
@@ -477,6 +478,37 @@ def index_python_call_relationships(
         )
 
 
+def index_python_attribute_relationships(
+    conn: sqlite3.Connection, file_id: int, references: list[dict]
+) -> None:
+    symbol_ids: dict[str, int] = {}
+    for symbol_id, qualified_name in conn.execute(
+        "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id",
+        (file_id,),
+    ):
+        symbol_ids.setdefault(qualified_name, symbol_id)
+
+    seen = set()
+    for reference in references:
+        referrer_id = symbol_ids.get(reference["referrer"])
+        attribute_id = symbol_ids.get(f"{reference['class']}.{reference['attribute']}")
+        if referrer_id is None or attribute_id is None:
+            continue
+        if (referrer_id, attribute_id) in seen:
+            continue
+        seen.add((referrer_id, attribute_id))
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'high')
+            """,
+            (referrer_id, attribute_id),
+        )
+
+
 def index_python_import_relationships(
     conn: sqlite3.Connection,
     file_id: int,
@@ -875,6 +907,9 @@ def run_scan(
             source = (Path(project_root) / record["path"]).read_text()
             symbols = index_python_symbols(conn, file_id, record["path"], source)
             calls = extract_static_calls(record["path"], source)
+            attribute_references = extract_self_attribute_references(
+                record["path"], source
+            )
             try:
                 imports = extract_imports(record["path"], source)
             except SyntaxError:
@@ -888,6 +923,9 @@ def run_scan(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
             index_python_call_relationships(conn, file_id, calls)
+            index_python_attribute_relationships(
+                conn, file_id, attribute_references
+            )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
             source = (Path(project_root) / record["path"]).read_text()
@@ -1142,6 +1180,9 @@ def refresh_index(
             source = (Path(project_root) / record["path"]).read_text()
             symbols = index_python_symbols(conn, file_id, record["path"], source)
             calls = extract_static_calls(record["path"], source)
+            attribute_references = extract_self_attribute_references(
+                record["path"], source
+            )
             try:
                 imports = extract_imports(record["path"], source)
             except SyntaxError:
@@ -1155,6 +1196,9 @@ def refresh_index(
                     conn, file_id, module_symbol["qualified_name"], classes
                 )
             index_python_call_relationships(conn, file_id, calls)
+            index_python_attribute_relationships(
+                conn, file_id, attribute_references
+            )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
             source = (Path(project_root) / record["path"]).read_text()

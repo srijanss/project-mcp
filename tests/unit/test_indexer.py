@@ -10,6 +10,7 @@ from project_mcp.indexer import (
     ensure_fresh_index,
     get_index_status,
     index_legacy_signals,
+    index_python_attribute_relationships,
     mark_index_complete,
     refresh_index,
     remove_file,
@@ -1046,6 +1047,106 @@ def test_run_scan_persists_static_call_relationship_for_same_module_functions(tm
     ).fetchone()
 
     assert relationship == ("calls", "high")
+
+
+def test_run_scan_persists_references_relationship_from_method_to_self_field(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "payment.py").write_text(
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def run(self):\n"
+        "        return self.status\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    method_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.payment.Payment.run'"
+    ).fetchone()[0]
+    field_id = conn.execute(
+        "SELECT id FROM symbols WHERE qualified_name = 'app.payment.Payment.status'"
+    ).fetchone()[0]
+    relationship = conn.execute(
+        """
+        SELECT relationship_type, confidence FROM relationships
+        WHERE source_entity_type = 'symbol' AND source_entity_id = ?
+          AND target_entity_type = 'symbol' AND target_entity_id = ?
+        """,
+        (method_id, field_id),
+    ).fetchone()
+
+    assert relationship == ("references", "high")
+
+
+def test_run_scan_persists_one_references_relationship_for_repeated_self_accesses(
+    tmp_path,
+):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "payment.py").write_text(
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def run(self):\n"
+        "        if self.status == 'new':\n"
+        "            self.status = 'done'\n"
+        "        return self.status\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    count = conn.execute(
+        """
+        SELECT COUNT(*) FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'references'
+          AND s.qualified_name = 'app.payment.Payment.run'
+          AND t.qualified_name = 'app.payment.Payment.status'
+        """
+    ).fetchone()[0]
+
+    assert count == 1
+
+
+def test_index_python_attribute_relationships_looks_up_symbols_once_per_file(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    fields = [f"field_{i}" for i in range(30)]
+    source = (
+        "class Payment:\n"
+        + "".join(f"    {name} = {i}\n" for i, name in enumerate(fields))
+        + "\n"
+        + "    def run(self):\n"
+        + "".join(f"        self.{name}\n" for name in fields)
+    )
+    (project_root / "app" / "payment.py").write_text(source)
+    run_scan(conn, project_root, config)
+    file_id = conn.execute(
+        "SELECT id FROM files WHERE path = 'app/payment.py'"
+    ).fetchone()[0]
+    references = [
+        {
+            "referrer": "app.payment.Payment.run",
+            "class": "app.payment.Payment",
+            "attribute": name,
+            "line": 1,
+        }
+        for name in fields
+    ]
+
+    statements = []
+    conn.set_trace_callback(statements.append)
+    index_python_attribute_relationships(conn, file_id, references)
+    conn.set_trace_callback(None)
+
+    symbol_lookups = [s for s in statements if "FROM symbols" in s]
+    assert len(symbol_lookups) <= 1
 
 
 def test_run_scan_persists_static_call_relationship_from_method_to_module_function(

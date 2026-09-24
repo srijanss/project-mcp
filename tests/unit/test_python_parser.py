@@ -1,5 +1,6 @@
 from project_mcp.analyzers.python.parser import (
     extract_imports,
+    extract_self_attribute_references,
     extract_static_calls,
     parse_python_source,
 )
@@ -47,6 +48,64 @@ def test_parse_python_source_extracts_module_function_class_and_method():
     private_method = by_qualified_name["app.widget.Widget._internal"]
     assert private_method["kind"] == "method"
     assert private_method["visibility"] == "private"
+
+
+def test_parse_python_source_extracts_class_level_fields():
+    source = (
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "    amount: int = 0\n"
+        "    note: str\n"
+        "    _secret = None\n"
+        "\n"
+        "    def run(self):\n"
+        "        local = 1\n"
+    )
+
+    symbols = parse_python_source("app/payment.py", source)
+    fields = {s["qualified_name"]: s for s in symbols if s["kind"] == "field"}
+
+    assert set(fields) == {
+        "app.payment.Payment.status",
+        "app.payment.Payment.amount",
+        "app.payment.Payment.note",
+        "app.payment.Payment._secret",
+    }
+    assert fields["app.payment.Payment.status"]["name"] == "status"
+    assert fields["app.payment.Payment.status"]["start_line"] == 2
+    assert fields["app.payment.Payment._secret"]["visibility"] == "private"
+
+
+def test_extract_self_attribute_references_finds_self_accesses_in_methods():
+    source = (
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def run(self, other):\n"
+        "        if self.status == 'new':\n"
+        "            self.amount = 1\n"
+        "        return other.status\n"
+        "\n"
+        "def helper(self):\n"
+        "    return self.status\n"
+    )
+
+    refs = extract_self_attribute_references("app/payment.py", source)
+
+    assert refs == [
+        {
+            "referrer": "app.payment.Payment.run",
+            "class": "app.payment.Payment",
+            "attribute": "status",
+            "line": 5,
+        },
+        {
+            "referrer": "app.payment.Payment.run",
+            "class": "app.payment.Payment",
+            "attribute": "amount",
+            "line": 6,
+        },
+    ]
 
 
 def test_parse_python_source_returns_error_marker_for_syntax_error():

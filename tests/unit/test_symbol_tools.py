@@ -93,6 +93,58 @@ def test_get_dependents_returns_import_sources_for_a_module(tmp_path):
     } in dependents
 
 
+def test_find_symbol_lists_fields_after_other_symbol_kinds(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    (project_root / "app" / "aa_payment.py").write_text(
+        "class Payment:\n"
+        "    status = 'new'\n"
+    )
+    (project_root / "app" / "zz_reports.py").write_text(
+        "def status_report():\n"
+        "    return 1\n"
+    )
+
+    results = find_symbol(project_root, "status")
+
+    kinds = [r["kind"] for r in results]
+    assert "field" in kinds and "function" in kinds
+    assert kinds.index("function") < kinds.index("field")
+    assert kinds[kinds.index("field"):] == ["field"] * kinds.count("field")
+
+
+def test_get_dependents_returns_methods_that_read_a_model_field_via_self(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    (project_root / "app" / "payments.py").write_text(
+        "from django.db import models\n"
+        "\n"
+        "\n"
+        "class Payment(models.Model):\n"
+        "    gateway_captured_card_number = models.CharField(max_length=32)\n"
+        "\n"
+        "    def masked(self):\n"
+        "        return self.gateway_captured_card_number[-4:]\n"
+        "\n"
+        "    @property\n"
+        "    def has_card(self):\n"
+        "        return bool(self.gateway_captured_card_number)\n"
+    )
+
+    dependents = get_dependents(
+        project_root, "app.payments.Payment.gateway_captured_card_number"
+    )
+
+    assert {
+        "source": "app.payments.Payment.masked",
+        "relationship_type": "references",
+        "confidence": "high",
+    } in dependents
+    assert {
+        "source": "app.payments.Payment.has_card",
+        "relationship_type": "references",
+        "confidence": "high",
+    } in dependents
+
+
 def test_get_dependents_returns_inheritance_sources_for_a_class(tmp_path):
     project_root = _copy_fixture(tmp_path)
     (project_root / "app" / "shapes.py").write_text(

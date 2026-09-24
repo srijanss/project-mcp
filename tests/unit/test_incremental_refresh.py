@@ -50,6 +50,84 @@ def test_refresh_index_detects_edited_file_and_re_indexes(tmp_path):
     assert new_symbol is not None
 
 
+def _references_between(conn, source_name: str, target_name: str) -> list[tuple]:
+    return conn.execute(
+        """
+        SELECT r.relationship_type, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND r.relationship_type = 'references'
+          AND s.qualified_name = ? AND t.qualified_name = ?
+        """,
+        (source_name, target_name),
+    ).fetchall()
+
+
+def test_refresh_index_persists_references_for_edited_file(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    payment = project_root / "app" / "payment.py"
+    payment.write_text(
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def run(self):\n"
+        "        return 1\n"
+    )
+    run_scan(conn, project_root, config)
+    assert _references_between(
+        conn, "app.payment.Payment.run", "app.payment.Payment.status"
+    ) == []
+
+    time.sleep(0.01)
+    payment.write_text(
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def run(self):\n"
+        "        return self.status\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    assert _references_between(
+        conn, "app.payment.Payment.run", "app.payment.Payment.status"
+    ) == [("references", "high")]
+
+
+def test_refresh_index_removes_stale_references_when_edit_drops_access(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    payment = project_root / "app" / "payment.py"
+    payment.write_text(
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def run(self):\n"
+        "        return self.status\n"
+    )
+    run_scan(conn, project_root, config)
+    assert _references_between(
+        conn, "app.payment.Payment.run", "app.payment.Payment.status"
+    ) == [("references", "high")]
+
+    time.sleep(0.01)
+    payment.write_text(
+        "class Payment:\n"
+        "    status = 'new'\n"
+        "\n"
+        "    def run(self):\n"
+        "        return 1\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    assert _references_between(
+        conn, "app.payment.Payment.run", "app.payment.Payment.status"
+    ) == []
+
+
 def test_refresh_index_detects_deleted_file(tmp_path):
     """Deleted file should be removed from index and relationships cleaned up."""
     project_root = _copy_fixture(tmp_path)
