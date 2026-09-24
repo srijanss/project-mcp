@@ -20,6 +20,25 @@ def test_enrich_django_metadata_handles_empty_symbol_and_file_lists():
     assert result == []
 
 
+def test_detect_django_models_tolerates_dynamic_base_markers():
+    """A computed base (parser emits a dict marker) must not crash detection."""
+    dynamic_base = {"dynamic": True, "expression": "make_base()"}
+    symbols = [
+        {"qualified_name": "app.Computed", "kind": "class", "bases": [dynamic_base]},
+        {
+            "qualified_name": "app.Mixed",
+            "kind": "class",
+            "bases": [dynamic_base, "models.Model"],
+        },
+    ]
+
+    result = detect_django_models(symbols, [])
+
+    assert result == [
+        {"qualified_name": "app.Mixed", "framework_kind": "django_model"}
+    ]
+
+
 def test_detect_django_models_skips_symbols_missing_qualified_name():
     """A matching class symbol with no qualified_name key should be skipped, not crash."""
     symbols = [
@@ -171,6 +190,23 @@ def test_detect_views_handles_explicit_null_bases():
     result = detect_views(symbols)
 
     assert result == []
+
+
+def test_detect_views_tolerates_dynamic_base_markers():
+    """A computed base (parser emits a dict marker) must not crash view detection."""
+    dynamic_base = {"dynamic": True, "expression": "make_base()"}
+    symbols = [
+        {"qualified_name": "app.Computed", "kind": "class", "bases": [dynamic_base]},
+        {
+            "qualified_name": "app.Mixed",
+            "kind": "class",
+            "bases": [dynamic_base, "View"],
+        },
+    ]
+
+    result = detect_views(symbols)
+
+    assert result == [{"qualified_name": "app.Mixed", "framework_kind": "django_view"}]
 
 
 def test_detect_views_identifies_function_named_view():
