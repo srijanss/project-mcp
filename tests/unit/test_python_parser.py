@@ -6,6 +6,7 @@ from project_mcp.analyzers.python.parser import (
     extract_name_loads,
     extract_self_attribute_references,
     extract_self_method_calls,
+    extract_typed_method_calls,
     extract_static_calls,
     parse_python_source,
 )
@@ -155,6 +156,45 @@ def test_analyze_python_source_records_self_method_calls_apart_from_references()
     ]
 
 
+def test_analyze_python_source_types_receivers_from_constructors_and_annotations():
+    source = (
+        "def run(p: Payment, q: 'Quoted', r: m.Refund | None, s: list[Payment]):\n"
+        "    a = Payment()\n"
+        "    b = m.Refund(1)\n"
+        "    c = Payment()\n"
+        "    c = Other()\n"
+        "    d = make()\n"
+        "    p.charge()\n"
+        "    q.charge()\n"
+        "    r.refund()\n"
+        "    s.append(1)\n"
+        "    a.charge()\n"
+        "    b.refund()\n"
+        "    c.charge()\n"
+        "    d.charge()\n"
+        "    a.nested.call()\n"
+        "\n"
+        "    def inner():\n"
+        "        return a.charge()\n"
+        "    return inner\n"
+        "\n"
+        "\n"
+        "class Handler:\n"
+        "    def handle(self, p: Payment):\n"
+        "        p = p\n"
+        "        return p.charge()\n"
+    )
+
+    analysis = analyze_python_source("app/service.py", source)
+
+    assert analysis["typed_calls"] == [
+        {"caller": "app.service.run", "class": "Payment", "method": "charge", "line": 7},
+        {"caller": "app.service.run", "class": "m.Refund", "method": "refund", "line": 9},
+        {"caller": "app.service.run", "class": "Payment", "method": "charge", "line": 11},
+        {"caller": "app.service.run", "class": "m.Refund", "method": "refund", "line": 12},
+    ]
+
+
 def test_extract_foreign_attribute_accesses_finds_non_self_accesses_in_functions():
     source = (
         "def report(payment, other):\n"
@@ -258,6 +298,7 @@ def test_analyze_python_source_matches_each_extractor_with_one_parse(monkeypatch
         "attribute_calls": extract_attribute_calls(path, ANALYSIS_SOURCE),
         "self_references": extract_self_attribute_references(path, ANALYSIS_SOURCE),
         "self_calls": extract_self_method_calls(path, ANALYSIS_SOURCE),
+        "typed_calls": extract_typed_method_calls(path, ANALYSIS_SOURCE),
         "foreign_accesses": extract_foreign_attribute_accesses(path, ANALYSIS_SOURCE),
         "name_loads": extract_name_loads(path, ANALYSIS_SOURCE),
     }
@@ -284,6 +325,7 @@ def test_analyze_python_source_reports_syntax_error_with_empty_extractions():
         "attribute_calls": [],
         "self_references": [],
         "self_calls": [],
+        "typed_calls": [],
         "foreign_accesses": [],
         "name_loads": [],
     }

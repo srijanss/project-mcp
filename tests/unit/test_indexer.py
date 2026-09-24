@@ -1089,6 +1089,37 @@ def test_run_scan_persists_static_call_relationship_for_same_module_functions(tm
     assert relationship == ("calls", "high")
 
 
+def test_run_scan_records_one_call_edge_per_caller_and_callee(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "workflow.py").write_text(
+        "def helper():\n"
+        "    return 'done'\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    helper()\n"
+        "    helper()\n"
+        "    return helper()\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    count = conn.execute(
+        """
+        SELECT COUNT(*) FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls'
+          AND s.qualified_name = 'app.workflow.run'
+          AND t.qualified_name = 'app.workflow.helper'
+        """
+    ).fetchone()[0]
+
+    assert count == 1
+
+
 def test_run_scan_persists_references_relationship_from_method_to_self_field(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)
@@ -2216,4 +2247,200 @@ def test_run_scan_links_self_method_calls_to_own_and_inherited_methods(tmp_path)
         ("app.svc.Service.nested.inner", "calls", "high", "app.svc.Service.helper"),
         ("app.svc.Service.run", "calls", "high", "app.svc.Base.shared"),
         ("app.svc.Service.run", "calls", "high", "app.svc.Service.helper"),
+    ]
+
+
+def _inherits_edges(conn):
+    return conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'inherits'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+        ORDER BY 1, 2
+        """
+    ).fetchall()
+
+
+def test_run_scan_links_classes_to_bases_imported_from_other_files(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "__init__.py").write_text("")
+    (project_root / "app" / "base.py").write_text(
+        "class Base:\n    pass\n\n\nclass Mixin:\n    pass\n"
+    )
+    (project_root / "app" / "models.py").write_text(
+        "import app.base\n"
+        "from app import base\n"
+        "from .base import Base as Root\n"
+        "\n"
+        "\n"
+        "class Local:\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class ByName(Root):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class ByModule(base.Mixin, Local):\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class ByDottedModule(app.base.Base, Unknown):\n"
+        "    pass\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    expected = [
+        ("app.models.ByDottedModule", "app.base.Base"),
+        ("app.models.ByModule", "app.base.Mixin"),
+        ("app.models.ByModule", "app.models.Local"),
+        ("app.models.ByName", "app.base.Base"),
+    ]
+    assert _inherits_edges(conn) == expected
+
+    (project_root / "app" / "base.py").write_text(
+        "class Base:\n    x = 1\n\n\nclass Mixin:\n    pass\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    assert _inherits_edges(conn) == expected
+
+
+def _call_edges_from(conn, caller: str):
+    return conn.execute(
+        """
+        SELECT t.qualified_name FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls' AND s.qualified_name = ?
+        ORDER BY 1
+        """,
+        (caller,),
+    ).fetchall()
+
+
+def test_run_scan_links_self_method_calls_to_methods_inherited_across_files(tmp_path):
+    """The subclass file sorts first, so its bases' own cross-file inherits
+    edges don't exist yet when it is processed in file order."""
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "c_core.py").write_text(
+        "class Root:\n"
+        "    def ping(self):\n"
+        "        return 1\n"
+    )
+    (project_root / "app" / "b_base.py").write_text(
+        "from app.c_core import Root\n"
+        "\n"
+        "\n"
+        "class Base(Root):\n"
+        "    def save(self):\n"
+        "        return 1\n"
+    )
+    (project_root / "app" / "a_models.py").write_text(
+        "from app.b_base import Base\n"
+        "\n"
+        "\n"
+        "class Model(Base):\n"
+        "    def run(self):\n"
+        "        self.save()\n"
+        "        self.ping()\n"
+        "        self.missing()\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    expected = [("app.b_base.Base.save",), ("app.c_core.Root.ping",)]
+    assert _call_edges_from(conn, "app.a_models.Model.run") == expected
+
+    (project_root / "app" / "b_base.py").write_text(
+        (project_root / "app" / "b_base.py").read_text() + "\n# edited\n"
+    )
+    refresh_index(conn, project_root, config)
+
+    assert _call_edges_from(conn, "app.a_models.Model.run") == expected
+
+
+def test_run_scan_links_method_calls_on_constructed_and_annotated_objects(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "models.py").write_text(
+        "class Payment:\n"
+        "    def charge(self):\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "class Refund(Payment):\n"
+        "    pass\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "import app.models as m\n"
+        "from app.models import Payment, Refund\n"
+        "\n"
+        "\n"
+        "class Local:\n"
+        "    def go(self):\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "def by_constructor():\n"
+        "    p = Payment()\n"
+        "    return p.charge()\n"
+        "\n"
+        "\n"
+        "def by_inherited():\n"
+        "    r = Refund()\n"
+        "    return r.charge()\n"
+        "\n"
+        "\n"
+        "def by_module():\n"
+        "    p = m.Payment()\n"
+        "    return p.charge()\n"
+        "\n"
+        "\n"
+        "def by_annotation(p: Payment, local: Local | None):\n"
+        "    p.charge()\n"
+        "    return local.go()\n"
+        "\n"
+        "\n"
+        "def by_local_class():\n"
+        "    local = Local()\n"
+        "    return local.go()\n"
+        "\n"
+        "\n"
+        "def reassigned():\n"
+        "    x = Payment()\n"
+        "    x = Local()\n"
+        "    return x.charge()\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls' AND s.qualified_name LIKE 'app.service.%'
+          AND t.kind = 'method'
+        ORDER BY 1, 2
+        """
+    ).fetchall()
+    assert edges == [
+        ("app.service.by_annotation", "app.models.Payment.charge", "high"),
+        ("app.service.by_annotation", "app.service.Local.go", "high"),
+        ("app.service.by_constructor", "app.models.Payment.charge", "high"),
+        ("app.service.by_inherited", "app.models.Payment.charge", "high"),
+        ("app.service.by_local_class", "app.service.Local.go", "high"),
+        ("app.service.by_module", "app.models.Payment.charge", "high"),
     ]

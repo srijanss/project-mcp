@@ -10,7 +10,10 @@ import sqlite3
 # 4: relative imports (`from .x import y`) resolve for imports, calls and
 #    constants, and repeated imports of one file yield a single edge.
 # 5: `self.method()` is a `calls` edge (not `references`) and resolves to
-#    methods inherited from base classes in the same file.
+#    inherited methods, classes inherit from bases imported from other files,
+#    `obj.method()` resolves when `obj` is built by `Cls()` or annotated `Cls`
+#    in the calling function, and a function calling another several times
+#    yields a single edge.
 CURRENT_SCHEMA_VERSION = 5
 
 REQUIRED_TABLES = {
@@ -138,9 +141,21 @@ _TABLE_DDL = [
 ]
 
 
+# Lookups the indexer and tools run per symbol or per edge.
+_INDEX_DDL = [
+    "CREATE INDEX IF NOT EXISTS symbols_by_file"
+    " ON symbols (file_id, qualified_name)",
+    "CREATE INDEX IF NOT EXISTS symbols_by_qualified_name ON symbols (qualified_name)",
+    "CREATE INDEX IF NOT EXISTS relationships_by_source"
+    " ON relationships (source_entity_type, source_entity_id)",
+    "CREATE INDEX IF NOT EXISTS relationships_by_target"
+    " ON relationships (target_entity_type, target_entity_id)",
+]
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
-    for ddl in _TABLE_DDL:
+    for ddl in _TABLE_DDL + _INDEX_DDL:
         conn.execute(ddl)
     conn.execute(
         "INSERT OR IGNORE INTO index_metadata (key, value) VALUES ('schema_version', ?)",

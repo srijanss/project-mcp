@@ -456,11 +456,15 @@ def index_python_call_relationships(
     if module_name is None:
         return
 
+    seen = set()
     for call in calls:
         caller_id = symbol_ids.get(call["caller"])
         callee_id = symbol_ids.get(f"{module_name}.{call['callee']}")
         if caller_id is None or callee_id is None:
             continue
+        if (caller_id, callee_id) in seen:
+            continue
+        seen.add((caller_id, callee_id))
         conn.execute(
             """
             INSERT INTO relationships (
@@ -675,6 +679,142 @@ def _imported_modules(imports: list[dict]) -> dict[str, str]:
     return modules
 
 
+def _resolve_method_in_class_tree(
+    conn: sqlite3.Connection, class_id: int, method: str, visited: set[int]
+) -> int | None:
+    """Find `method` on a class or, depth-first, on its indexed base classes."""
+    if class_id in visited:
+        return None
+    visited.add(class_id)
+    method_row = conn.execute(
+        """
+        SELECT m.id FROM symbols c
+        JOIN symbols m ON m.file_id = c.file_id
+                      AND m.qualified_name = c.qualified_name || '.' || ?
+        WHERE c.id = ? AND m.kind = 'method'
+        """,
+        (method, class_id),
+    ).fetchone()
+    if method_row is not None:
+        return method_row[0]
+    for (base_id,) in conn.execute(
+        """
+        SELECT target_entity_id FROM relationships
+        WHERE relationship_type = 'inherits'
+          AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
+          AND source_entity_id = ?
+        ORDER BY id
+        """,
+        (class_id,),
+    ).fetchall():
+        found = _resolve_method_in_class_tree(conn, base_id, method, visited)
+        if found is not None:
+            return found
+    return None
+
+
+def _resolve_class_reference(
+    conn: sqlite3.Connection,
+    file_id: int,
+    class_name: str,
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> int | None:
+    """The class symbol a `Cls` / `mod.Cls` name refers to from this file."""
+    module_row = conn.execute(
+        "SELECT qualified_name FROM symbols WHERE file_id = ? AND kind = 'module'",
+        (file_id,),
+    ).fetchone()
+    if module_row is None:
+        return None
+    if "." not in class_name:
+        local_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?"
+            " AND kind = 'class'",
+            (file_id, f"{module_row[0]}.{class_name}"),
+        ).fetchone()
+        if local_row is not None:
+            return local_row[0]
+    imported_from = _imported_names(imports)
+    imported_modules = _imported_modules(imports)
+    if class_name in imported_from:
+        module, name = imported_from[class_name]
+    elif "." in class_name and class_name.rsplit(".", 1)[0] in imported_modules:
+        prefix, name = class_name.rsplit(".", 1)
+        module = imported_modules[prefix]
+    else:
+        return None
+    target_file_id = path_to_file_id.get(module.replace(".", "/") + ".py")
+    if target_file_id is None:
+        return None
+    row = conn.execute(
+        "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?"
+        " AND kind = 'class'",
+        (target_file_id, f"{module}.{name}"),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
+def _typed_call_edges(
+    conn: sqlite3.Connection,
+    file_id: int,
+    typed_calls: list[dict],
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> list[tuple[int, int]]:
+    """(caller id, method id) for `obj.method()` calls on objects of a known class."""
+    edges = []
+    for call in typed_calls:
+        caller_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, call["caller"]),
+        ).fetchone()
+        class_id = _resolve_class_reference(
+            conn, file_id, call["class"], imports, path_to_file_id
+        )
+        if caller_row is None or class_id is None:
+            continue
+        method_id = _resolve_method_in_class_tree(conn, class_id, call["method"], set())
+        if method_id is not None:
+            edges.append((caller_row[0], method_id))
+    return edges
+
+
+def index_python_typed_call_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    typed_calls: list[dict],
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    """Link `obj.method()` calls whose method is defined in this same file.
+
+    Methods in other files are linked by
+    index_python_cross_module_call_relationships.
+    """
+    local_ids = {
+        row[0]
+        for row in conn.execute("SELECT id FROM symbols WHERE file_id = ?", (file_id,))
+    }
+    seen = set()
+    for caller_id, callee_id in _typed_call_edges(
+        conn, file_id, typed_calls, imports, path_to_file_id
+    ):
+        if callee_id not in local_ids or (caller_id, callee_id) in seen:
+            continue
+        seen.add((caller_id, callee_id))
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
+            """,
+            (caller_id, callee_id),
+        )
+
+
 def index_python_cross_module_call_relationships(
     conn: sqlite3.Connection,
     file_id: int,
@@ -682,6 +822,8 @@ def index_python_cross_module_call_relationships(
     imports: list[dict],
     path_to_file_id: dict,
     attribute_calls: list[dict] = (),
+    self_calls: list[dict] = (),
+    typed_calls: list[dict] = (),
 ) -> None:
     conn.execute(
         """
@@ -707,7 +849,7 @@ def index_python_cross_module_call_relationships(
         if call["object"] in imported_modules
     )
 
-    seen = set()
+    edges = []
     for caller, module, name in targets:
         target_file_id = path_to_file_id.get(module.replace(".", "/") + ".py")
         if target_file_id is None:
@@ -722,9 +864,39 @@ def index_python_cross_module_call_relationships(
         ).fetchone()
         if caller_row is None or callee_row is None:
             continue
-        if (caller_row[0], callee_row[0]) in seen:
+        edges.append((caller_row[0], callee_row[0]))
+
+    # `self.method()` resolved to a base class in another file; same-file
+    # targets are linked by index_python_self_call_relationships instead.
+    file_symbol_ids = {
+        qualified_name: symbol_id
+        for symbol_id, qualified_name in conn.execute(
+            "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id DESC",
+            (file_id,),
+        )
+    }
+    local_ids = set(file_symbol_ids.values())
+    for call in self_calls:
+        caller_id = file_symbol_ids.get(call["caller"])
+        class_id = file_symbol_ids.get(call["class"])
+        if caller_id is None or class_id is None:
             continue
-        seen.add((caller_row[0], callee_row[0]))
+        callee_id = _resolve_method_in_class_tree(conn, class_id, call["method"], set())
+        if callee_id is not None and callee_id not in local_ids:
+            edges.append((caller_id, callee_id))
+    edges.extend(
+        (caller_id, callee_id)
+        for caller_id, callee_id in _typed_call_edges(
+            conn, file_id, typed_calls, imports, path_to_file_id
+        )
+        if callee_id not in local_ids
+    )
+
+    seen = set()
+    for caller_id, callee_id in edges:
+        if (caller_id, callee_id) in seen:
+            continue
+        seen.add((caller_id, callee_id))
         conn.execute(
             """
             INSERT INTO relationships (
@@ -733,7 +905,7 @@ def index_python_cross_module_call_relationships(
                 relationship_type, confidence
             ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
             """,
-            (caller_row[0], callee_row[0]),
+            (caller_id, callee_id),
         )
 
 
@@ -873,10 +1045,71 @@ def index_python_constant_reference_relationships(
         )
 
 
+def index_python_cross_file_inheritance_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    symbols: list[dict],
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    """Link classes to base classes imported from other project files.
+
+    Bases are resolved from `from x import Base` names and from `mod.Base`
+    where `mod` is an imported module.
+    """
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'inherits'
+          AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
+          AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
+          AND target_entity_id NOT IN (SELECT id FROM symbols WHERE file_id = ?)
+        """,
+        (file_id, file_id),
+    )
+
+    local_ids = {
+        row[0]
+        for row in conn.execute("SELECT id FROM symbols WHERE file_id = ?", (file_id,))
+    }
+    for class_symbol in symbols:
+        if class_symbol.get("kind") != "class":
+            continue
+        class_row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (file_id, class_symbol["qualified_name"]),
+        ).fetchone()
+        if class_row is None:
+            continue
+        for base in class_symbol["bases"]:
+            if not isinstance(base, str):
+                continue
+            base_id = _resolve_class_reference(
+                conn, file_id, base, imports, path_to_file_id
+            )
+            # Same-file bases are linked by index_python_inheritance_relationships.
+            if base_id is None or base_id in local_ids:
+                continue
+            conn.execute(
+                """
+                INSERT INTO relationships (
+                    source_entity_type, source_entity_id,
+                    target_entity_type, target_entity_id,
+                    relationship_type, confidence
+                ) VALUES ('symbol', ?, 'symbol', ?, 'inherits', 'high')
+                """,
+                (class_row[0], base_id),
+            )
+
+
 def _index_python_cross_file_edges(
     conn: sqlite3.Connection, file_id: int, analysis: dict, path_to_file_id: dict
 ) -> None:
-    """Recompute the edges from this file's symbols into other files."""
+    """Recompute the edges from this file's symbols into other files.
+
+    Expects cross-file inherits edges to be current (see
+    _index_python_cross_file_edges_for_files).
+    """
     index_python_cross_module_call_relationships(
         conn,
         file_id,
@@ -884,6 +1117,8 @@ def _index_python_cross_file_edges(
         analysis["imports"],
         path_to_file_id,
         analysis["attribute_calls"],
+        analysis["self_calls"],
+        analysis["typed_calls"],
     )
     index_python_cross_file_attribute_relationships(
         conn, file_id, analysis["foreign_accesses"]
@@ -891,6 +1126,22 @@ def _index_python_cross_file_edges(
     index_python_constant_reference_relationships(
         conn, file_id, analysis["name_loads"], analysis["imports"], path_to_file_id
     )
+
+
+def _index_python_cross_file_edges_for_files(
+    conn: sqlite3.Connection, analyses: list[tuple[int, dict]], path_to_file_id: dict
+) -> None:
+    """Recompute cross-file edges for several files, inheritance first.
+
+    `self.method()` resolution walks inherits edges through other files, so
+    every file's bases must be linked before any file's calls are.
+    """
+    for file_id, analysis in analyses:
+        index_python_cross_file_inheritance_relationships(
+            conn, file_id, analysis["symbols"], analysis["imports"], path_to_file_id
+        )
+    for file_id, analysis in analyses:
+        _index_python_cross_file_edges(conn, file_id, analysis, path_to_file_id)
 
 
 def refresh_cross_module_edges_for_importers(
@@ -923,14 +1174,14 @@ def refresh_cross_module_edges_for_importers(
         )
     }
     id_to_path = {file_id: path for path, file_id in path_to_file_id.items()}
-    for importer_id in importer_ids:
+    analyses = []
+    for importer_id in sorted(importer_ids):
         path = id_to_path.get(importer_id)
         if path is None or path in refreshed_paths:
             continue
         source = (Path(project_root) / path).read_text()
-        _index_python_cross_file_edges(
-            conn, importer_id, _analyze_python_file(path, source), path_to_file_id
-        )
+        analyses.append((importer_id, _analyze_python_file(path, source)))
+    _index_python_cross_file_edges_for_files(conn, analyses, path_to_file_id)
 
 
 def index_python_test_relationships(
@@ -1304,6 +1555,9 @@ def run_scan(
             index_python_self_call_relationships(
                 conn, file_id, analysis["self_calls"], symbols
             )
+            index_python_typed_call_relationships(
+                conn, file_id, analysis["typed_calls"], analysis["imports"], path_to_file_id
+            )
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]
             )
@@ -1335,6 +1589,7 @@ def run_scan(
     else:
         paths_to_refresh = list(changed_python_files)
 
+    cross_file_analyses = []
     for path in paths_to_refresh:
         file_id = path_to_file_id[path]
         if path in changed_python_files:
@@ -1345,8 +1600,9 @@ def run_scan(
         index_python_import_relationships(
             conn, file_id, analysis["imports"], path_to_file_id
         )
-        _index_python_cross_file_edges(conn, file_id, analysis, path_to_file_id)
+        cross_file_analyses.append((file_id, analysis))
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
+    _index_python_cross_file_edges_for_files(conn, cross_file_analyses, path_to_file_id)
 
     js_new_file_added = any(path not in existing_rows for path in changed_js_files)
     if js_new_file_added:
@@ -1578,6 +1834,9 @@ def refresh_index(
             index_python_self_call_relationships(
                 conn, file_id, analysis["self_calls"], symbols
             )
+            index_python_typed_call_relationships(
+                conn, file_id, analysis["typed_calls"], analysis["imports"], path_to_file_id
+            )
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]
             )
@@ -1605,6 +1864,7 @@ def refresh_index(
     else:
         paths_to_refresh = list(changed_python_files)
 
+    cross_file_analyses = []
     for path in paths_to_refresh:
         file_id = path_to_file_id[path]
         if path in changed_python_files:
@@ -1615,8 +1875,9 @@ def refresh_index(
         index_python_import_relationships(
             conn, file_id, analysis["imports"], path_to_file_id
         )
-        _index_python_cross_file_edges(conn, file_id, analysis, path_to_file_id)
+        cross_file_analyses.append((file_id, analysis))
         index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
+    _index_python_cross_file_edges_for_files(conn, cross_file_analyses, path_to_file_id)
 
     refresh_cross_module_edges_for_importers(
         conn, project_root, list(changed_python_files), paths_to_refresh, path_to_file_id

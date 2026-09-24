@@ -48,3 +48,26 @@ def test_init_schema_creates_git_facts_table_with_change_count_and_last_changed(
         row[1] for row in conn.execute("PRAGMA table_info(git_facts)").fetchall()
     }
     assert {"file_id", "change_count", "last_changed"} <= columns
+
+
+def test_init_schema_indexes_hot_symbol_and_relationship_lookups():
+    import pytest
+
+    conn = sqlite3.connect(":memory:")
+    init_schema(conn)
+    lookups = [
+        "SELECT id FROM symbols WHERE file_id = 1 AND qualified_name = 'a.b'",
+        "SELECT id FROM symbols WHERE file_id = 1",
+        "SELECT id FROM symbols WHERE qualified_name = 'a.b'",
+        "SELECT id FROM relationships"
+        " WHERE source_entity_type = 'symbol' AND source_entity_id = 1",
+        "SELECT id FROM relationships"
+        " WHERE target_entity_type = 'symbol' AND target_entity_id = 1",
+    ]
+
+    for query in lookups:
+        plan = " ".join(
+            row[-1] for row in conn.execute(f"EXPLAIN QUERY PLAN {query}")
+        )
+        if "USING" not in plan or "INDEX" not in plan:
+            pytest.fail(f"full scan for {query!r}: {plan}")

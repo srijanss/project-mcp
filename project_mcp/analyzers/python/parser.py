@@ -165,6 +165,54 @@ def _dotted_name(node: ast.expr) -> str | None:
     return None
 
 
+def _annotated_class(annotation: ast.expr | None) -> str | None:
+    """The class named by `Cls`, `mod.Cls` or `Cls | None`, if that's all it is."""
+    if (
+        isinstance(annotation, ast.BinOp)
+        and isinstance(annotation.op, ast.BitOr)
+        and isinstance(annotation.right, ast.Constant)
+        and annotation.right.value is None
+    ):
+        annotation = annotation.left
+    if annotation is None:
+        return None
+    return _dotted_name(annotation)
+
+
+def _constructed_class(value: ast.expr) -> str | None:
+    """The class in `Cls(...)` / `mod.Cls(...)`; CapWords names only."""
+    if not isinstance(value, ast.Call):
+        return None
+    name = _dotted_name(value.func)
+    if name is None or not name.rsplit(".", 1)[-1][:1].isupper():
+        return None
+    return name
+
+
+class _FunctionTypes:
+    """Receiver types of one function's local names, and its method calls."""
+
+    UNTYPED = None
+
+    def __init__(self):
+        self.types: dict[str, set] = {}
+        self.calls: list[tuple[str, str, str, int]] = []
+
+    def assign(self, name: str, class_name: str | None) -> None:
+        self.types.setdefault(name, set()).add(class_name)
+
+    def typed_calls(self) -> list[dict]:
+        resolved = []
+        for caller, name, method, line in self.calls:
+            classes = self.types.get(name, {self.UNTYPED})
+            if len(classes) == 1 and self.UNTYPED not in classes:
+                (class_name,) = classes
+                resolved.append(
+                    {"caller": caller, "class": class_name, "method": method, "line": line}
+                )
+        return resolved
+
+
 class _ReferenceCollector(_ScopeTrackingVisitor):
     """Collects every usage kind the indexer needs in a single tree walk."""
 
@@ -174,15 +222,52 @@ class _ReferenceCollector(_ScopeTrackingVisitor):
         self.attribute_calls: list[dict] = []
         self.self_references: list[dict] = []
         self.self_calls: list[dict] = []
+        self.typed_calls: list[dict] = []
         self.foreign_accesses: list[dict] = []
         self.name_loads: list[dict] = []
         # `self.x` nodes that are called; they become self_calls, not references.
         self._called_self_attributes: set[int] = set()
+        self._function_types: list[_FunctionTypes] = []
+        # Name targets of `x = Cls()`, already typed by visit_Assign.
+        self._typed_targets: set[int] = set()
+
+    def visit_FunctionDef(self, node):
+        function_types = _FunctionTypes()
+        arguments = node.args
+        for arg in [*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs]:
+            function_types.assign(arg.arg, _annotated_class(arg.annotation))
+        # *args / **kwargs are a tuple and a dict, whatever their annotation.
+        for arg in filter(None, [arguments.vararg, arguments.kwarg]):
+            function_types.assign(arg.arg, _FunctionTypes.UNTYPED)
+        self._function_types.append(function_types)
+        super().visit_FunctionDef(node)
+        self._function_types.pop()
+        self.typed_calls.extend(function_types.typed_calls())
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Assign(self, node):
+        if self._function_types and len(node.targets) == 1:
+            target = node.targets[0]
+            class_name = _constructed_class(node.value)
+            if isinstance(target, ast.Name) and class_name is not None:
+                self._function_types[-1].assign(target.id, class_name)
+                self._typed_targets.add(id(target))
+        self.generic_visit(node)
 
     def visit_Call(self, node):
         if self.callers:
             caller = self.callers[-1]
             func = node.func
+            if (
+                self._function_types
+                and isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id != "self"
+            ):
+                self._function_types[-1].calls.append(
+                    (caller, func.value.id, func.attr, node.lineno)
+                )
             if (
                 isinstance(func, ast.Attribute)
                 and isinstance(func.value, ast.Name)
@@ -239,6 +324,12 @@ class _ReferenceCollector(_ScopeTrackingVisitor):
         self.generic_visit(node)
 
     def visit_Name(self, node):
+        if (
+            self._function_types
+            and not isinstance(node.ctx, ast.Load)
+            and id(node) not in self._typed_targets
+        ):
+            self._function_types[-1].assign(node.id, _FunctionTypes.UNTYPED)
         if self.callers and isinstance(node.ctx, ast.Load):
             self.name_loads.append(
                 {"referrer": self.callers[-1], "name": node.id, "line": node.lineno}
@@ -271,6 +362,7 @@ def analyze_python_source(path: str, source: str) -> dict:
             "attribute_calls": [],
             "self_references": [],
             "self_calls": [],
+            "typed_calls": [],
             "foreign_accesses": [],
             "name_loads": [],
         }
@@ -282,6 +374,7 @@ def analyze_python_source(path: str, source: str) -> dict:
         "attribute_calls": collector.attribute_calls,
         "self_references": collector.self_references,
         "self_calls": collector.self_calls,
+        "typed_calls": collector.typed_calls,
         "foreign_accesses": collector.foreign_accesses,
         "name_loads": collector.name_loads,
     }
@@ -301,6 +394,10 @@ def extract_self_attribute_references(path: str, source: str) -> list[dict]:
 
 def extract_self_method_calls(path: str, source: str) -> list[dict]:
     return _collect(path, _parse_or_none(path, source)).self_calls
+
+
+def extract_typed_method_calls(path: str, source: str) -> list[dict]:
+    return _collect(path, _parse_or_none(path, source)).typed_calls
 
 
 def extract_foreign_attribute_accesses(path: str, source: str) -> list[dict]:
