@@ -98,14 +98,15 @@ def extract_imports(path: str, source: str) -> list[dict]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                imports.append(
-                    {
-                        "module": alias.name,
-                        "names": [],
-                        "level": 0,
-                        "line": node.lineno,
-                    }
-                )
+                record = {
+                    "module": alias.name,
+                    "names": [],
+                    "level": 0,
+                    "line": node.lineno,
+                }
+                if alias.asname:
+                    record["aliases"] = {alias.asname: alias.name}
+                imports.append(record)
         elif isinstance(node, ast.ImportFrom):
             names = [alias.name for alias in node.names]
             record = {
@@ -116,6 +117,9 @@ def extract_imports(path: str, source: str) -> list[dict]:
             }
             if names == ["*"]:
                 record["dynamic"] = True
+            aliases = {alias.asname: alias.name for alias in node.names if alias.asname}
+            if aliases:
+                record["aliases"] = aliases
             imports.append(record)
 
     return imports
@@ -170,6 +174,34 @@ def extract_static_calls(path: str, source: str) -> list[dict]:
             self.generic_visit(node)
 
     return _walk_scopes(path, source, CallVisitor, [])
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        prefix = _dotted_name(node.value)
+        return f"{prefix}.{node.attr}" if prefix else None
+    return None
+
+
+def extract_attribute_calls(path: str, source: str) -> list[dict]:
+    class AttributeCallVisitor(_ScopeTrackingVisitor):
+        def visit_Call(self, node):
+            if self.callers and isinstance(node.func, ast.Attribute):
+                obj = _dotted_name(node.func.value)
+                if obj is not None:
+                    self.results.append(
+                        {
+                            "caller": self.callers[-1],
+                            "object": obj,
+                            "attribute": node.func.attr,
+                            "line": node.lineno,
+                        }
+                    )
+            self.generic_visit(node)
+
+    return _walk_scopes(path, source, AttributeCallVisitor, [])
 
 
 def extract_self_attribute_references(path: str, source: str) -> list[dict]:

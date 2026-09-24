@@ -1182,6 +1182,96 @@ def test_run_scan_persists_call_relationship_across_modules_via_from_import(tmp_
     assert relationship == ("calls", "high")
 
 
+def test_run_scan_resolves_calls_through_imported_module_attributes(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "helpers.py").write_text(
+        "def helper():\n"
+        "    return 1\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "import app.helpers\n"
+        "import app.helpers as h\n"
+        "from app import helpers\n"
+        "\n"
+        "\n"
+        "def by_dotted_path():\n"
+        "    return app.helpers.helper()\n"
+        "\n"
+        "\n"
+        "def by_module_alias():\n"
+        "    return h.helper()\n"
+        "\n"
+        "\n"
+        "def by_from_imported_module():\n"
+        "    return helpers.helper()\n"
+        "\n"
+        "\n"
+        "def by_unknown_object(thing):\n"
+        "    return thing.helper()\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    callers = conn.execute(
+        """
+        SELECT s.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND t.qualified_name = 'app.helpers.helper'
+        ORDER BY s.qualified_name
+        """
+    ).fetchall()
+
+    assert callers == [
+        ("app.service.by_dotted_path", "high"),
+        ("app.service.by_from_imported_module", "high"),
+        ("app.service.by_module_alias", "high"),
+    ]
+
+
+def test_run_scan_resolves_aliased_from_imports_for_calls_and_constants(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "helpers.py").write_text(
+        "MAX_RETRIES = 3\n"
+        "\n"
+        "\n"
+        "def helper():\n"
+        "    return 1\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "from app.helpers import helper as do_help, MAX_RETRIES as RETRIES\n"
+        "\n"
+        "\n"
+        "def run():\n"
+        "    return do_help(), RETRIES\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    edges = conn.execute(
+        """
+        SELECT t.qualified_name, r.relationship_type, r.confidence
+        FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND s.qualified_name = 'app.service.run'
+        ORDER BY t.qualified_name
+        """
+    ).fetchall()
+
+    assert edges == [
+        ("app.helpers.MAX_RETRIES", "references", "high"),
+        ("app.helpers.helper", "calls", "high"),
+    ]
+
+
 def test_run_scan_persists_low_confidence_reference_to_field_in_imported_module(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)

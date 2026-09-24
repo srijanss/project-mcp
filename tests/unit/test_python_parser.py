@@ -1,4 +1,5 @@
 from project_mcp.analyzers.python.parser import (
+    extract_attribute_calls,
     extract_foreign_attribute_accesses,
     extract_imports,
     extract_name_loads,
@@ -203,15 +204,42 @@ def test_extract_imports_extracts_absolute_and_relative_imports():
     by_line = {imp["line"]: imp for imp in imports}
 
     assert by_line[1] == {"module": "os", "names": [], "level": 0, "line": 1}
-    assert by_line[2] == {"module": "json", "names": [], "level": 0, "line": 2}
+    assert by_line[2] == {
+        "module": "json",
+        "names": [],
+        "level": 0,
+        "line": 2,
+        "aliases": {"j": "json"},
+    }
     assert by_line[3] == {
         "module": "app.models",
         "names": ["Widget", "Gadget"],
         "level": 0,
         "line": 3,
+        "aliases": {"G": "Gadget"},
     }
     assert by_line[4] == {"module": None, "names": ["utils"], "level": 1, "line": 4}
     assert by_line[5] == {"module": "pkg", "names": ["helper"], "level": 2, "line": 5}
+
+
+def test_extract_imports_records_aliases_for_from_imports():
+    source = (
+        "from app.helpers import helper as do_help, MAX_RETRIES\n"
+        "from app.models import Widget\n"
+    )
+
+    imports = extract_imports("app/service.py", source)
+
+    assert imports == [
+        {
+            "module": "app.helpers",
+            "names": ["helper", "MAX_RETRIES"],
+            "level": 0,
+            "line": 1,
+            "aliases": {"do_help": "helper"},
+        },
+        {"module": "app.models", "names": ["Widget"], "level": 0, "line": 2},
+    ]
 
 
 def test_parse_python_source_extracts_class_bases():
@@ -278,6 +306,37 @@ def test_extract_static_calls_returns_same_module_function_calls():
             "callee": "helper",
             "line": 6,
         }
+    ]
+
+
+def test_extract_attribute_calls_records_dotted_object_and_attribute():
+    source = (
+        "import app.helpers\n"
+        "\n"
+        "\n"
+        "def run(thing):\n"
+        "    app.helpers.helper()\n"
+        "    thing.save()\n"
+        "    make().go()\n"
+        "    return plain()\n"
+        "\n"
+        "\n"
+        "app.helpers.setup()\n"
+    )
+
+    assert extract_attribute_calls("app/service.py", source) == [
+        {
+            "caller": "app.service.run",
+            "object": "app.helpers",
+            "attribute": "helper",
+            "line": 5,
+        },
+        {
+            "caller": "app.service.run",
+            "object": "thing",
+            "attribute": "save",
+            "line": 6,
+        },
     ]
 
 

@@ -30,6 +30,7 @@ from project_mcp.analyzers.rust.parser import (
     parse_rust_source,
 )
 from project_mcp.analyzers.python.parser import (
+    extract_attribute_calls,
     extract_foreign_attribute_accesses,
     extract_imports,
     extract_name_loads,
@@ -553,12 +554,51 @@ def index_python_import_relationships(
         )
 
 
+def _imported_names(imports: list[dict]) -> dict[str, tuple[str, str]]:
+    """Map each name bound by an absolute `from` import to (module, original name)."""
+    imported: dict[str, tuple[str, str]] = {}
+    for imp in imports:
+        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
+            continue
+        if not imp.get("names"):
+            continue  # plain `import x`: binds a module, not a name in it
+        aliased = set(imp.get("aliases", {}).values())
+        for name in imp["names"]:
+            if name not in aliased:
+                imported[name] = (imp["module"], name)
+        for local_name, name in imp.get("aliases", {}).items():
+            imported[local_name] = (imp["module"], name)
+    return imported
+
+
+def _imported_modules(imports: list[dict]) -> dict[str, str]:
+    """Map each local name that may refer to a module to that module's dotted name.
+
+    `from pkg import mod` names are candidates only; they resolve when a
+    matching `pkg/mod.py` file exists.
+    """
+    modules: dict[str, str] = {}
+    for imp in imports:
+        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
+            continue
+        if not imp.get("names"):
+            aliases = imp.get("aliases")
+            if aliases:
+                modules.update(aliases)
+            else:
+                modules[imp["module"]] = imp["module"]
+    for local_name, (module, name) in _imported_names(imports).items():
+        modules.setdefault(local_name, f"{module}.{name}")
+    return modules
+
+
 def index_python_cross_module_call_relationships(
     conn: sqlite3.Connection,
     file_id: int,
     calls: list[dict],
     imports: list[dict],
     path_to_file_id: dict,
+    attribute_calls: list[dict] = (),
 ) -> None:
     conn.execute(
         """
@@ -571,28 +611,31 @@ def index_python_cross_module_call_relationships(
         (file_id, file_id),
     )
 
-    imported_from: dict[str, str] = {}
-    for imp in imports:
-        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
-            continue
-        for name in imp.get("names", []):
-            imported_from[name] = imp["module"]
+    imported_from = _imported_names(imports)
+    imported_modules = _imported_modules(imports)
+    targets = [
+        (call["caller"], *imported_from[call["callee"]])
+        for call in calls
+        if call["callee"] in imported_from
+    ]
+    targets.extend(
+        (call["caller"], imported_modules[call["object"]], call["attribute"])
+        for call in attribute_calls
+        if call["object"] in imported_modules
+    )
 
     seen = set()
-    for call in calls:
-        module = imported_from.get(call["callee"])
-        if module is None:
-            continue
+    for caller, module, name in targets:
         target_file_id = path_to_file_id.get(module.replace(".", "/") + ".py")
         if target_file_id is None:
             continue
         caller_row = conn.execute(
             "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
-            (file_id, call["caller"]),
+            (file_id, caller),
         ).fetchone()
         callee_row = conn.execute(
             "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
-            (target_file_id, f"{module}.{call['callee']}"),
+            (target_file_id, f"{module}.{name}"),
         ).fetchone()
         if caller_row is None or callee_row is None:
             continue
@@ -714,20 +757,17 @@ def index_python_constant_reference_relationships(
         if kind == "constant":
             constant_ids.setdefault(name, symbol_id)
 
-    for imp in imports:
-        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
-            continue
-        target_file_id = path_to_file_id.get(imp["module"].replace(".", "/") + ".py")
+    for local_name, (module, name) in _imported_names(imports).items():
+        target_file_id = path_to_file_id.get(module.replace(".", "/") + ".py")
         if target_file_id is None:
             continue
-        for name in imp.get("names", []):
-            row = conn.execute(
-                "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ? "
-                "AND kind = 'constant'",
-                (target_file_id, f"{imp['module']}.{name}"),
-            ).fetchone()
-            if row is not None:
-                constant_ids[name] = row[0]
+        row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ? "
+            "AND kind = 'constant'",
+            (target_file_id, f"{module}.{name}"),
+        ).fetchone()
+        if row is not None:
+            constant_ids[local_name] = row[0]
 
     seen = set()
     for load in loads:
@@ -795,6 +835,7 @@ def refresh_cross_module_edges_for_importers(
             extract_static_calls(path, source),
             imports,
             path_to_file_id,
+            extract_attribute_calls(path, source),
         )
         index_python_cross_file_attribute_relationships(
             conn, importer_id, extract_foreign_attribute_accesses(path, source)
@@ -1224,6 +1265,7 @@ def run_scan(
             extract_static_calls(path, source),
             imports,
             path_to_file_id,
+            extract_attribute_calls(path, source),
         )
         index_python_cross_file_attribute_relationships(
             conn, file_id, extract_foreign_attribute_accesses(path, source)
@@ -1506,6 +1548,7 @@ def refresh_index(
             extract_static_calls(path, source),
             imports,
             path_to_file_id,
+            extract_attribute_calls(path, source),
         )
         index_python_cross_file_attribute_relationships(
             conn, file_id, extract_foreign_attribute_accesses(path, source)
