@@ -692,6 +692,7 @@ in v1:
   MVP 14 token-efficiency benchmark
   MVP 15 downstream MCP integration contracts
   MVP 16 README and handoff documentation
+  MVP 17 language/framework-agnostic core via plugins (post-v1 refactor)
 
 deferred post-v1, to be added as adapters (no core schema change needed):
   MVP 4  JavaScript/TypeScript analyzer
@@ -1635,6 +1636,202 @@ A developer with no prior design context can:
 6. rebuild the index safely
 
 using only the README.
+
+---
+
+# MVP 17 — Language- and framework-agnostic core via plugins
+
+**Depends on:** MVP 3–8 as implemented (Python, JS/TS, Rust analyzers,
+dependency indexing, Django enrichment, test relationships).
+
+## Goal
+
+Make the core language- and framework-agnostic. Anything specific to a
+language or framework lives in a plugin that can be added, removed, or
+disabled without touching core code.
+
+## Problem
+
+Language and framework logic is hardcoded in the core:
+
+```text
+indexer.py                   per-language parser dispatch (duplicated in
+                             run_scan and refresh_index), per-language import
+                             re-linking, Python call/inheritance/constant
+                             linking, pytest links, dependency calls, Django
+                             enrichment step
+analyzers/generic/filesystem.py   extension -> language map, test-file rules
+tools/dependencies.py        pyproject.toml / Cargo.toml / package.json readers
+tools/project.py             hardcoded manifest file names
+main_stdio.py                list_dependencies is Python-only
+tools/context_packs.py       ".py" path -> module name conversion
+```
+
+Adding a language or framework currently means editing several places in
+two functions.
+
+## Scope
+
+### Core (stays language-neutral)
+
+```text
+file discovery (no built-in language knowledge)
+plugin registry and loader
+one generic scan/refresh loop
+database and normalized schema (unchanged)
+git, architecture, and legacy analysis
+MCP tools and context packs
+```
+
+The core only handles common-format data: symbols, relationships, test
+links, and dependencies.
+
+### Language plugin interface
+
+A language plugin owns:
+
+```text
+name and file extensions
+test-file classification rules
+analyze(path, source) -> FileAnalysis   (symbols, imports, calls, references)
+resolve_import(importer, module, known_paths) -> candidate paths
+cross-file linking (optional; e.g. typed-receiver calls, inheritance)
+test relationship evidence (optional)
+manifest and dependency reading
+path -> module name mapping
+```
+
+### Framework plugin interface
+
+A framework plugin owns:
+
+```text
+name and the language plugin it depends on
+detect(project) -> bool
+enrich(symbols) -> extra symbol metadata / edges
+```
+
+### Loading and configuration
+
+```text
+built-in plugins registered by default
+external plugins via the `project_mcp.plugins` entry-point group
+mcpctl.toml: plugins.enabled / plugins.disabled per project
+```
+
+A plugin that fails to load or raises during analysis is reported and
+skipped; it must not abort the scan.
+
+### Behaviour with no plugins
+
+Absent a `plugins` config section, all built-in plugins are enabled. Zero
+active plugins happens only by explicit configuration
+(`plugins.enabled = []`) and is a supported, non-error state.
+
+```text
+still works (core only):
+  file discovery: path, size, mtime for every file (language is NULL)
+  git facts: churn, last change, change coupling
+  architecture docs and ADR ingestion
+  legacy signals that need no language knowledge
+  MCP tools run and return file-level context
+
+not available (owned by plugins):
+  symbols, so find_symbol / get_symbol_context return nothing
+  import, call, inheritance, and reference edges
+  test links and test-file classification (files are plain source/config)
+  declared dependencies
+  framework enrichment
+```
+
+Rules:
+
+- the scan completes with a warning, not an error, e.g.
+  `no language plugins active; indexed N files at file level only`
+- a file with no matching plugin gets `language = NULL`, exactly like an
+  unknown extension
+- a framework plugin whose language plugin is disabled is skipped with a
+  warning
+
+### Signalling coverage to the LLM
+
+Principle: absence of data must be distinguishable from absence of
+relationships. The same applies to partial coverage (e.g. a Rust file when
+only the Python plugin is enabled), not only to zero plugins.
+
+- every tool response carries a `coverage` block scoped to the files or
+  symbols in the query:
+
+  ```json
+  "coverage": {
+    "active_plugins": ["python", "django"],
+    "file_language": "rust",
+    "analyzed": false,
+    "missing_plugin": "rust",
+    "note": "No plugin handles 'rust'. Symbols and relationships are unavailable for this file; results are file-level only."
+  }
+  ```
+
+  For fully covered queries it is minimal (`analyzed: true`, no note).
+- an empty result says why: `"reason": "not_analyzed"` (no plugin ran) is
+  distinct from `"reason": "none_found"` (analyzed, nothing there)
+- relationships in unanalyzed files are never reported as absent; where a
+  confidence value is required it is `unknown`
+- `get_project_overview` lists the active plugins and the languages present
+  in the project that no active plugin covers, with file counts, e.g.
+  `uncovered_languages: {"rust": 42}`
+- `get_index_status` reports the active plugin list and any plugins that
+  failed to load, with the error
+- the MCP server `instructions` string is generated from the active
+  plugins, stating which languages are analyzed and that empty relationship
+  results for other languages mean unknown, not none
+- missing-plugin notes are written to be relayed: the `note` text names the
+  missing plugin and how to enable it (`plugins.enabled` in `mcpctl.toml`
+  or installing the package), and the server instructions tell the LLM to
+  tell the user when a query touches uncovered files, so the user knows why
+  results are limited instead of the LLM treating them as complete
+
+### Migration order
+
+One step at a time; tests pass and scan output is unchanged after each step.
+
+```text
+1. plugin interface and registry; move Rust
+2. move JS/TS; language map and test-file rules come from plugins
+3. move Python (may be split into several steps)
+4. move dependency/manifest reading; list_dependencies works per ecosystem
+5. move Django to a framework plugin; add enable/disable config
+6. clean-up: core imports nothing from analyzers/python|javascript|rust
+```
+
+Out of scope: tree-sitter as a shared parser base. It can follow once the
+plugin boundary is in place.
+
+## Acceptance criteria
+
+- core has no `language == "<name>"` branches and no imports from
+  language- or framework-specific plugin packages
+- a test fails if core imports a language or framework plugin module
+- scan and refresh results for the existing Python, JS/TS, and Rust
+  fixtures are unchanged
+- disabling a plugin in `mcpctl.toml` removes its files' analysis without
+  breaking the rest of the index
+- adding a new language requires only a new plugin, with no core edits
+- `list_dependencies` and manifest detection work for every enabled
+  ecosystem
+- a failing plugin is reported and does not abort the scan
+- with `plugins.enabled = []`, the scan completes with a warning and
+  indexes files at file level only (`language = NULL`), and git,
+  architecture, and file-level tools still work
+- a framework plugin without its language plugin is skipped with a warning
+- every tool response includes `coverage`; querying a file no active plugin
+  covers returns `analyzed: false` and names the missing plugin
+- empty results distinguish `not_analyzed` from `none_found`; relationships
+  are never reported as absent for unanalyzed files
+- `get_project_overview` lists uncovered languages with file counts
+- the server `instructions` are generated from the active plugins and tell
+  the LLM to inform the user when a query touches files with no active
+  plugin
 
 ---
 
