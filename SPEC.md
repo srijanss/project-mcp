@@ -1675,7 +1675,8 @@ two functions.
 ### Core (stays language-neutral)
 
 ```text
-file discovery (no built-in language knowledge)
+file discovery (no built-in language knowledge; ignores, generated files,
+  binaries, size limits, and excluded directories still apply)
 plugin registry and loader
 one generic scan/refresh loop
 database and normalized schema (unchanged)
@@ -1686,12 +1687,34 @@ MCP tools and context packs
 The core only handles common-format data: symbols, relationships, test
 links, and dependencies.
 
-### Language plugin interface
+### Descriptors and analyzers
 
-A language plugin owns:
+Each plugin has two parts:
 
 ```text
-name and file extensions
+descriptor  static data, no analysis code: plugin name, version,
+            api_version, language name, file extensions, test-path hints,
+            enable/install guidance
+analyzer    the code that parses and links (everything below)
+```
+
+Descriptors of every installed plugin load even when the plugin is
+disabled. Core uses them to label files (`language = "rust"`) and to report
+coverage, so a disabled Rust plugin still yields `language: "rust"` with
+`analyzed: false`. Analyzers load only for enabled plugins.
+
+A file whose extension matches no installed descriptor keeps
+`language = NULL`. Core may ship a small extension -> plugin-name data table
+(data only, no logic) so notes can suggest a plugin that is not installed.
+
+Each plugin declares an `api_version`; a plugin built for an unsupported
+version is treated as failed to load.
+
+### Language plugin interface
+
+A language plugin's analyzer owns:
+
+```text
 test-file classification rules
 analyze(path, source) -> FileAnalysis   (symbols, imports, calls, references)
 resolve_import(importer, module, known_paths) -> candidate paths
@@ -1719,8 +1742,20 @@ external plugins via the `project_mcp.plugins` entry-point group
 mcpctl.toml: plugins.enabled / plugins.disabled per project
 ```
 
-A plugin that fails to load or raises during analysis is reported and
-skipped; it must not abort the scan.
+Rules:
+
+- **Failure scope.** A plugin that fails to load is disabled as a whole and
+  reported. A plugin that raises on one file skips that file's output from
+  that plugin (recorded as `failed` in coverage, with the error); the
+  plugin's output for other files is kept. Neither aborts the scan.
+- **Conflicts.** At most one language plugin may claim a file extension. Two
+  enabled language plugins claiming the same extension is a config error
+  reported at startup. Framework plugins may stack on one language.
+- **Framework ordering.** Framework plugins run in registration order.
+  Ordering and inter-framework dependencies are added when a second
+  framework plugin needs them.
+- **Freshness.** The index freshness check includes each active plugin's
+  name, version, and config hash. A change re-indexes that plugin's files.
 
 ### Behaviour with no plugins
 
@@ -1730,7 +1765,8 @@ active plugins happens only by explicit configuration
 
 ```text
 still works (core only):
-  file discovery: path, size, mtime for every file (language is NULL)
+  file discovery: path, size, mtime for every file; language labels from
+    installed descriptors (NULL for unknown extensions)
   git facts: churn, last change, change coupling
   architecture docs and ADR ingestion
   legacy signals that need no language knowledge
@@ -1748,8 +1784,9 @@ Rules:
 
 - the scan completes with a warning, not an error, e.g.
   `no language plugins active; indexed N files at file level only`
-- a file with no matching plugin gets `language = NULL`, exactly like an
-  unknown extension
+- a file whose language has an installed but disabled plugin keeps its
+  language label and is `analyzed: false`; a file matching no installed
+  descriptor gets `language = NULL`
 - a framework plugin whose language plugin is disabled is skipped with a
   warning
 
@@ -1760,19 +1797,27 @@ relationships. The same applies to partial coverage (e.g. a Rust file when
 only the Python plugin is enabled), not only to zero plugins.
 
 - every tool response carries a `coverage` block scoped to the files or
-  symbols in the query:
+  symbols in the query, with one entry per language involved plus an
+  aggregate status (`full`, `partial`, `none`):
 
   ```json
   "coverage": {
+    "status": "partial",
     "active_plugins": ["python", "django"],
-    "file_language": "rust",
-    "analyzed": false,
-    "missing_plugin": "rust",
-    "note": "No plugin handles 'rust'. Symbols and relationships are unavailable for this file; results are file-level only."
+    "languages": {
+      "python": {"analyzed": true},
+      "rust": {
+        "analyzed": false,
+        "reason": "plugin_disabled",
+        "note": "Rust plugin is installed but disabled. Symbols and relationships are unavailable for these files; results are file-level only. Enable it via plugins.enabled in mcpctl.toml."
+      }
+    }
   }
   ```
 
-  For fully covered queries it is minimal (`analyzed: true`, no note).
+  Per-language `reason` is one of `plugin_disabled`, `plugin_not_installed`,
+  `plugin_failed`, or `file_failed`. For fully covered queries the block is
+  minimal (`status: "full"`, no notes).
 - an empty result says why: `"reason": "not_analyzed"` (no plugin ran) is
   distinct from `"reason": "none_found"` (analyzed, nothing there)
 - relationships in unanalyzed files are never reported as absent; where a
@@ -1796,6 +1841,9 @@ only the Python plugin is enabled), not only to zero plugins.
 One step at a time; tests pass and scan output is unchanged after each step.
 
 ```text
+0. golden fixtures: snapshot scan and refresh output (symbols,
+   relationships, tests, dependencies) for the Python, JS/TS, and Rust
+   fixtures before any code moves; later steps must match them
 1. plugin interface and registry; move Rust
 2. move JS/TS; language map and test-file rules come from plugins
 3. move Python (may be split into several steps)
@@ -1813,7 +1861,7 @@ plugin boundary is in place.
   language- or framework-specific plugin packages
 - a test fails if core imports a language or framework plugin module
 - scan and refresh results for the existing Python, JS/TS, and Rust
-  fixtures are unchanged
+  fixtures match golden snapshots captured before the migration
 - disabling a plugin in `mcpctl.toml` removes its files' analysis without
   breaking the rest of the index
 - adding a new language requires only a new plugin, with no core edits
@@ -1821,11 +1869,22 @@ plugin boundary is in place.
   ecosystem
 - a failing plugin is reported and does not abort the scan
 - with `plugins.enabled = []`, the scan completes with a warning and
-  indexes files at file level only (`language = NULL`), and git,
-  architecture, and file-level tools still work
+  indexes files at file level only, keeping language labels from installed
+  descriptors, and git, architecture, and file-level tools still work
+- a disabled plugin's files keep their language label and report
+  `analyzed: false`; files matching no descriptor have `language = NULL`
+- two enabled language plugins claiming one extension is a startup config
+  error
+- an exception on one file skips only that file's output from that plugin
+  and is recorded as `file_failed`; a plugin that fails to load is disabled
+  and reported
+- changing a plugin's version or config re-indexes that plugin's files
+- discovery still honours ignores, generated files, binaries, and size
+  limits with no plugins active
 - a framework plugin without its language plugin is skipped with a warning
-- every tool response includes `coverage`; querying a file no active plugin
-  covers returns `analyzed: false` and names the missing plugin
+- every tool response includes `coverage` with per-language entries and an
+  aggregate status; querying a file no active plugin covers returns
+  `analyzed: false` with a `reason` and names the missing plugin
 - empty results distinguish `not_analyzed` from `none_found`; relationships
   are never reported as absent for unanalyzed files
 - `get_project_overview` lists uncovered languages with file counts
