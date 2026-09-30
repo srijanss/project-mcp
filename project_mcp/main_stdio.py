@@ -69,14 +69,26 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
     ]
 
 
+def _size(value) -> int:
+    return len(json.dumps(value, default=str))
+
+
 def _cap_output(result):
-    """Trim an oversized list so clients don't overflow into a saved file."""
-    if not isinstance(result, list) or len(json.dumps(result)) <= MAX_TOOL_OUTPUT_CHARS:
+    """Trim oversized results so clients don't overflow into a saved file."""
+    if _size(result) <= MAX_TOOL_OUTPUT_CHARS:
         return result
+    if isinstance(result, list):
+        return _cap_list(result)
+    if isinstance(result, dict):
+        return _cap_dict(result)
+    return result
+
+
+def _cap_list(result: list) -> dict:
     low, high = 0, len(result)  # largest prefix that fits, by bisection
     while low < high:
         mid = (low + high + 1) // 2
-        if len(json.dumps(result[:mid])) <= MAX_TOOL_OUTPUT_CHARS:
+        if _size(result[:mid]) <= MAX_TOOL_OUTPUT_CHARS:
             low = mid
         else:
             high = mid - 1
@@ -87,6 +99,20 @@ def _cap_output(result):
         "returned": len(kept),
         "items": kept,
     }
+
+
+def _cap_dict(result: dict) -> dict:
+    trimmed: dict[str, dict] = {}
+    capped = {**result, "truncated": True, "truncated_fields": trimmed}
+    while _size(capped) > MAX_TOOL_OUTPUT_CHARS:
+        lists = [k for k, v in capped.items() if isinstance(v, list) and v]
+        if not lists:
+            break
+        name = max(lists, key=lambda k: _size(capped[k]))
+        total = trimmed.get(name, {}).get("total", len(capped[name]))
+        capped[name] = capped[name][: len(capped[name]) // 2]
+        trimmed[name] = {"total": total, "returned": len(capped[name])}
+    return capped if trimmed else result
 
 
 def _guard_tools(server: MCPServer) -> None:

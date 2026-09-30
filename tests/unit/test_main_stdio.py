@@ -387,6 +387,36 @@ def test_oversized_list_result_is_truncated_and_says_so(tmp_path, monkeypatch):
     assert len(json.dumps(payload["items"])) <= MAX_TOOL_OUTPUT_CHARS
 
 
+def test_oversized_dict_result_trims_its_longest_list_and_says_so(tmp_path, monkeypatch):
+    import json
+
+    from project_mcp.main_stdio import MAX_TOOL_OUTPUT_CHARS
+
+    pack = {
+        "target": "app.models",
+        "dependents": [{"source": f"app.mod_{i}"} for i in range(5000)],
+        "related_tests": [{"test": "tests/test_models.py"}],
+    }
+    monkeypatch.setattr(
+        "project_mcp.main_stdio.get_context_for_symbol", lambda *a, **k: pack
+    )
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_context_for_symbol", {"qualified_name": "app.models"})
+    )
+
+    payload = json.loads(result.content[0].text)
+    assert len(json.dumps(payload)) <= MAX_TOOL_OUTPUT_CHARS
+    assert payload["truncated"] is True
+    assert payload["truncated_fields"]["dependents"]["total"] == 5000
+    assert payload["truncated_fields"]["dependents"]["returned"] == len(
+        payload["dependents"]
+    )
+    assert payload["related_tests"] == [{"test": "tests/test_models.py"}]
+    assert payload["target"] == "app.models"
+
+
 def test_small_list_result_is_returned_unchanged(tmp_path, monkeypatch):
     rows = [{"name": "symbol_1", "file": "app/models.py"}]
     monkeypatch.setattr("project_mcp.main_stdio.find_symbol", lambda *a, **k: rows)
