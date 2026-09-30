@@ -1011,11 +1011,18 @@ def index_python_cross_module_call_relationships(
 
 
 def index_python_cross_file_attribute_relationships(
-    conn: sqlite3.Connection, file_id: int, accesses: list[dict]
+    conn: sqlite3.Connection,
+    file_id: int,
+    accesses: list[dict],
+    imports: list[dict],
+    path_to_file_id: dict,
 ) -> None:
     """Link `obj.<name>` accesses to a field defined in a module this file imports.
 
-    Types are not inferred, so these edges are heuristic and low confidence.
+    `Cls.<name>` on a class this file can resolve links only to that class's own
+    field, or to nothing when it has none (e.g. a framework-provided manager).
+    Other objects are untyped, so they match a uniquely named field instead.
+    These edges are heuristic and low confidence.
     """
     conn.execute(
         """
@@ -1063,10 +1070,38 @@ def index_python_cross_file_attribute_relationships(
     ):
         symbol_ids.setdefault(qualified_name, symbol_id)
 
+    class_ids: dict[str, int | None] = {}
+
+    def own_field(owner: str, attribute: str) -> tuple[bool, int | None]:
+        """Whether `owner` names a class, and that class's own field if it has one."""
+        if owner not in class_ids:
+            class_ids[owner] = _resolve_class_reference(
+                conn, file_id, owner, imports, path_to_file_id
+            )
+        if class_ids[owner] is None:
+            return False, None
+        row = conn.execute(
+            """
+            SELECT f.id FROM symbols f
+            WHERE f.kind = 'field' AND f.file_id != ?
+              AND f.qualified_name = (
+                  SELECT qualified_name FROM symbols WHERE id = ?
+              ) || '.' || ?
+            """,
+            (file_id, class_ids[owner], attribute),
+        ).fetchone()
+        return True, row[0] if row else None
+
     seen = set()
     for access in accesses:
         referrer_id = symbol_ids.get(access["referrer"])
-        field_id = field_ids.get(access["attribute"])
+        is_class, field_id = (
+            own_field(access["object"], access["attribute"])
+            if access["object"]
+            else (False, None)
+        )
+        if not is_class:
+            field_id = field_ids.get(access["attribute"])
         if referrer_id is None or field_id is None:
             continue
         if (referrer_id, field_id) in seen:
@@ -1269,7 +1304,11 @@ def _index_python_cross_file_edges(
         analysis["typed_calls"],
     )
     index_python_cross_file_attribute_relationships(
-        conn, file_id, analysis["foreign_accesses"]
+        conn,
+        file_id,
+        analysis["foreign_accesses"],
+        analysis["imports"],
+        path_to_file_id,
     )
     index_python_constant_reference_relationships(
         conn, file_id, analysis["name_loads"], analysis["imports"], path_to_file_id

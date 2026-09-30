@@ -2678,3 +2678,38 @@ def test_run_scan_links_reads_of_imported_and_local_classes_to_the_reading_symbo
         ("app.service.by_own_method", "app.models.Watch", "high"),
         ("app.service.by_own_method", "app.service.Local", "high"),
     ]
+
+
+def test_run_scan_links_class_attribute_reference_only_to_that_classs_field(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "models.py").write_text(
+        "class Promo:\n    objects = None\n\n\nclass Watch:\n    pass\n"
+    )
+    (project_root / "app" / "views.py").write_text(
+        "from app.models import Promo, Watch\n"
+        "\n"
+        "\n"
+        "def watches():\n"
+        "    return Watch.objects\n"
+        "\n"
+        "\n"
+        "def promos():\n"
+        "    return Promo.objects\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'references'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND t.kind = 'field' AND s.qualified_name LIKE 'app.views.%'
+        """
+    ).fetchall()
+
+    assert rows == [("app.views.promos", "app.models.Promo.objects", "low")]

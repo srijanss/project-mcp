@@ -317,6 +317,7 @@ class _ReferenceCollector(_ScopeTrackingVisitor):
                 self.foreign_accesses.append(
                     {
                         "referrer": self.callers[-1],
+                        "object": _dotted_name(node.value),
                         "attribute": node.attr,
                         "line": node.lineno,
                     }

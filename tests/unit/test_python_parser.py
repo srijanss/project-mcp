@@ -213,11 +213,30 @@ def test_extract_foreign_attribute_accesses_finds_non_self_accesses_in_functions
 
     accesses = extract_foreign_attribute_accesses("app/report.py", source)
 
-    assert accesses == [
-        {"referrer": "app.report.report", "attribute": "amount", "line": 2},
-        {"referrer": "app.report.report", "attribute": "status", "line": 3},
-        {"referrer": "app.report.report", "attribute": "note", "line": 4},
-        {"referrer": "app.report.Handler.run", "attribute": "amount", "line": 9},
+    assert [
+        (a["referrer"], a["object"], a["attribute"], a["line"]) for a in accesses
+    ] == [
+        ("app.report.report", "payment", "amount", 2),
+        ("app.report.report", "other", "status", 3),
+        ("app.report.report", "self_like", "note", 4),
+        ("app.report.Handler.run", "payment", "amount", 9),
+    ]
+
+
+def test_extract_foreign_attribute_accesses_names_dotted_objects_and_skips_expressions():
+    source = (
+        "def run(a):\n"
+        "    x = models.Watch.objects\n"
+        "    y = make().total\n"
+        "    return x, y\n"
+    )
+
+    accesses = extract_foreign_attribute_accesses("app/run.py", source)
+
+    assert [(a["object"], a["attribute"]) for a in accesses] == [
+        ("models.Watch", "objects"),
+        ("models", "Watch"),
+        (None, "total"),
     ]
 
 
