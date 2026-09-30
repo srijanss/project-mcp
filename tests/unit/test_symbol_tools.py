@@ -242,3 +242,52 @@ def test_find_symbol_treats_like_wildcards_in_the_query_literally(tmp_path):
 
     assert [r["name"] for r in underscore] == ["get_user"]
     assert percent == []
+
+
+def _watch_project(root: Path) -> Path:
+    (root / "cms").mkdir()
+    (root / "cms" / "models.py").write_text(
+        "class Watch:\n    pass\n\n\nclass Other:\n    pass\n"
+    )
+    (root / "cms" / "forms.py").write_text(
+        "from cms.models import Watch\n\n\n"
+        "class WatchForm:\n    class Meta:\n        model = Watch\n"
+    )
+    (root / "cms" / "views.py").write_text(
+        "from cms.models import Watch as W\n\n\ndef show():\n    return W\n"
+    )
+    (root / "cms" / "unrelated.py").write_text("from cms.models import Other\n")
+    return root
+
+
+def _importers(rows: list[dict]) -> list[str]:
+    return sorted(row["source"] for row in rows if row["relationship_type"] == "imports")
+
+
+def test_get_dependents_lists_the_files_that_import_a_symbol(tmp_path):
+    project_root = _watch_project(tmp_path)
+
+    rows = get_dependents(project_root, "cms.models.Watch")
+
+    assert _importers(rows) == ["cms/forms.py", "cms/views.py"]
+    assert all(row["confidence"] == "high" for row in rows)
+
+
+def test_get_dependents_keeps_symbol_importers_after_the_symbols_file_is_edited(tmp_path):
+    import time
+
+    project_root = _watch_project(tmp_path)
+    assert _importers(get_dependents(project_root, "cms.models.Watch")) == [
+        "cms/forms.py",
+        "cms/views.py",
+    ]
+
+    time.sleep(0.01)
+    (project_root / "cms" / "models.py").write_text(
+        "class Watch:\n    def size(self):\n        return 1\n\n\nclass Other:\n    pass\n"
+    )
+
+    assert _importers(get_dependents(project_root, "cms.models.Watch")) == [
+        "cms/forms.py",
+        "cms/views.py",
+    ]

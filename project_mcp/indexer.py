@@ -1203,6 +1203,51 @@ def index_python_cross_file_inheritance_relationships(
             )
 
 
+def index_python_symbol_import_relationships(
+    conn: sqlite3.Connection,
+    file_id: int,
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> None:
+    """Link this file to each symbol another file's `from x import name` brings in.
+
+    These are file-to-symbol `imports` edges, next to the file-to-file ones, so a
+    symbol's dependents include importers that never call it (a class body's
+    `model = Watch`, a re-export).
+    """
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE source_entity_type = 'file' AND source_entity_id = ?
+          AND target_entity_type = 'symbol' AND relationship_type = 'imports'
+        """,
+        (file_id,),
+    )
+
+    seen = set()
+    for module, name in _imported_names(imports).values():
+        target_file_id = path_to_file_id.get(module.replace(".", "/") + ".py")
+        if target_file_id is None or target_file_id == file_id:
+            continue
+        row = conn.execute(
+            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+            (target_file_id, f"{module}.{name}"),
+        ).fetchone()
+        if row is None or row[0] in seen:
+            continue
+        seen.add(row[0])
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('file', ?, 'symbol', ?, 'imports', 'high')
+            """,
+            (file_id, row[0]),
+        )
+
+
 def _index_python_cross_file_edges(
     conn: sqlite3.Connection, file_id: int, analysis: dict, path_to_file_id: dict
 ) -> None:
@@ -1226,6 +1271,9 @@ def _index_python_cross_file_edges(
     )
     index_python_constant_reference_relationships(
         conn, file_id, analysis["name_loads"], analysis["imports"], path_to_file_id
+    )
+    index_python_symbol_import_relationships(
+        conn, file_id, analysis["imports"], path_to_file_id
     )
 
 
