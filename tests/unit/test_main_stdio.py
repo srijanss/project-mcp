@@ -557,3 +557,38 @@ def test_find_symbol_tool_call_sees_edits_made_after_first_index(tmp_path):
 
     assert result.is_error is False
     assert "Gadget" in result.content[0].text
+
+
+@pytest.mark.parametrize("alias", ["query", "symbol"])
+@pytest.mark.parametrize(
+    "tool", ["get_symbol_context", "get_dependents", "get_tests_for", "get_dependencies"]
+)
+def test_symbol_tools_accept_query_and_symbol_as_aliases_for_qualified_name(
+    tmp_path, tool, alias
+):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
+    (tmp_path / "app" / "importer.py").write_text("import app.models\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_models.py").write_text(
+        "from app.models import VALUE\n\n\ndef test_value():\n    assert VALUE\n"
+    )
+    server = build_server(tmp_path)
+
+    target = "app.importer" if tool == "get_dependencies" else "app.models"
+
+    by_name = asyncio.run(server.call_tool(tool, {"qualified_name": target}))
+    by_alias = asyncio.run(server.call_tool(tool, {alias: target}))
+
+    assert by_name.content, "fixture should give every tool something to return"
+    assert by_alias.is_error is False
+    assert [c.text for c in by_alias.content] == [c.text for c in by_name.content]
+
+
+def test_symbol_tools_say_which_argument_is_missing(tmp_path):
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server = build_server(tmp_path)
+
+    with pytest.raises(ToolError, match="qualified_name is required"):
+        asyncio.run(server.call_tool("get_dependents", {}))

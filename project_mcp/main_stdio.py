@@ -70,6 +70,14 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
     ]
 
 
+def _symbol_name(qualified_name: str | None, query: str | None, symbol: str | None) -> str:
+    """The name a symbol tool was asked about, under any of its accepted spellings."""
+    for name in (qualified_name, query, symbol):
+        if name:
+            return name
+    raise ToolError("qualified_name is required (query and symbol are accepted aliases)")
+
+
 def _size(value) -> int:
     return len(json.dumps(value, default=str))
 
@@ -219,28 +227,54 @@ def build_server(project_root: Path) -> MCPServer:
         return rows
 
     @server.tool(name="get_symbol_context")
-    def get_symbol_context_tool(qualified_name: str) -> dict:
+    def get_symbol_context_tool(
+        qualified_name: str | None = None,
+        query: str | None = None,
+        symbol: str | None = None,
+    ) -> dict:
         """Return one symbol's location, source, direct callers/callees and tests.
 
         `source` is cut at 80 lines (see `source_truncated`); tests fall back
-        to the enclosing module's, marked `scope: "module"`.
+        to the enclosing module's, marked `scope: "module"`. `query` and
+        `symbol` are aliases for `qualified_name`.
         """
-        return describe_symbol(project_root, qualified_name)
+        return describe_symbol(project_root, _symbol_name(qualified_name, query, symbol))
 
     @server.tool(name="get_dependencies")
-    def get_dependencies_tool(qualified_name: str) -> list[dict]:
-        """Return what a symbol or module imports or inherits from."""
-        return get_dependencies(project_root, qualified_name)
+    def get_dependencies_tool(
+        qualified_name: str | None = None,
+        query: str | None = None,
+        symbol: str | None = None,
+    ) -> list[dict]:
+        """Return what a symbol or module imports or inherits from.
+
+        `query` and `symbol` are aliases for `qualified_name`.
+        """
+        return get_dependencies(project_root, _symbol_name(qualified_name, query, symbol))
 
     @server.tool(name="get_dependents")
-    def get_dependents_tool(qualified_name: str) -> list[dict]:
-        """Return what imports or inherits from a symbol or module."""
-        return get_dependents(project_root, qualified_name)
+    def get_dependents_tool(
+        qualified_name: str | None = None,
+        query: str | None = None,
+        symbol: str | None = None,
+    ) -> list[dict]:
+        """Return what imports or inherits from a symbol or module.
+
+        `query` and `symbol` are aliases for `qualified_name`.
+        """
+        return get_dependents(project_root, _symbol_name(qualified_name, query, symbol))
 
     @server.tool(name="get_tests_for")
-    def get_tests_for_tool(qualified_name: str) -> list[dict]:
-        """Return tests associated with a source module or symbol, with confidence and evidence."""
-        return get_tests_for(project_root, qualified_name)
+    def get_tests_for_tool(
+        qualified_name: str | None = None,
+        query: str | None = None,
+        symbol: str | None = None,
+    ) -> list[dict]:
+        """Return tests associated with a source module or symbol, with confidence and evidence.
+
+        `query` and `symbol` are aliases for `qualified_name`.
+        """
+        return get_tests_for(project_root, _symbol_name(qualified_name, query, symbol))
 
     @server.tool(name="get_test_summary")
     def get_test_summary_tool() -> dict:
