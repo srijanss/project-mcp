@@ -114,3 +114,29 @@ def test_get_connection_rebuilds_index_written_before_cross_module_edges(tmp_pat
     reopened.close()
 
     assert file_rows == []
+
+
+def test_get_connection_reads_while_another_connection_holds_the_write_lock(tmp_path):
+    """A second session re-indexing must not make status/read tools fail.
+
+    Opening a connection on an already-initialised index used to write
+    (schema_version INSERT OR IGNORE), so it queued behind the indexer's write
+    lock and surfaced as "database is locked".
+    """
+    writer = get_connection(tmp_path)
+    writer.execute("BEGIN IMMEDIATE")
+    writer.execute(
+        "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('index_status', 'indexing')"
+    )
+
+    reader = get_connection(tmp_path)
+    try:
+        rows = reader.execute(
+            "SELECT value FROM index_metadata WHERE key = 'schema_version'"
+        ).fetchall()
+    finally:
+        reader.close()
+        writer.rollback()
+        writer.close()
+
+    assert rows == [(str(CURRENT_SCHEMA_VERSION),)]

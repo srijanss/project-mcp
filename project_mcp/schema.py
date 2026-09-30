@@ -157,10 +157,13 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA foreign_keys = ON")
     for ddl in _TABLE_DDL + _INDEX_DDL:
         conn.execute(ddl)
-    conn.execute(
-        "INSERT OR IGNORE INTO index_metadata (key, value) VALUES ('schema_version', ?)",
-        (str(CURRENT_SCHEMA_VERSION),),
-    )
+    # Only write when the version is missing: an unconditional INSERT OR IGNORE
+    # takes the write lock and fails while another session is indexing.
+    if get_schema_version(conn) is None:
+        conn.execute(
+            "INSERT OR IGNORE INTO index_metadata (key, value) VALUES ('schema_version', ?)",
+            (str(CURRENT_SCHEMA_VERSION),),
+        )
     conn.commit()
 
 
