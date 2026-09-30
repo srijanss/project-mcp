@@ -63,8 +63,11 @@ def _callers(project_root: Path, qualified_name: str) -> list[dict]:
     ]
 
 
+_OUTLINE_GROUPS = {"field": "fields", "method": "methods", "class": "classes"}
+
+
 def _outline(project_root: Path, symbol: dict) -> dict:
-    """A class's direct members in source order, with fields folded into one list."""
+    """A class's direct members, one line per kind: `name` for fields, `name:line` else."""
     prefix = f"{symbol['qualified_name']}."
     conn = get_connection(project_root)
     try:
@@ -81,14 +84,13 @@ def _outline(project_root: Path, symbol: dict) -> dict:
         ).fetchall()
     finally:
         conn.close()
-    return {
-        "fields": [name for name, kind, _ in rows if kind == "field"],
-        "members": [
-            {"name": name, "kind": kind, "start_line": line}
-            for name, kind, line in rows
-            if kind != "field"
-        ],
-    }
+    groups: dict[str, list[str]] = {}
+    for name, kind, line in rows:
+        # Fields are listed by name; everything else carries its start line.
+        groups.setdefault(_OUTLINE_GROUPS.get(kind, f"{kind}s"), []).append(
+            name if kind == "field" else f"{name}:{line}"
+        )
+    return {group: ", ".join(entries) for group, entries in groups.items()}
 
 
 def _similar_names(project_root: Path, short: str) -> list[str]:

@@ -209,33 +209,35 @@ def test_describe_symbol_outlines_a_class_whose_source_is_cut_off(tmp_path):
     details = describe_symbol(_big_class(tmp_path), "app.big.Big")
 
     assert details["source_truncated"] is True
-    members = details["outline"]["members"]
-    names = [member["name"] for member in members]
-    assert names[0] == "outer"
-    assert names[1:] == [f"method_{i}" for i in range(30)]
-    assert members[0] == {"name": "outer", "kind": "method", "start_line": 2}
+    methods = details["outline"]["methods"].split(", ")
+    assert methods[0] == "outer:2"
+    assert [entry.split(":")[0] for entry in methods[1:]] == [
+        f"method_{i}" for i in range(30)
+    ]
 
 
 def test_describe_symbol_outline_lists_only_direct_members(tmp_path):
     details = describe_symbol(_big_class(tmp_path), "app.big.Big")
 
-    assert "inner" not in [member["name"] for member in details["outline"]["members"]]
+    assert "inner" not in details["outline"]["methods"]
 
 
-def test_describe_symbol_outline_lists_fields_by_name_on_one_line(tmp_path):
+def test_describe_symbol_outline_groups_members_by_kind_on_one_line_each(tmp_path):
     (tmp_path / "app").mkdir()
     body = "".join(f"    def method_{i}(self):\n        return {i}\n" for i in range(40))
     (tmp_path / "app" / "big.py").write_text(
-        "class Big:\n    first = 1\n    second = 2\n" + body + "    last = 3\n"
+        "class Big:\n    first = 1\n    second = 2\n"
+        + body
+        + "    last = 3\n\n    class Meta:\n        ordering = 1\n"
     )
 
     details = describe_symbol(tmp_path, "app.big.Big")
 
     outline = details["outline"]
-    assert outline["fields"] == ["first", "second", "last"]
-    assert [member["name"] for member in outline["members"]] == [
-        f"method_{i}" for i in range(40)
-    ]
+    assert outline["fields"] == "first, second, last"
+    assert outline["methods"].startswith("method_0:4, method_1:6, ")
+    assert outline["methods"].endswith("method_39:82")
+    assert outline["classes"] == "Meta:86"
 
 
 def test_describe_symbol_gives_no_outline_when_the_whole_class_is_shown(tmp_path):
