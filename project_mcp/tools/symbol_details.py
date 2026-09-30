@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from project_mcp.db import get_connection
 from project_mcp.tools.symbols import (
     get_dependencies,
     get_dependents,
@@ -25,6 +26,40 @@ def _covering_tests(project_root: Path, qualified_name: str) -> list[dict]:
     return []
 
 
+def _in_test_files(project_root: Path, qualified_names: list[str]) -> set[str]:
+    if not qualified_names:
+        return set()
+    conn = get_connection(project_root)
+    try:
+        marks = ",".join("?" * len(qualified_names))
+        rows = conn.execute(
+            f"""
+            SELECT s.qualified_name FROM symbols s
+            JOIN files f ON f.id = s.file_id
+            WHERE f.file_kind = 'test' AND s.qualified_name IN ({marks})
+            """,
+            qualified_names,
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row[0] for row in rows}
+
+
+def _callers(project_root: Path, qualified_name: str) -> list[dict]:
+    """Direct callers, leaving tests to the separate `tests` list."""
+    rows = [
+        row
+        for row in get_dependents(project_root, qualified_name)
+        if row["relationship_type"] == "calls"
+    ]
+    in_tests = _in_test_files(project_root, [row["source"] for row in rows])
+    return [
+        {"symbol": row["source"], "confidence": row["confidence"]}
+        for row in rows
+        if row["source"] not in in_tests
+    ]
+
+
 def describe_symbol(project_root: Path, qualified_name: str) -> dict:
     context = get_symbol_context(project_root, qualified_name)
     if not context["found"]:
@@ -38,11 +73,7 @@ def describe_symbol(project_root: Path, qualified_name: str) -> dict:
         "source": "\n".join(definition[:MAX_SOURCE_LINES]),
         "source_truncated": len(definition) > MAX_SOURCE_LINES,
         "source_total_lines": len(definition),
-        "callers": [
-            {"symbol": row["source"], "confidence": row["confidence"]}
-            for row in get_dependents(project_root, qualified_name)
-            if row["relationship_type"] == "calls"
-        ],
+        "callers": _callers(project_root, qualified_name),
         "callees": [
             {"symbol": row["target"], "confidence": row["confidence"]}
             for row in get_dependencies(project_root, qualified_name)

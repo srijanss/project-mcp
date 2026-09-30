@@ -92,7 +92,7 @@ def test_get_symbol_context_tool_returns_source_callers_callees_and_tests(tmp_pa
 
     details = json.loads(result.content[0].text)
     assert details["source"] == "def middle():\n    return leaf()"
-    assert "app.flow.top" in [c["symbol"] for c in details["callers"]]
+    assert [c["symbol"] for c in details["callers"]] == ["app.flow.top"]
     assert [c["symbol"] for c in details["callees"]] == ["app.flow.leaf"]
     assert details["tests"][0]["test_file"] == "tests/test_flow.py"
 

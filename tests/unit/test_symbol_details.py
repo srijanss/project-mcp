@@ -61,6 +61,22 @@ def test_describe_symbol_lists_direct_callers_and_callees(tmp_path):
     assert details["callers"][0]["confidence"] == "high"
 
 
+def test_describe_symbol_leaves_test_functions_out_of_callers(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "flow.py").write_text(
+        "def middle():\n    return 1\n\n\ndef top():\n    return middle()\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_flow.py").write_text(
+        "from app.flow import middle\n\n\ndef test_middle():\n    assert middle()\n"
+    )
+
+    details = describe_symbol(tmp_path, "app.flow.middle")
+
+    assert [c["symbol"] for c in details["callers"]] == ["app.flow.top"]
+    assert details["tests"][0]["test_file"] == "tests/test_flow.py"
+
+
 def test_describe_symbol_lists_tests_covering_its_module(tmp_path):
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "models.py").write_text("def value():\n    return 1\n")
