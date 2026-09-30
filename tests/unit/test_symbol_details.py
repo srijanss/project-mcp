@@ -147,3 +147,22 @@ def test_describe_symbol_reports_unavailable_source_when_the_file_is_gone(
     assert details["source_error"] == "FileNotFoundError"
     assert details["source_truncated"] is False
     assert details["source_total_lines"] == 0
+
+
+def test_describe_symbol_suggests_close_matches_when_the_name_is_not_found(tmp_path):
+    details = describe_symbol(_project(tmp_path), "app.wrong.Widget")
+
+    assert details["found"] is False
+    assert details["symbol"] is None
+    assert details["suggestions"] == ["app.models.Widget"]
+
+
+def test_describe_symbol_limits_how_many_suggestions_it_returns(tmp_path):
+    (tmp_path / "app").mkdir()
+    classes = "".join(f"class Widget{letter}:\n    pass\n\n\n" for letter in "ABCDEFGH")
+    (tmp_path / "app" / "models.py").write_text(classes)
+
+    details = describe_symbol(tmp_path, "app.wrong.Widget")
+
+    assert details["found"] is False
+    assert len(details["suggestions"]) == 5

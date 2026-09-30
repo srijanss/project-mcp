@@ -13,6 +13,7 @@ from project_mcp.tools.tests import get_tests_for
 
 
 MAX_SOURCE_LINES = 80
+MAX_SUGGESTIONS = 5
 
 
 def _covering_tests(project_root: Path, qualified_name: str) -> list[dict]:
@@ -76,6 +77,15 @@ def _resolve(project_root: Path, name: str) -> dict:
         return get_symbol_context(project_root, matches.pop())
     if matches:
         return {**context, "candidates": sorted(matches)}
+    # Likely a mistyped path: offer the nearest matches for its last segment.
+    short = name.rsplit(".", 1)[-1]
+    nearest = [
+        row["qualified_name"]
+        for row in find_symbol(project_root, short, limit=MAX_SUGGESTIONS * 10)
+        if short.lower() in row["name"].lower()  # not merely inside a longer path
+    ][:MAX_SUGGESTIONS]
+    if nearest:
+        return {**context, "suggestions": nearest}
     return context
 
 
