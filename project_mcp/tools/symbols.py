@@ -35,18 +35,28 @@ def _symbol_row_to_dict(row: tuple) -> dict:
     }
 
 
-def find_symbol(project_root: Path, query: str) -> list[dict]:
+def find_symbol(
+    project_root: Path, query: str, include_migrations: bool = False
+) -> list[dict]:
     conn, project_id = _ensure_indexed(project_root)
 
     like_query = f"%{query.lower()}%"
+    # Migrations are generated history that swamps real definitions in results.
+    migration_filter = (
+        ""
+        if include_migrations
+        else "AND COALESCE(json_extract(s.metadata_json, '$.framework_kind'), '')"
+        " != 'django_migration'"
+    )
     rows = conn.execute(
-        """
+        f"""
         SELECT s.name, s.qualified_name, s.kind, s.start_line, s.end_line,
                s.visibility, s.language, f.path
         FROM symbols s
         JOIN files f ON f.id = s.file_id
         WHERE f.project_id = ?
           AND (LOWER(s.name) LIKE ? OR LOWER(s.qualified_name) LIKE ?)
+          {migration_filter}
         ORDER BY (s.kind = 'field'), s.qualified_name
         """,
         (project_id, like_query, like_query),

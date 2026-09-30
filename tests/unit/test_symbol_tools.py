@@ -30,6 +30,28 @@ def test_find_symbol_matches_by_name_substring_case_insensitively(tmp_path):
         assert r["file"]
 
 
+def _add_migration_defining(project_root: Path, class_name: str) -> None:
+    migrations = project_root / "app" / "migrations"
+    migrations.mkdir()
+    (migrations / "__init__.py").write_text("")
+    (migrations / "0001_initial.py").write_text(f"class {class_name}:\n    pass\n")
+
+
+def test_find_symbol_leaves_out_migrations_unless_asked(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    _add_migration_defining(project_root, "WidgetMigrationHelper")
+
+    default = {r["qualified_name"] for r in find_symbol(project_root, "widget")}
+    included = {
+        r["qualified_name"]
+        for r in find_symbol(project_root, "widget", include_migrations=True)
+    }
+
+    assert "app.models.Widget" in default
+    assert not any("migrations" in name for name in default)
+    assert any("migrations" in name for name in included)
+
+
 def test_get_symbol_context_returns_full_details_for_exact_match(tmp_path):
     project_root = _copy_fixture(tmp_path)
 
