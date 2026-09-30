@@ -166,3 +166,50 @@ def test_describe_symbol_limits_how_many_suggestions_it_returns(tmp_path):
 
     assert details["found"] is False
     assert len(details["suggestions"]) == 5
+
+
+def _big_class(tmp_path, methods=30):
+    (tmp_path / "app").mkdir()
+    body = "".join(
+        f"    def method_{i}(self):\n        value = {i}\n        return value\n\n"
+        for i in range(methods)
+    )
+    (tmp_path / "app" / "big.py").write_text(
+        "class Big:\n    def outer(self):\n        def inner():\n            return 1\n"
+        "        return inner\n\n" + body
+    )
+    return tmp_path
+
+
+def test_describe_symbol_outlines_a_class_whose_source_is_cut_off(tmp_path):
+    details = describe_symbol(_big_class(tmp_path), "app.big.Big")
+
+    assert details["source_truncated"] is True
+    names = [member["name"] for member in details["outline"]]
+    assert names[0] == "outer"
+    assert names[1:] == [f"method_{i}" for i in range(30)]
+    assert details["outline"][0] == {"name": "outer", "kind": "method", "start_line": 2}
+
+
+def test_describe_symbol_outline_lists_only_direct_members(tmp_path):
+    details = describe_symbol(_big_class(tmp_path), "app.big.Big")
+
+    assert "inner" not in [member["name"] for member in details["outline"]]
+
+
+def test_describe_symbol_gives_no_outline_when_the_whole_class_is_shown(tmp_path):
+    details = describe_symbol(_project(tmp_path), "app.models.Widget")
+
+    assert details["source_truncated"] is False
+    assert "outline" not in details
+
+
+def test_describe_symbol_gives_no_outline_for_a_long_function(tmp_path):
+    (tmp_path / "app").mkdir()
+    body = "".join(f"    x{i} = {i}\n" for i in range(300))
+    (tmp_path / "app" / "long.py").write_text("def big():\n" + body)
+
+    details = describe_symbol(tmp_path, "app.long.big")
+
+    assert details["source_truncated"] is True
+    assert "outline" not in details

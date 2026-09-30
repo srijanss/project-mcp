@@ -62,6 +62,27 @@ def _callers(project_root: Path, qualified_name: str) -> list[dict]:
     ]
 
 
+def _outline(project_root: Path, symbol: dict) -> list[dict]:
+    """A class's direct members (methods, fields), in source order."""
+    prefix = f"{symbol['qualified_name']}."
+    conn = get_connection(project_root)
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.name, s.kind, s.start_line FROM symbols s
+            JOIN files f ON f.id = s.file_id
+            WHERE f.path = ?
+              AND substr(s.qualified_name, 1, ?) = ?
+              AND instr(substr(s.qualified_name, ? + 1), '.') = 0
+            ORDER BY s.start_line
+            """,
+            (symbol["file"], len(prefix), prefix, len(prefix)),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [{"name": name, "kind": kind, "start_line": line} for name, kind, line in rows]
+
+
 def _resolve(project_root: Path, name: str) -> dict:
     """Look `name` up exactly, else as a short name if it is unambiguous."""
     context = get_symbol_context(project_root, name)
@@ -112,9 +133,16 @@ def describe_symbol(project_root: Path, qualified_name: str) -> dict:
             "source_truncated": len(definition) > MAX_SOURCE_LINES,
             "source_total_lines": len(definition),
         }
+    # A cut-off class body ends mid-method; its member list is the useful overview.
+    outline = (
+        {"outline": _outline(project_root, symbol)}
+        if symbol["kind"] == "class" and source["source_truncated"]
+        else {}
+    )
     return {
         **context,
         **source,
+        **outline,
         "callers": _callers(project_root, qualified_name),
         "callees": [
             {"symbol": row["target"], "confidence": row["confidence"]}
