@@ -1,4 +1,4 @@
-from project_mcp.tools.symbol_details import describe_symbol
+from project_mcp.tools.symbol_details import MAX_SOURCE_LINES, describe_symbol
 
 MODELS = (
     "import os\n"
@@ -31,6 +31,19 @@ def test_describe_symbol_includes_the_symbols_own_source(tmp_path):
     assert "def size(self):" in details["source"]
     assert "class Other" not in details["source"]
     assert details["source_truncated"] is False
+
+
+def test_describe_symbol_cuts_long_source_and_says_so(tmp_path):
+    (tmp_path / "app").mkdir()
+    body = "".join(f"    x{i} = {i}\n" for i in range(300))
+    (tmp_path / "app" / "long.py").write_text("def big():\n" + body)
+
+    details = describe_symbol(tmp_path, "app.long.big")
+
+    assert details["source_truncated"] is True
+    assert len(details["source"].splitlines()) == MAX_SOURCE_LINES
+    assert details["source_total_lines"] == 301
+    assert details["source"].startswith("def big():")
 
 
 def test_describe_symbol_reports_missing_symbols(tmp_path):

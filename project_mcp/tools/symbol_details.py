@@ -5,6 +5,9 @@ from pathlib import Path
 from project_mcp.tools.symbols import get_symbol_context
 
 
+MAX_SOURCE_LINES = 80
+
+
 def describe_symbol(project_root: Path, qualified_name: str) -> dict:
     context = get_symbol_context(project_root, qualified_name)
     if not context["found"]:
@@ -12,5 +15,10 @@ def describe_symbol(project_root: Path, qualified_name: str) -> dict:
 
     symbol = context["symbol"]
     lines = (Path(project_root) / symbol["file"]).read_text().splitlines()
-    source = "\n".join(lines[symbol["start_line"] - 1 : symbol["end_line"]])
-    return {**context, "source": source, "source_truncated": False}
+    definition = lines[symbol["start_line"] - 1 : symbol["end_line"]]
+    return {
+        **context,
+        "source": "\n".join(definition[:MAX_SOURCE_LINES]),
+        "source_truncated": len(definition) > MAX_SOURCE_LINES,
+        "source_total_lines": len(definition),
+    }
