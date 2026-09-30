@@ -1,5 +1,6 @@
 """A symbol's definition with the surrounding facts an agent would otherwise Read for."""
 
+import difflib
 from pathlib import Path
 
 from project_mcp.db import get_connection
@@ -83,6 +84,22 @@ def _outline(project_root: Path, symbol: dict) -> list[dict]:
     return [{"name": name, "kind": kind, "start_line": line} for name, kind, line in rows]
 
 
+def _similar_names(project_root: Path, short: str) -> list[str]:
+    """Qualified names whose own name is close to `short`, e.g. a one-letter typo."""
+    conn = get_connection(project_root)
+    try:
+        rows = conn.execute(
+            "SELECT name, qualified_name FROM symbols WHERE kind != 'module'"
+        ).fetchall()
+    finally:
+        conn.close()
+    by_name: dict[str, list[str]] = {}
+    for name, qualified_name in rows:
+        by_name.setdefault(name.lower(), []).append(qualified_name)
+    close = difflib.get_close_matches(short.lower(), by_name, n=MAX_SUGGESTIONS)
+    return [qn for name in close for qn in sorted(by_name[name])]
+
+
 def _resolve(project_root: Path, name: str) -> dict:
     """Look `name` up exactly, else as a short name if it is unambiguous."""
     context = get_symbol_context(project_root, name)
@@ -104,7 +121,12 @@ def _resolve(project_root: Path, name: str) -> dict:
         row["qualified_name"]
         for row in find_symbol(project_root, short, limit=MAX_SUGGESTIONS * 10)
         if short.lower() in row["name"].lower()  # not merely inside a longer path
-    ][:MAX_SUGGESTIONS]
+    ]
+    if len(nearest) < MAX_SUGGESTIONS:
+        nearest += [
+            qn for qn in _similar_names(project_root, short) if qn not in nearest
+        ]
+    nearest = nearest[:MAX_SUGGESTIONS]
     if nearest:
         return {**context, "suggestions": nearest}
     return context

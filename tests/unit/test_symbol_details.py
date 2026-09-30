@@ -258,3 +258,21 @@ def test_describe_symbol_lists_what_the_symbol_references(tmp_path):
         ("app.models.Watch.objects", "low"),
     }
     assert describe_symbol(tmp_path, "app.service.nothing")["references"] == []
+
+
+def test_describe_symbol_suggests_the_closest_name_for_a_misspelling(tmp_path):
+    (tmp_path / "cms").mkdir()
+    (tmp_path / "cms" / "models.py").write_text(
+        "class GiftCardWatchList:\n    pass\n\n\nclass Unrelated:\n    pass\n"
+    )
+
+    details = describe_symbol(tmp_path, "cms.models.GiftCardWatchLst")
+
+    assert details["found"] is False
+    assert details["suggestions"] == ["cms.models.GiftCardWatchList"]
+
+
+def test_describe_symbol_offers_no_suggestion_for_a_name_nothing_resembles(tmp_path):
+    details = describe_symbol(_project(tmp_path), "app.models.Zzzzzz")
+
+    assert details == {"found": False, "symbol": None}
