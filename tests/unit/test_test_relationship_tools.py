@@ -53,6 +53,9 @@ def _order_project(root: Path) -> Path:
         "\n"
         "    def cancel(self):\n"
         "        return 2\n"
+        "\n"
+        "    def unused(self):\n"
+        "        return 3\n"
     )
     (root / "tests").mkdir()
     (root / "tests" / "test_orders.py").write_text(
@@ -89,11 +92,18 @@ def test_get_tests_for_a_method_names_the_tests_that_reference_it(tmp_path):
     ]
 
 
+def test_get_tests_for_a_method_called_on_a_constructor_expression(tmp_path):
+    project_root = _order_project(tmp_path)
+
+    (row,) = get_tests_for(project_root, "app.models.Order.cancel")
+
+    assert row["tests"] == ["tests.test_orders.test_cancel"]
+
+
 def test_get_tests_for_a_method_nothing_references_stays_empty(tmp_path):
     project_root = _order_project(tmp_path)
 
-    # `Order().cancel()` names no object, so nothing ties test_cancel to the method.
-    assert get_tests_for(project_root, "app.models.Order.cancel") == []
+    assert get_tests_for(project_root, "app.models.Order.unused") == []
 
 
 def test_get_tests_for_a_method_caps_the_tests_it_names_per_file(tmp_path):

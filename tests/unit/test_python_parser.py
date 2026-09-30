@@ -195,6 +195,23 @@ def test_analyze_python_source_types_receivers_from_constructors_and_annotations
     ]
 
 
+def test_analyze_python_source_types_calls_made_on_a_constructor_expression():
+    source = (
+        "def run():\n"
+        "    Payment().charge()\n"
+        "    m.Refund(1).refund()\n"
+        "    make().charge()\n"
+        "    payment().charge()\n"
+    )
+
+    analysis = analyze_python_source("app/service.py", source)
+
+    assert analysis["typed_calls"] == [
+        {"caller": "app.service.run", "class": "Payment", "method": "charge", "line": 2},
+        {"caller": "app.service.run", "class": "m.Refund", "method": "refund", "line": 3},
+    ]
+
+
 def test_extract_foreign_attribute_accesses_finds_non_self_accesses_in_functions():
     source = (
         "def report(payment, other):\n"

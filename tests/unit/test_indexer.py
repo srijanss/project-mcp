@@ -2713,3 +2713,30 @@ def test_run_scan_links_class_attribute_reference_only_to_that_classs_field(tmp_
     ).fetchall()
 
     assert rows == [("app.views.promos", "app.models.Promo.objects", "low")]
+
+
+def test_run_scan_links_calls_made_on_a_constructor_expression(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "models.py").write_text(
+        "class Payment:\n    def charge(self):\n        return 1\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "from app.models import Payment\n\n\n"
+        "def run():\n    return Payment().charge()\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls' AND s.qualified_name = 'app.service.run'
+          AND t.qualified_name = 'app.models.Payment.charge'
+        """
+    ).fetchall()
+
+    assert edges == [("app.service.run", "app.models.Payment.charge", "high")]

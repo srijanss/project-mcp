@@ -268,6 +268,20 @@ class _ReferenceCollector(_ScopeTrackingVisitor):
                 self._function_types[-1].calls.append(
                     (caller, func.value.id, func.attr, node.lineno)
                 )
+            constructed = (
+                _constructed_class(func.value)
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if constructed is not None:  # `Cls(...).method()`
+                self.typed_calls.append(
+                    {
+                        "caller": caller,
+                        "class": constructed,
+                        "method": func.attr,
+                        "line": node.lineno,
+                    }
+                )
             if (
                 isinstance(func, ast.Attribute)
                 and isinstance(func.value, ast.Name)
