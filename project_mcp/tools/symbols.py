@@ -40,6 +40,8 @@ def find_symbol(
     query: str,
     include_migrations: bool = False,
     kind: str | None = None,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[dict]:
     conn, project_id = _ensure_indexed(project_root)
 
@@ -66,6 +68,7 @@ def find_symbol(
                       WHEN LOWER(s.name) LIKE ? THEN 1
                       ELSE 2 END,
                  s.qualified_name
+        LIMIT ? OFFSET ?
         """,
         (
             project_id,
@@ -75,6 +78,8 @@ def find_symbol(
             kind,
             query.lower(),
             f"{query.lower()}%",
+            -1 if limit is None else limit,  # SQLite: a negative LIMIT is no limit
+            offset,
         ),
     ).fetchall()
 

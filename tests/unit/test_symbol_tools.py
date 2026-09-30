@@ -78,6 +78,24 @@ def test_find_symbol_filters_by_kind(tmp_path):
     assert [r["qualified_name"] for r in modules] == ["app.widgets"]
 
 
+def test_find_symbol_pages_with_limit_and_offset(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "widgets.py").write_text(
+        "".join(f"class Widget{i}:\n    pass\n\n\n" for i in range(5))
+    )
+
+    everything = [r["name"] for r in find_symbol(tmp_path, "widget", kind="class")]
+    first = [r["name"] for r in find_symbol(tmp_path, "widget", kind="class", limit=2)]
+    second = [
+        r["name"]
+        for r in find_symbol(tmp_path, "widget", kind="class", limit=2, offset=2)
+    ]
+
+    assert len(everything) == 5
+    assert first == everything[:2]
+    assert second == everything[2:4]
+
+
 def test_get_symbol_context_returns_full_details_for_exact_match(tmp_path):
     project_root = _copy_fixture(tmp_path)
 
