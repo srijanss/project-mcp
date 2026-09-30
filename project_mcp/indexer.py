@@ -486,6 +486,41 @@ def index_python_call_relationships(
         )
 
 
+def _same_file_member_resolver(symbols: list[dict], kind: str):
+    """A `(class, name) -> qualified name` lookup for members of one kind.
+
+    A member the class doesn't define is looked up on its base classes in the
+    same file, depth-first and left to right.
+    """
+    module_name = next(
+        (s["qualified_name"] for s in symbols if s.get("kind") == "module"), None
+    )
+    members = {s["qualified_name"] for s in symbols if s.get("kind") == kind}
+    class_bases = {
+        s["qualified_name"]: [
+            f"{module_name}.{base}"
+            for base in s["bases"]
+            if isinstance(base, str) and "." not in base
+        ]
+        for s in symbols
+        if s.get("kind") == "class"
+    }
+
+    def find(class_name: str, name: str, visited: set[str]) -> str | None:
+        if class_name in visited or class_name not in class_bases:
+            return None
+        visited.add(class_name)
+        if f"{class_name}.{name}" in members:
+            return f"{class_name}.{name}"
+        for base in class_bases[class_name]:
+            found = find(base, name, visited)
+            if found is not None:
+                return found
+        return None
+
+    return lambda class_name, name: find(class_name, name, set())
+
+
 def index_python_self_call_relationships(
     conn: sqlite3.Connection, file_id: int, self_calls: list[dict], symbols: list[dict]
 ) -> None:
@@ -500,36 +535,12 @@ def index_python_self_call_relationships(
         (file_id,),
     ):
         symbol_ids.setdefault(qualified_name, symbol_id)
-    module_name = next(
-        (s["qualified_name"] for s in symbols if s.get("kind") == "module"), None
-    )
-    methods = {s["qualified_name"] for s in symbols if s.get("kind") == "method"}
-    class_bases = {
-        s["qualified_name"]: [
-            f"{module_name}.{base}"
-            for base in s["bases"]
-            if isinstance(base, str) and "." not in base
-        ]
-        for s in symbols
-        if s.get("kind") == "class"
-    }
-
-    def resolve(class_name: str, method: str, visited: set[str]) -> str | None:
-        if class_name in visited or class_name not in class_bases:
-            return None
-        visited.add(class_name)
-        if f"{class_name}.{method}" in methods:
-            return f"{class_name}.{method}"
-        for base in class_bases[class_name]:
-            found = resolve(base, method, visited)
-            if found is not None:
-                return found
-        return None
+    resolve = _same_file_member_resolver(symbols, "method")
 
     seen = set()
     for call in self_calls:
         caller_id = symbol_ids.get(call["caller"])
-        target = resolve(call["class"], call["method"], set())
+        target = resolve(call["class"], call["method"])
         callee_id = symbol_ids.get(target) if target is not None else None
         if caller_id is None or callee_id is None:
             continue
@@ -576,6 +587,49 @@ def index_python_attribute_relationships(
             ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'high')
             """,
             (referrer_id, attribute_id),
+        )
+
+
+def index_python_class_attribute_relationships(
+    conn: sqlite3.Connection, file_id: int, accesses: list[dict], symbols: list[dict]
+) -> None:
+    """Link `Cls.<name>` to the field of a class defined in the same file.
+
+    A field the class doesn't declare is looked up on its base classes in the
+    same file, depth-first and left to right.
+    """
+    symbol_ids: dict[str, int] = {}
+    for symbol_id, qualified_name in conn.execute(
+        "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id",
+        (file_id,),
+    ):
+        symbol_ids.setdefault(qualified_name, symbol_id)
+    module_name = next(
+        (s["qualified_name"] for s in symbols if s.get("kind") == "module"), None
+    )
+    resolve = _same_file_member_resolver(symbols, "field")
+
+    seen = set()
+    for access in accesses:
+        if not access["object"]:
+            continue
+        target = resolve(f"{module_name}.{access['object']}", access["attribute"])
+        referrer_id = symbol_ids.get(access["referrer"])
+        field_id = symbol_ids.get(target) if target is not None else None
+        if referrer_id is None or field_id is None:
+            continue
+        if (referrer_id, field_id) in seen:
+            continue
+        seen.add((referrer_id, field_id))
+        conn.execute(
+            """
+            INSERT INTO relationships (
+                source_entity_type, source_entity_id,
+                target_entity_type, target_entity_id,
+                relationship_type, confidence
+            ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'high')
+            """,
+            (referrer_id, field_id),
         )
 
 
@@ -1759,6 +1813,9 @@ def run_scan(
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]
             )
+            index_python_class_attribute_relationships(
+                conn, file_id, analysis["foreign_accesses"], symbols
+            )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
             source = _read_source(Path(project_root) / record["path"])
@@ -2055,6 +2112,9 @@ def refresh_index(
             )
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]
+            )
+            index_python_class_attribute_relationships(
+                conn, file_id, analysis["foreign_accesses"], symbols
             )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
