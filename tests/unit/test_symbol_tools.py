@@ -229,3 +229,16 @@ def test_get_dependents_returns_inheritance_sources_for_a_class(tmp_path):
         "relationship_type": "inherits",
         "confidence": "high",
     } in dependents
+
+
+def test_find_symbol_treats_like_wildcards_in_the_query_literally(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "users.py").write_text(
+        "def get_user():\n    pass\n\n\ndef getXuser():\n    pass\n"
+    )
+
+    underscore = find_symbol(tmp_path, "get_user")
+    percent = find_symbol(tmp_path, "%")
+
+    assert [r["name"] for r in underscore] == ["get_user"]
+    assert percent == []

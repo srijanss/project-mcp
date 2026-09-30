@@ -45,7 +45,9 @@ def find_symbol(
 ) -> list[dict]:
     conn, project_id = _ensure_indexed(project_root)
 
-    like_query = f"%{query.lower()}%"
+    # `%` and `_` in the query are literal characters, not LIKE wildcards.
+    escaped = query.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like_query = f"%{escaped}%"
     # Migrations are generated history that swamps real definitions in results.
     migration_filter = (
         ""
@@ -60,12 +62,13 @@ def find_symbol(
         FROM symbols s
         JOIN files f ON f.id = s.file_id
         WHERE f.project_id = ?
-          AND (LOWER(s.name) LIKE ? OR LOWER(s.qualified_name) LIKE ?)
+          AND (LOWER(s.name) LIKE ? ESCAPE '\\'
+               OR LOWER(s.qualified_name) LIKE ? ESCAPE '\\')
           AND (? IS NULL OR s.kind = ?)
           {migration_filter}
         ORDER BY (s.kind = 'field'),
                  CASE WHEN LOWER(s.name) = ? THEN 0
-                      WHEN LOWER(s.name) LIKE ? THEN 1
+                      WHEN LOWER(s.name) LIKE ? ESCAPE '\\' THEN 1
                       ELSE 2 END,
                  s.qualified_name
         LIMIT ? OFFSET ?
@@ -77,7 +80,7 @@ def find_symbol(
             kind,
             kind,
             query.lower(),
-            f"{query.lower()}%",
+            f"{escaped}%",
             -1 if limit is None else limit,  # SQLite: a negative LIMIT is no limit
             offset,
         ),
