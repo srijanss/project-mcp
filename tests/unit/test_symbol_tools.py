@@ -63,6 +63,21 @@ def test_find_symbol_ranks_exact_name_then_prefix_then_substring(tmp_path):
     assert [r["name"] for r in results] == ["Widget", "WidgetZ", "AWidget"]
 
 
+def test_find_symbol_filters_by_kind(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "widgets.py").write_text(
+        "class Widget:\n    pass\n\n\ndef widget_factory():\n    pass\n"
+    )
+
+    classes = find_symbol(tmp_path, "widget", kind="class")
+    functions = find_symbol(tmp_path, "widget", kind="function")
+    modules = find_symbol(tmp_path, "widgets", kind="module")
+
+    assert [r["name"] for r in classes] == ["Widget"]
+    assert [r["name"] for r in functions] == ["widget_factory"]
+    assert [r["qualified_name"] for r in modules] == ["app.widgets"]
+
+
 def test_get_symbol_context_returns_full_details_for_exact_match(tmp_path):
     project_root = _copy_fixture(tmp_path)
 

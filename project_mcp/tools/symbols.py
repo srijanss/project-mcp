@@ -36,7 +36,10 @@ def _symbol_row_to_dict(row: tuple) -> dict:
 
 
 def find_symbol(
-    project_root: Path, query: str, include_migrations: bool = False
+    project_root: Path,
+    query: str,
+    include_migrations: bool = False,
+    kind: str | None = None,
 ) -> list[dict]:
     conn, project_id = _ensure_indexed(project_root)
 
@@ -56,6 +59,7 @@ def find_symbol(
         JOIN files f ON f.id = s.file_id
         WHERE f.project_id = ?
           AND (LOWER(s.name) LIKE ? OR LOWER(s.qualified_name) LIKE ?)
+          AND (? IS NULL OR s.kind = ?)
           {migration_filter}
         ORDER BY (s.kind = 'field'),
                  CASE WHEN LOWER(s.name) = ? THEN 0
@@ -67,6 +71,8 @@ def find_symbol(
             project_id,
             like_query,
             like_query,
+            kind,
+            kind,
             query.lower(),
             f"{query.lower()}%",
         ),
