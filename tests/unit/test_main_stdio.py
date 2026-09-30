@@ -352,6 +352,22 @@ def test_get_context_for_symbol_tool_call_returns_context(tmp_path):
     assert "app.models" in result.content[0].text
 
 
+def test_tool_failure_reports_the_underlying_error_message(tmp_path, monkeypatch):
+    """A crash must not reach the client as a bare "Error executing tool"."""
+    import sqlite3
+
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    def locked(*args, **kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr("project_mcp.main_stdio.find_symbol", locked)
+    server = build_server(tmp_path)
+
+    with pytest.raises(ToolError, match="OperationalError: database is locked"):
+        asyncio.run(server.call_tool("find_symbol", {"query": "x"}))
+
+
 def test_find_symbol_tool_call_sees_edits_made_after_first_index(tmp_path):
     """A tool call must not silently serve stale data (MVP 13)."""
     import time

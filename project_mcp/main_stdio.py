@@ -1,8 +1,10 @@
+import functools
 import os
 import sys
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
@@ -61,9 +63,38 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
     ]
 
 
+def _report_tool_errors(server: MCPServer) -> None:
+    """Make every tool registered on `server` surface its real failure.
+
+    The framework hides the text of unexpected exceptions behind a bare
+    "Error executing tool"; a ToolError keeps its message.
+    """
+    register = server.tool
+
+    def tool(*args, **kwargs):
+        decorate = register(*args, **kwargs)
+
+        def wrap(fn):
+            @functools.wraps(fn)
+            def guarded(*fn_args, **fn_kwargs):
+                try:
+                    return fn(*fn_args, **fn_kwargs)
+                except ToolError:
+                    raise
+                except Exception as exc:
+                    raise ToolError(f"{type(exc).__name__}: {exc}") from exc
+
+            return decorate(guarded)
+
+        return wrap
+
+    server.tool = tool
+
+
 def build_server(project_root: Path) -> MCPServer:
     config = load_config(project_root)
     server = MCPServer("project-mcp")
+    _report_tool_errors(server)
 
     @server.tool()
     def list_dependencies(ecosystem: str | None = None) -> list[dict]:
