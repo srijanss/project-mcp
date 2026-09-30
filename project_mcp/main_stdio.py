@@ -21,11 +21,11 @@ from project_mcp.tools.git import (
     get_hotspots,
 )
 from project_mcp.tools.project import get_project_overview
+from project_mcp.tools.symbol_details import describe_symbol
 from project_mcp.tools.symbols import (
     find_symbol,
     get_dependencies,
     get_dependents,
-    get_symbol_context,
 )
 from project_mcp.tools.tests import get_test_summary, get_tests_for
 from project_mcp.tools.context_packs import (
@@ -212,8 +212,12 @@ def build_server(project_root: Path) -> MCPServer:
 
     @server.tool(name="get_symbol_context")
     def get_symbol_context_tool(qualified_name: str) -> dict:
-        """Return full details for one exact symbol match."""
-        return get_symbol_context(project_root, qualified_name)
+        """Return one symbol's location, source, direct callers/callees and tests.
+
+        `source` is cut at 80 lines (see `source_truncated`); tests fall back
+        to the enclosing module's, marked `scope: "module"`.
+        """
+        return describe_symbol(project_root, qualified_name)
 
     @server.tool(name="get_dependencies")
     def get_dependencies_tool(qualified_name: str) -> list[dict]:

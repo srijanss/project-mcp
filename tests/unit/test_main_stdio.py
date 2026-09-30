@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -70,6 +71,30 @@ def test_get_symbol_context_tool_call_returns_details(tmp_path):
 
     assert result.is_error is False
     assert "Widget" in result.content[0].text
+
+
+def test_get_symbol_context_tool_returns_source_callers_callees_and_tests(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "flow.py").write_text(
+        "def leaf():\n    return 1\n\n\n"
+        "def middle():\n    return leaf()\n\n\n"
+        "def top():\n    return middle()\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_flow.py").write_text(
+        "from app.flow import middle\n\n\ndef test_middle():\n    assert middle()\n"
+    )
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_symbol_context", {"qualified_name": "app.flow.middle"})
+    )
+
+    details = json.loads(result.content[0].text)
+    assert details["source"] == "def middle():\n    return leaf()"
+    assert "app.flow.top" in [c["symbol"] for c in details["callers"]]
+    assert [c["symbol"] for c in details["callees"]] == ["app.flow.leaf"]
+    assert details["tests"][0]["test_file"] == "tests/test_flow.py"
 
 
 def test_get_dependencies_tool_call_returns_relationships(tmp_path):
