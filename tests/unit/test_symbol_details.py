@@ -46,6 +46,21 @@ def test_describe_symbol_cuts_long_source_and_says_so(tmp_path):
     assert details["source"].startswith("def big():")
 
 
+def test_describe_symbol_lists_direct_callers_and_callees(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "flow.py").write_text(
+        "def leaf():\n    return 1\n\n\n"
+        "def middle():\n    return leaf()\n\n\n"
+        "def top():\n    return middle()\n"
+    )
+
+    details = describe_symbol(tmp_path, "app.flow.middle")
+
+    assert [c["symbol"] for c in details["callers"]] == ["app.flow.top"]
+    assert [c["symbol"] for c in details["callees"]] == ["app.flow.leaf"]
+    assert details["callers"][0]["confidence"] == "high"
+
+
 def test_describe_symbol_reports_missing_symbols(tmp_path):
     details = describe_symbol(_project(tmp_path), "app.models.Nope")
 
