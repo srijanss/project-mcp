@@ -461,6 +461,31 @@ def test_oversized_dict_result_trims_its_longest_list_and_says_so(tmp_path, monk
     assert payload["target"] == "app.models"
 
 
+def test_oversized_dict_without_lists_trims_its_longest_string_and_says_so(
+    tmp_path, monkeypatch
+):
+    import json
+
+    from project_mcp.main_stdio import MAX_TOOL_OUTPUT_CHARS
+
+    pack = {"target": "app.models", "source": "x" * 50_000}
+    monkeypatch.setattr(
+        "project_mcp.main_stdio.get_context_for_symbol", lambda *a, **k: pack
+    )
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_context_for_symbol", {"qualified_name": "app.models"})
+    )
+
+    payload = json.loads(result.content[0].text)
+    assert len(json.dumps(payload)) <= MAX_TOOL_OUTPUT_CHARS
+    assert payload["truncated"] is True
+    assert payload["truncated_fields"]["source"]["total"] == 50_000
+    assert payload["truncated_fields"]["source"]["returned"] == len(payload["source"])
+    assert payload["target"] == "app.models"
+
+
 def test_find_symbol_tool_pages_results_and_says_where_to_continue(tmp_path):
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "widgets.py").write_text(

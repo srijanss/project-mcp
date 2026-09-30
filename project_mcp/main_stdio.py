@@ -108,10 +108,12 @@ def _cap_dict(result: dict) -> dict:
     trimmed: dict[str, dict] = {}
     capped = {**result, "truncated": True, "truncated_fields": trimmed}
     while _size(capped) > MAX_TOOL_OUTPUT_CHARS:
-        lists = [k for k, v in capped.items() if isinstance(v, list) and v]
-        if not lists:
+        trimmable = [
+            k for k, v in capped.items() if isinstance(v, (list, str)) and v
+        ]
+        if not trimmable:
             break
-        name = max(lists, key=lambda k: _size(capped[k]))
+        name = max(trimmable, key=lambda k: _size(capped[k]))
         total = trimmed.get(name, {}).get("total", len(capped[name]))
         capped[name] = capped[name][: len(capped[name]) // 2]
         trimmed[name] = {"total": total, "returned": len(capped[name])}
