@@ -843,6 +843,75 @@ def index_python_typed_call_relationships(
         )
 
 
+MAX_UNTYPED_CALL_CANDIDATES = 3
+
+
+def _untyped_call_edges(
+    conn: sqlite3.Connection,
+    file_id: int,
+    attribute_calls: list[dict],
+    typed_calls: list[dict],
+    imports: list[dict],
+    path_to_file_id: dict,
+) -> list[tuple[int, int]]:
+    """(caller id, method id) guessed from the method name of `obj.method()` alone.
+
+    Nothing says what `obj` is, so the candidates are the methods of that name
+    in the files this one imports; a name shared by more than
+    MAX_UNTYPED_CALL_CANDIDATES of them is too ambiguous to guess.
+    """
+    imported_from = _imported_names(imports)
+    imported_modules = _imported_modules(imports)
+    imported_files = {
+        path_to_file_id.get(module.replace(".", "/") + ".py")
+        for module in {m for m, _ in imported_from.values()} | set(imported_modules.values())
+    } - {None, file_id}
+    if not imported_files:
+        return []
+    marks = ",".join("?" * len(imported_files))
+    known_heads = set(imported_from) | set(imported_modules)
+    typed = {(c["caller"], c["method"], c["line"]) for c in typed_calls}
+
+    caller_ids: dict[str, int | None] = {}
+    is_class: dict[str, bool] = {}
+    candidates: dict[str, list[int]] = {}
+    edges = []
+    for call in attribute_calls:
+        obj, name, caller = call["object"], call["attribute"], call["caller"]
+        if obj not in is_class:
+            is_class[obj] = (
+                _resolve_class_reference(conn, file_id, obj, imports, path_to_file_id)
+                is not None
+            )
+        if (
+            obj in ("self", "cls")
+            or obj.split(".")[0] in known_heads
+            or is_class[obj]
+            or (caller, name, call["line"]) in typed
+        ):
+            continue  # a module, a class, or an object whose type is already known
+        if name not in candidates:
+            candidates[name] = [
+                row[0]
+                for row in conn.execute(
+                    f"SELECT id FROM symbols WHERE kind = 'method' AND name = ?"
+                    f" AND file_id IN ({marks})",
+                    (name, *imported_files),
+                )
+            ]
+        if not 0 < len(candidates[name]) <= MAX_UNTYPED_CALL_CANDIDATES:
+            continue
+        if caller not in caller_ids:
+            caller_row = conn.execute(
+                "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+                (file_id, caller),
+            ).fetchone()
+            caller_ids[caller] = caller_row[0] if caller_row else None
+        if caller_ids[caller] is not None:
+            edges.extend((caller_ids[caller], method_id) for method_id in candidates[name])
+    return edges
+
+
 def index_python_cross_module_call_relationships(
     conn: sqlite3.Connection,
     file_id: int,
@@ -920,21 +989,25 @@ def index_python_cross_module_call_relationships(
         if callee_id not in local_ids
     )
 
+    guessed = _untyped_call_edges(
+        conn, file_id, attribute_calls, typed_calls, imports, path_to_file_id
+    )
     seen = set()
-    for caller_id, callee_id in edges:
-        if (caller_id, callee_id) in seen:
-            continue
-        seen.add((caller_id, callee_id))
-        conn.execute(
-            """
-            INSERT INTO relationships (
-                source_entity_type, source_entity_id,
-                target_entity_type, target_entity_id,
-                relationship_type, confidence
-            ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
-            """,
-            (caller_id, callee_id),
-        )
+    for confidence, found in (("high", edges), ("low", guessed)):
+        for caller_id, callee_id in found:
+            if (caller_id, callee_id) in seen:
+                continue
+            seen.add((caller_id, callee_id))
+            conn.execute(
+                """
+                INSERT INTO relationships (
+                    source_entity_type, source_entity_id,
+                    target_entity_type, target_entity_id,
+                    relationship_type, confidence
+                ) VALUES ('symbol', ?, 'symbol', ?, 'calls', ?)
+                """,
+                (caller_id, callee_id, confidence),
+            )
 
 
 def index_python_cross_file_attribute_relationships(

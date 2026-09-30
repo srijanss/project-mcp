@@ -2469,6 +2469,8 @@ def test_run_scan_links_method_calls_on_constructed_and_annotated_objects(tmp_pa
         ("app.service.by_inherited", "app.models.Payment.charge", "high"),
         ("app.service.by_local_class", "app.service.Local.go", "high"),
         ("app.service.by_module", "app.models.Payment.charge", "high"),
+        # Conflicting types give no high-confidence edge, only the name-based guess.
+        ("app.service.reassigned", "app.models.Payment.charge", "low"),
     ]
 
 
@@ -2554,4 +2556,69 @@ def test_run_scan_links_method_calls_made_on_a_class_itself(tmp_path):
         ("app.service.by_inherited_method", "app.checks.Base.inherited", "high"),
         ("app.service.by_local_class", "app.service.Local.go", "high"),
         ("app.service.by_module_qualified_class", "app.checks.Checker.is_ok", "high"),
+    ]
+
+
+def test_run_scan_links_calls_on_untyped_objects_by_method_name_with_low_confidence(
+    tmp_path,
+):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    crowded = "".join(
+        f"class Crowd{i}:\n    def common(self):\n        return {i}\n\n\n" for i in range(4)
+    )
+    (project_root / "app" / "models.py").write_text(
+        "class Order:\n"
+        "    def refund(self):\n"
+        "        return 1\n"
+        "\n"
+        "\n" + crowded
+    )
+    (project_root / "app" / "elsewhere.py").write_text(
+        "class Stranger:\n    def only_here(self):\n        return 1\n"
+    )
+    (project_root / "app" / "views.py").write_text(
+        "from app.models import Order\n"
+        "\n"
+        "\n"
+        "class View:\n"
+        "    def post(self, obj):\n"
+        "        return obj.refund()\n"
+        "\n"
+        "\n"
+        "def typed():\n"
+        "    order = Order()\n"
+        "    return order.refund()\n"
+        "\n"
+        "\n"
+        "def unknown_method(obj):\n"
+        "    return obj.nothing_like_it()\n"
+        "\n"
+        "\n"
+        "def ambiguous_method(obj):\n"
+        "    return obj.common()\n"
+        "\n"
+        "\n"
+        "def not_imported(obj):\n"
+        "    return obj.only_here()\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls' AND s.qualified_name LIKE 'app.views.%'
+          AND t.kind = 'method'
+        ORDER BY s.qualified_name, t.qualified_name
+        """
+    ).fetchall()
+
+    assert edges == [
+        ("app.views.View.post", "app.models.Order.refund", "low"),
+        ("app.views.typed", "app.models.Order.refund", "high"),
     ]
