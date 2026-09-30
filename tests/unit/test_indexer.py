@@ -2715,6 +2715,42 @@ def test_run_scan_links_class_attribute_reference_only_to_that_classs_field(tmp_
     assert rows == [("app.views.promos", "app.models.Promo.objects", "low")]
 
 
+def test_run_scan_does_not_guess_a_field_for_an_unresolvable_class_name(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "models.py").write_text(
+        "class Promo:\n    objects = None\n"
+    )
+    (project_root / "app" / "views.py").write_text(
+        "from app.models import Promo\n"
+        "from elsewhere import Watch\n"
+        "\n"
+        "\n"
+        "def external():\n"
+        "    return Watch.objects\n"
+        "\n"
+        "\n"
+        "def untyped(row):\n"
+        "    return row.objects\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'references'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND t.kind = 'field' AND s.qualified_name LIKE 'app.views.%'
+        """
+    ).fetchall()
+
+    assert rows == [("app.views.untyped", "app.models.Promo.objects")]
+
+
 def test_run_scan_links_calls_made_on_a_constructor_expression(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)

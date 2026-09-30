@@ -1020,7 +1020,8 @@ def index_python_cross_file_attribute_relationships(
     """Link `obj.<name>` accesses to a field defined in a module this file imports.
 
     `Cls.<name>` on a class this file can resolve links only to that class's own
-    field, or to nothing when it has none (e.g. a framework-provided manager).
+    field, or to nothing when it has none (e.g. a framework-provided manager);
+    the same goes for a CapWords name this file cannot resolve.
     Other objects are untyped, so they match a uniquely named field instead.
     These edges are heuristic and low confidence.
     """
@@ -1079,7 +1080,9 @@ def index_python_cross_file_attribute_relationships(
                 conn, file_id, owner, imports, path_to_file_id
             )
         if class_ids[owner] is None:
-            return False, None
+            # A CapWords name is a class even when it is not one of ours
+            # (external, or re-exported); guessing a field for it would be wrong.
+            return owner.rsplit(".", 1)[-1][:1].isupper(), None
         row = conn.execute(
             """
             SELECT f.id FROM symbols f
