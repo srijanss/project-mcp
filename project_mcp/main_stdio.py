@@ -38,6 +38,7 @@ from project_mcp.tools.context_packs import (
 
 
 MAX_TOOL_OUTPUT_CHARS = 20_000
+DEFAULT_FIND_SYMBOL_LIMIT = 50
 
 
 def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> list[dict]:
@@ -177,9 +178,37 @@ def build_server(project_root: Path) -> MCPServer:
         return get_project_overview(project_root)
 
     @server.tool(name="find_symbol")
-    def find_symbol_tool(query: str) -> list[dict]:
-        """Find symbols whose name or qualified name matches the query."""
-        return find_symbol(project_root, query)
+    def find_symbol_tool(
+        query: str,
+        limit: int = DEFAULT_FIND_SYMBOL_LIMIT,
+        offset: int = 0,
+        kind: str | None = None,
+        include_migrations: bool = False,
+    ) -> list[dict]:
+        """Find symbols whose name or qualified name matches the query.
+
+        Exact names rank first, then prefixes, then substrings. `kind` filters
+        (class, function, method, field, module, ...); migrations are left out
+        unless `include_migrations`. When more than `limit` symbols match, the
+        result is {"truncated": true, "items": [...], "next_offset": N}: pass
+        `offset=N` for the next page.
+        """
+        rows = find_symbol(
+            project_root,
+            query,
+            include_migrations=include_migrations,
+            kind=kind,
+            limit=limit + 1,  # one extra row tells us whether another page exists
+            offset=offset,
+        )
+        if len(rows) > limit:
+            return {
+                "truncated": True,
+                "returned": limit,
+                "next_offset": offset + limit,
+                "items": rows[:limit],
+            }
+        return rows
 
     @server.tool(name="get_symbol_context")
     def get_symbol_context_tool(qualified_name: str) -> dict:

@@ -375,10 +375,12 @@ def test_oversized_list_result_is_truncated_and_says_so(tmp_path, monkeypatch):
     from project_mcp.main_stdio import MAX_TOOL_OUTPUT_CHARS
 
     rows = [{"name": f"symbol_{i}", "file": "app/models.py"} for i in range(5000)]
-    monkeypatch.setattr("project_mcp.main_stdio.find_symbol", lambda *a, **k: rows)
+    monkeypatch.setattr("project_mcp.main_stdio.get_dependents", lambda *a, **k: rows)
     server = build_server(tmp_path)
 
-    result = asyncio.run(server.call_tool("find_symbol", {"query": "symbol"}))
+    result = asyncio.run(
+        server.call_tool("get_dependents", {"qualified_name": "app.models"})
+    )
 
     payload = result.structured_content["result"]
     assert payload["truncated"] is True
@@ -417,12 +419,36 @@ def test_oversized_dict_result_trims_its_longest_list_and_says_so(tmp_path, monk
     assert payload["target"] == "app.models"
 
 
-def test_small_list_result_is_returned_unchanged(tmp_path, monkeypatch):
-    rows = [{"name": "symbol_1", "file": "app/models.py"}]
-    monkeypatch.setattr("project_mcp.main_stdio.find_symbol", lambda *a, **k: rows)
+def test_find_symbol_tool_pages_results_and_says_where_to_continue(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "widgets.py").write_text(
+        "".join(f"class Widget{i}:\n    pass\n\n\n" for i in range(5))
+    )
     server = build_server(tmp_path)
 
-    result = asyncio.run(server.call_tool("find_symbol", {"query": "symbol"}))
+    first = asyncio.run(
+        server.call_tool("find_symbol", {"query": "widget", "kind": "class", "limit": 2})
+    ).structured_content["result"]
+    last = asyncio.run(
+        server.call_tool(
+            "find_symbol", {"query": "widget", "kind": "class", "limit": 2, "offset": 4}
+        )
+    ).structured_content["result"]
+
+    assert first["truncated"] is True
+    assert first["returned"] == len(first["items"]) == 2
+    assert first["next_offset"] == 2
+    assert [row["name"] for row in last] == ["Widget4"]
+
+
+def test_small_list_result_is_returned_unchanged(tmp_path, monkeypatch):
+    rows = [{"name": "symbol_1", "file": "app/models.py"}]
+    monkeypatch.setattr("project_mcp.main_stdio.get_dependents", lambda *a, **k: rows)
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_dependents", {"qualified_name": "app.models"})
+    )
 
     assert result.structured_content == {"result": rows}
 
