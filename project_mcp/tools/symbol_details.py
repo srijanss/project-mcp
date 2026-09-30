@@ -4,6 +4,7 @@ from pathlib import Path
 
 from project_mcp.db import get_connection
 from project_mcp.tools.symbols import (
+    find_symbol,
     get_dependencies,
     get_dependents,
     get_symbol_context,
@@ -60,12 +61,29 @@ def _callers(project_root: Path, qualified_name: str) -> list[dict]:
     ]
 
 
+def _resolve(project_root: Path, name: str) -> dict:
+    """Look `name` up exactly, else as a short name if it is unambiguous."""
+    context = get_symbol_context(project_root, name)
+    if context["found"]:
+        return context
+    suffix = f".{name}"
+    matches = {
+        row["qualified_name"]
+        for row in find_symbol(project_root, name)
+        if row["name"] == name or row["qualified_name"].endswith(suffix)
+    }
+    if len(matches) == 1:
+        return get_symbol_context(project_root, matches.pop())
+    return context
+
+
 def describe_symbol(project_root: Path, qualified_name: str) -> dict:
-    context = get_symbol_context(project_root, qualified_name)
+    context = _resolve(project_root, qualified_name)
     if not context["found"]:
         return context
 
     symbol = context["symbol"]
+    qualified_name = symbol["qualified_name"]
     lines = (Path(project_root) / symbol["file"]).read_text().splitlines()
     definition = lines[symbol["start_line"] - 1 : symbol["end_line"]]
     return {

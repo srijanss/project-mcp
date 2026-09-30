@@ -97,6 +97,14 @@ def test_describe_symbol_lists_tests_covering_its_module(tmp_path):
     ]
 
 
+def test_describe_symbol_resolves_a_unique_short_name(tmp_path):
+    details = describe_symbol(_project(tmp_path), "Widget")
+
+    assert details["found"] is True
+    assert details["symbol"]["qualified_name"] == "app.models.Widget"
+    assert details["source"].startswith("class Widget:")
+
+
 def test_describe_symbol_reports_missing_symbols(tmp_path):
     details = describe_symbol(_project(tmp_path), "app.models.Nope")
 
