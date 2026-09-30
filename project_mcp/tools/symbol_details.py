@@ -63,8 +63,8 @@ def _callers(project_root: Path, qualified_name: str) -> list[dict]:
     ]
 
 
-def _outline(project_root: Path, symbol: dict) -> list[dict]:
-    """A class's direct members (methods, fields), in source order."""
+def _outline(project_root: Path, symbol: dict) -> dict:
+    """A class's direct members in source order, with fields folded into one list."""
     prefix = f"{symbol['qualified_name']}."
     conn = get_connection(project_root)
     try:
@@ -81,7 +81,14 @@ def _outline(project_root: Path, symbol: dict) -> list[dict]:
         ).fetchall()
     finally:
         conn.close()
-    return [{"name": name, "kind": kind, "start_line": line} for name, kind, line in rows]
+    return {
+        "fields": [name for name, kind, _ in rows if kind == "field"],
+        "members": [
+            {"name": name, "kind": kind, "start_line": line}
+            for name, kind, line in rows
+            if kind != "field"
+        ],
+    }
 
 
 def _similar_names(project_root: Path, short: str) -> list[str]:

@@ -209,16 +209,33 @@ def test_describe_symbol_outlines_a_class_whose_source_is_cut_off(tmp_path):
     details = describe_symbol(_big_class(tmp_path), "app.big.Big")
 
     assert details["source_truncated"] is True
-    names = [member["name"] for member in details["outline"]]
+    members = details["outline"]["members"]
+    names = [member["name"] for member in members]
     assert names[0] == "outer"
     assert names[1:] == [f"method_{i}" for i in range(30)]
-    assert details["outline"][0] == {"name": "outer", "kind": "method", "start_line": 2}
+    assert members[0] == {"name": "outer", "kind": "method", "start_line": 2}
 
 
 def test_describe_symbol_outline_lists_only_direct_members(tmp_path):
     details = describe_symbol(_big_class(tmp_path), "app.big.Big")
 
-    assert "inner" not in [member["name"] for member in details["outline"]]
+    assert "inner" not in [member["name"] for member in details["outline"]["members"]]
+
+
+def test_describe_symbol_outline_lists_fields_by_name_on_one_line(tmp_path):
+    (tmp_path / "app").mkdir()
+    body = "".join(f"    def method_{i}(self):\n        return {i}\n" for i in range(40))
+    (tmp_path / "app" / "big.py").write_text(
+        "class Big:\n    first = 1\n    second = 2\n" + body + "    last = 3\n"
+    )
+
+    details = describe_symbol(tmp_path, "app.big.Big")
+
+    outline = details["outline"]
+    assert outline["fields"] == ["first", "second", "last"]
+    assert [member["name"] for member in outline["members"]] == [
+        f"method_{i}" for i in range(40)
+    ]
 
 
 def test_describe_symbol_gives_no_outline_when_the_whole_class_is_shown(tmp_path):
