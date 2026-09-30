@@ -150,7 +150,7 @@ class _ScopeTrackingVisitor(ast.NodeVisitor):
         qualified_name = f"{self.scopes[-1]}.{node.name}"
         self.scopes.append(qualified_name)
         self.class_scopes.append(qualified_name)
-        for statement in node.body:
+        for statement in [*node.type_params, *node.body]:
             self.visit(statement)
         self.class_scopes.pop()
         self.scopes.pop()

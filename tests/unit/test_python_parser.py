@@ -331,6 +331,17 @@ def test_extract_name_loads_attributes_class_body_reads_to_the_class():
     ]
 
 
+def test_extract_name_loads_attributes_type_parameter_bounds_to_the_class():
+    source = "class Box[T: Bound = Default]:\n    pass\n"
+
+    loads = extract_name_loads("app/models.py", source)
+
+    assert loads == [
+        {"referrer": "app.models.Box", "name": "Bound", "line": 1},
+        {"referrer": "app.models.Box", "name": "Default", "line": 1},
+    ]
+
+
 ANALYSIS_SOURCE = (
     "import app.helpers as h\n"
     "from app.settings import LIMIT\n"
