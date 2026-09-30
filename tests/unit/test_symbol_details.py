@@ -230,6 +230,7 @@ def test_describe_symbol_lists_what_the_symbol_references(tmp_path):
 
     assert {(ref["symbol"], ref["confidence"]) for ref in details["references"]} == {
         ("app.models.LIMIT", "high"),
+        ("app.models.Watch", "high"),
         ("app.models.Watch.objects", "low"),
     }
     assert describe_symbol(tmp_path, "app.service.nothing")["references"] == []

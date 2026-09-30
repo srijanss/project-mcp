@@ -1091,27 +1091,29 @@ def index_python_constant_reference_relationships(
     imports: list[dict],
     path_to_file_id: dict,
 ) -> None:
-    """Link bare-name reads to module constants, local or `from`-imported."""
+    """Link bare-name reads to module constants and classes, local or `from`-imported."""
     conn.execute(
         """
         DELETE FROM relationships
         WHERE relationship_type = 'references'
           AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
           AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
-          AND target_entity_id IN (SELECT id FROM symbols WHERE kind = 'constant')
+          AND target_entity_id IN (
+              SELECT id FROM symbols WHERE kind IN ('constant', 'class')
+          )
         """,
         (file_id,),
     )
 
     symbol_ids: dict[str, int] = {}
-    constant_ids: dict[str, int] = {}
+    target_ids: dict[str, int] = {}
     for symbol_id, name, qualified_name, kind in conn.execute(
         "SELECT id, name, qualified_name, kind FROM symbols WHERE file_id = ? ORDER BY id",
         (file_id,),
     ):
         symbol_ids.setdefault(qualified_name, symbol_id)
-        if kind == "constant":
-            constant_ids.setdefault(name, symbol_id)
+        if kind in ("constant", "class"):
+            target_ids.setdefault(name, symbol_id)
 
     for local_name, (module, name) in _imported_names(imports).items():
         target_file_id = path_to_file_id.get(module.replace(".", "/") + ".py")
@@ -1119,21 +1121,21 @@ def index_python_constant_reference_relationships(
             continue
         row = conn.execute(
             "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ? "
-            "AND kind = 'constant'",
+            "AND kind IN ('constant', 'class')",
             (target_file_id, f"{module}.{name}"),
         ).fetchone()
         if row is not None:
-            constant_ids[local_name] = row[0]
+            target_ids[local_name] = row[0]
 
     seen = set()
     for load in loads:
         referrer_id = symbol_ids.get(load["referrer"])
-        constant_id = constant_ids.get(load["name"])
-        if referrer_id is None or constant_id is None:
+        target_id = target_ids.get(load["name"])
+        if referrer_id is None or target_id is None:
             continue
-        if (referrer_id, constant_id) in seen:
+        if (referrer_id, target_id) in seen:
             continue
-        seen.add((referrer_id, constant_id))
+        seen.add((referrer_id, target_id))
         conn.execute(
             """
             INSERT INTO relationships (
@@ -1142,7 +1144,7 @@ def index_python_constant_reference_relationships(
                 relationship_type, confidence
             ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'high')
             """,
-            (referrer_id, constant_id),
+            (referrer_id, target_id),
         )
 
 

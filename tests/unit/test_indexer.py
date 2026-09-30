@@ -2622,3 +2622,59 @@ def test_run_scan_links_calls_on_untyped_objects_by_method_name_with_low_confide
         ("app.views.View.post", "app.models.Order.refund", "low"),
         ("app.views.typed", "app.models.Order.refund", "high"),
     ]
+
+
+def test_run_scan_links_reads_of_imported_and_local_classes_to_the_reading_symbol(
+    tmp_path,
+):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "models.py").write_text(
+        "class Watch:\n    objects = None\n\n\nclass Unused:\n    pass\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "import app.models as m\n"
+        "from app.models import Watch\n"
+        "\n"
+        "\n"
+        "class Local:\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "def by_import():\n"
+        "    return Watch.objects\n"
+        "\n"
+        "\n"
+        "def by_local_class():\n"
+        "    return Local\n"
+        "\n"
+        "\n"
+        "def by_own_method(self_like=None):\n"
+        "    return [Watch, Local]\n"
+        "\n"
+        "\n"
+        "def unrelated():\n"
+        "    return 1\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'references' AND t.kind = 'class'
+          AND r.source_entity_type = 'symbol' AND s.qualified_name LIKE 'app.service.%'
+        ORDER BY 1, 2
+        """
+    ).fetchall()
+
+    assert edges == [
+        ("app.service.by_import", "app.models.Watch", "high"),
+        ("app.service.by_local_class", "app.service.Local", "high"),
+        ("app.service.by_own_method", "app.models.Watch", "high"),
+        ("app.service.by_own_method", "app.service.Local", "high"),
+    ]
