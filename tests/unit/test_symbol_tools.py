@@ -52,6 +52,17 @@ def test_find_symbol_leaves_out_migrations_unless_asked(tmp_path):
     assert any("migrations" in name for name in included)
 
 
+def test_find_symbol_ranks_exact_name_then_prefix_then_substring(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "things.py").write_text(
+        "class AWidget:\n    pass\n\n\nclass Widget:\n    pass\n\n\nclass WidgetZ:\n    pass\n"
+    )
+
+    results = find_symbol(tmp_path, "widget")
+
+    assert [r["name"] for r in results] == ["Widget", "WidgetZ", "AWidget"]
+
+
 def test_get_symbol_context_returns_full_details_for_exact_match(tmp_path):
     project_root = _copy_fixture(tmp_path)
 

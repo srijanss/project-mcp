@@ -57,9 +57,19 @@ def find_symbol(
         WHERE f.project_id = ?
           AND (LOWER(s.name) LIKE ? OR LOWER(s.qualified_name) LIKE ?)
           {migration_filter}
-        ORDER BY (s.kind = 'field'), s.qualified_name
+        ORDER BY (s.kind = 'field'),
+                 CASE WHEN LOWER(s.name) = ? THEN 0
+                      WHEN LOWER(s.name) LIKE ? THEN 1
+                      ELSE 2 END,
+                 s.qualified_name
         """,
-        (project_id, like_query, like_query),
+        (
+            project_id,
+            like_query,
+            like_query,
+            query.lower(),
+            f"{query.lower()}%",
+        ),
     ).fetchall()
 
     return [_symbol_row_to_dict(row) for row in rows]
