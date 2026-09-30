@@ -770,22 +770,40 @@ def _typed_call_edges(
     typed_calls: list[dict],
     imports: list[dict],
     path_to_file_id: dict,
+    attribute_calls: list[dict] = (),
 ) -> list[tuple[int, int]]:
-    """(caller id, method id) for `obj.method()` calls on objects of a known class."""
+    """(caller id, method id) for `obj.method()` calls on objects of a known class.
+
+    `Cls.method()` calls count too: their object is the class itself.
+    """
+    calls = [
+        *typed_calls,
+        *(
+            {"caller": c["caller"], "class": c["object"], "method": c["attribute"]}
+            for c in attribute_calls
+        ),
+    ]
+    caller_ids: dict[str, int | None] = {}
+    class_ids: dict[str, int | None] = {}
     edges = []
-    for call in typed_calls:
-        caller_row = conn.execute(
-            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
-            (file_id, call["caller"]),
-        ).fetchone()
-        class_id = _resolve_class_reference(
-            conn, file_id, call["class"], imports, path_to_file_id
-        )
-        if caller_row is None or class_id is None:
+    for call in calls:
+        caller = call["caller"]
+        if caller not in caller_ids:
+            caller_row = conn.execute(
+                "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+                (file_id, caller),
+            ).fetchone()
+            caller_ids[caller] = caller_row[0] if caller_row else None
+        if call["class"] not in class_ids:
+            class_ids[call["class"]] = _resolve_class_reference(
+                conn, file_id, call["class"], imports, path_to_file_id
+            )
+        caller_id, class_id = caller_ids[caller], class_ids[call["class"]]
+        if caller_id is None or class_id is None:
             continue
         method_id = _resolve_method_in_class_tree(conn, class_id, call["method"], set())
         if method_id is not None:
-            edges.append((caller_row[0], method_id))
+            edges.append((caller_id, method_id))
     return edges
 
 
@@ -795,8 +813,9 @@ def index_python_typed_call_relationships(
     typed_calls: list[dict],
     imports: list[dict],
     path_to_file_id: dict,
+    attribute_calls: list[dict] = (),
 ) -> None:
-    """Link `obj.method()` calls whose method is defined in this same file.
+    """Link `obj.method()` and `Cls.method()` calls whose method is defined in this file.
 
     Methods in other files are linked by
     index_python_cross_module_call_relationships.
@@ -807,7 +826,7 @@ def index_python_typed_call_relationships(
     }
     seen = set()
     for caller_id, callee_id in _typed_call_edges(
-        conn, file_id, typed_calls, imports, path_to_file_id
+        conn, file_id, typed_calls, imports, path_to_file_id, attribute_calls
     ):
         if callee_id not in local_ids or (caller_id, callee_id) in seen:
             continue
@@ -896,7 +915,7 @@ def index_python_cross_module_call_relationships(
     edges.extend(
         (caller_id, callee_id)
         for caller_id, callee_id in _typed_call_edges(
-            conn, file_id, typed_calls, imports, path_to_file_id
+            conn, file_id, typed_calls, imports, path_to_file_id, attribute_calls
         )
         if callee_id not in local_ids
     )
@@ -1565,7 +1584,12 @@ def run_scan(
                 conn, file_id, analysis["self_calls"], symbols
             )
             index_python_typed_call_relationships(
-                conn, file_id, analysis["typed_calls"], analysis["imports"], path_to_file_id
+                conn,
+                file_id,
+                analysis["typed_calls"],
+                analysis["imports"],
+                path_to_file_id,
+                analysis["attribute_calls"],
             )
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]
@@ -1857,7 +1881,12 @@ def refresh_index(
                 conn, file_id, analysis["self_calls"], symbols
             )
             index_python_typed_call_relationships(
-                conn, file_id, analysis["typed_calls"], analysis["imports"], path_to_file_id
+                conn,
+                file_id,
+                analysis["typed_calls"],
+                analysis["imports"],
+                path_to_file_id,
+                analysis["attribute_calls"],
             )
             index_python_attribute_relationships(
                 conn, file_id, analysis["self_references"]

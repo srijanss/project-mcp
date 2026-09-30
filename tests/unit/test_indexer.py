@@ -2487,3 +2487,71 @@ def test_run_scan_indexes_a_file_that_is_not_valid_utf8(tmp_path):
     }
     assert "app.legacy.cafe" in qualified_names
     assert "app.models.Widget" in qualified_names
+
+
+def test_run_scan_links_method_calls_made_on_a_class_itself(tmp_path):
+    project_root = tmp_path / "project"
+    (project_root / "app").mkdir(parents=True)
+    (project_root / "app" / "checks.py").write_text(
+        "class Base:\n"
+        "    @classmethod\n"
+        "    def inherited(cls):\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "class Checker(Base):\n"
+        "    @staticmethod\n"
+        "    def is_ok(value):\n"
+        "        return True\n"
+    )
+    (project_root / "app" / "service.py").write_text(
+        "import app.checks as c\n"
+        "from app.checks import Checker\n"
+        "\n"
+        "\n"
+        "class Local:\n"
+        "    @staticmethod\n"
+        "    def go():\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "def by_imported_class():\n"
+        "    return Checker.is_ok(1)\n"
+        "\n"
+        "\n"
+        "def by_module_qualified_class():\n"
+        "    return c.Checker.is_ok(1)\n"
+        "\n"
+        "\n"
+        "def by_inherited_method():\n"
+        "    return Checker.inherited()\n"
+        "\n"
+        "\n"
+        "def by_local_class():\n"
+        "    return Local.go()\n"
+        "\n"
+        "\n"
+        "def unknown_method():\n"
+        "    return Checker.missing()\n"
+    )
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+
+    run_scan(conn, project_root, config)
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls' AND s.qualified_name LIKE 'app.service.%'
+        ORDER BY s.qualified_name, t.qualified_name
+        """
+    ).fetchall()
+
+    assert edges == [
+        ("app.service.by_imported_class", "app.checks.Checker.is_ok", "high"),
+        ("app.service.by_inherited_method", "app.checks.Base.inherited", "high"),
+        ("app.service.by_local_class", "app.service.Local.go", "high"),
+        ("app.service.by_module_qualified_class", "app.checks.Checker.is_ok", "high"),
+    ]
