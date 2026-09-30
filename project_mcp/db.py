@@ -9,12 +9,16 @@ from project_mcp.schema import (
 )
 
 
+# Another session's full re-index can hold the write lock for many seconds.
+BUSY_TIMEOUT_SECONDS = 30
+
+
 def get_connection(project_root: Path) -> sqlite3.Connection:
     project_root = Path(project_root)
     project_mcp_dir = project_root / ".project-mcp"
     project_mcp_dir.mkdir(exist_ok=True)
     db_path = project_mcp_dir / "index.db"
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=BUSY_TIMEOUT_SECONDS)
     init_schema(conn)
     _invalidate_if_stale(conn)
     return conn

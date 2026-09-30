@@ -116,6 +116,15 @@ def test_get_connection_rebuilds_index_written_before_cross_module_edges(tmp_pat
     assert file_rows == []
 
 
+def test_get_connection_waits_long_enough_for_a_concurrent_indexer(tmp_path):
+    """A full re-index in another session can hold the write lock for many seconds."""
+    conn = get_connection(tmp_path)
+    timeout_ms = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+    conn.close()
+
+    assert timeout_ms >= 30_000
+
+
 def test_get_connection_reads_while_another_connection_holds_the_write_lock(tmp_path):
     """A second session re-indexing must not make status/read tools fail.
 
