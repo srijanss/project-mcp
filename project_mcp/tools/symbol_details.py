@@ -7,9 +7,22 @@ from project_mcp.tools.symbols import (
     get_dependents,
     get_symbol_context,
 )
+from project_mcp.tools.tests import get_tests_for
 
 
 MAX_SOURCE_LINES = 80
+
+
+def _covering_tests(project_root: Path, qualified_name: str) -> list[dict]:
+    """Tests for the symbol, else for the nearest enclosing module or class."""
+    parts = qualified_name.split(".")
+    for length in range(len(parts), 0, -1):
+        candidate = ".".join(parts[:length])
+        rows = get_tests_for(project_root, candidate)
+        if rows:
+            scope = "symbol" if candidate == qualified_name else "module"
+            return [{**row, "scope": scope} for row in rows]
+    return []
 
 
 def describe_symbol(project_root: Path, qualified_name: str) -> dict:
@@ -35,4 +48,5 @@ def describe_symbol(project_root: Path, qualified_name: str) -> dict:
             for row in get_dependencies(project_root, qualified_name)
             if row["relationship_type"] == "calls"
         ],
+        "tests": _covering_tests(project_root, qualified_name),
     }

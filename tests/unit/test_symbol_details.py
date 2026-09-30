@@ -61,6 +61,26 @@ def test_describe_symbol_lists_direct_callers_and_callees(tmp_path):
     assert details["callers"][0]["confidence"] == "high"
 
 
+def test_describe_symbol_lists_tests_covering_its_module(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("def value():\n    return 1\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_models.py").write_text(
+        "from app.models import value\n\n\ndef test_value():\n    assert value()\n"
+    )
+
+    details = describe_symbol(tmp_path, "app.models.value")
+
+    assert details["tests"] == [
+        {
+            "test_file": "tests/test_models.py",
+            "confidence": "high",
+            "evidence": ["direct_import"],
+            "scope": "module",
+        }
+    ]
+
+
 def test_describe_symbol_reports_missing_symbols(tmp_path):
     details = describe_symbol(_project(tmp_path), "app.models.Nope")
 
