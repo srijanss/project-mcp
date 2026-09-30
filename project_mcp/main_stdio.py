@@ -193,6 +193,10 @@ def build_server(project_root: Path) -> MCPServer:
         result is {"truncated": true, "items": [...], "next_offset": N}: pass
         `offset=N` for the next page.
         """
+        if limit < 1:
+            raise ToolError("limit must be at least 1")
+        if offset < 0:
+            raise ToolError("offset must not be negative")
         rows = find_symbol(
             project_root,
             query,

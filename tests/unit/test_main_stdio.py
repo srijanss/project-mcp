@@ -466,6 +466,25 @@ def test_find_symbol_tool_pages_results_and_says_where_to_continue(tmp_path):
     assert [row["name"] for row in last] == ["Widget4"]
 
 
+@pytest.mark.parametrize(
+    "arguments, message",
+    [
+        ({"limit": 0}, "limit must be at least 1"),
+        ({"limit": -3}, "limit must be at least 1"),
+        ({"offset": -1}, "offset must not be negative"),
+    ],
+)
+def test_find_symbol_tool_rejects_invalid_paging_arguments(
+    tmp_path, arguments, message
+):
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    server = build_server(tmp_path)
+
+    with pytest.raises(ToolError, match=message):
+        asyncio.run(server.call_tool("find_symbol", {"query": "x", **arguments}))
+
+
 def test_small_list_result_is_returned_unchanged(tmp_path, monkeypatch):
     rows = [{"name": "symbol_1", "file": "app/models.py"}]
     monkeypatch.setattr("project_mcp.main_stdio.get_dependents", lambda *a, **k: rows)
