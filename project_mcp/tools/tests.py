@@ -6,6 +6,9 @@ from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index
 
 
+MAX_TESTS_NAMED_PER_FILE = 5
+
+
 def _current_project_id(conn, project_root: Path) -> int | None:
     row = conn.execute(
         "SELECT id FROM projects WHERE root_path = ?", (str(project_root),)
@@ -61,11 +64,54 @@ def _resolve_entity_label(conn, entity_type: str, entity_id: int):
     return row[0] if row else None
 
 
+def _referencing_tests(conn, symbol_id: int) -> list[dict]:
+    """Test files whose tests call or read the symbol, with those tests named."""
+    rows = conn.execute(
+        """
+        SELECT f.path, s.qualified_name, r.confidence
+        FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN files f ON f.id = s.file_id
+        WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND r.target_entity_id = ? AND r.relationship_type IN ('calls', 'references')
+          AND f.file_kind = 'test'
+        """,
+        (symbol_id,),
+    ).fetchall()
+    by_file: dict[str, dict] = {}
+    for path, test_name, confidence in rows:
+        entry = by_file.setdefault(
+            path,
+            {
+                "test_file": path,
+                "confidence": "low",
+                "evidence": ["symbol_reference"],
+                "tests": set(),
+            },
+        )
+        entry["tests"].add(test_name)
+        if confidence == "high":
+            entry["confidence"] = "high"
+    results = []
+    for _, entry in sorted(by_file.items()):
+        names = sorted(entry["tests"])
+        row = {**entry, "tests": names[:MAX_TESTS_NAMED_PER_FILE]}
+        if len(names) > MAX_TESTS_NAMED_PER_FILE:
+            row["tests_total"] = len(names)
+        results.append(row)
+    return results
+
+
 def get_tests_for(project_root: Path, qualified_name: str) -> list[dict]:
     conn, project_id = _ensure_indexed(project_root)
     entity_type, entity_id = _resolve_entity(conn, project_id, qualified_name)
     if entity_type is None:
         return []
+    if entity_type == "symbol":
+        # Tests that name the symbol beat tests that merely import its module.
+        referencing = _referencing_tests(conn, entity_id)
+        if referencing:
+            return referencing
 
     rows = conn.execute(
         """

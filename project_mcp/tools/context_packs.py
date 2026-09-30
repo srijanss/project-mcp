@@ -18,6 +18,14 @@ from project_mcp.db import get_connection
 logger = logging.getLogger(__name__)
 
 
+def _related_test_files(project_root: Path, target: str) -> list[dict]:
+    """Test files for the target; packs stay compact, so tests are not named."""
+    return [
+        {key: value for key, value in row.items() if key not in ("tests", "tests_total")}
+        for row in get_tests_for(project_root, target)
+    ]
+
+
 def get_context_for_symbol(project_root: Path, qualified_name: str) -> dict[str, Any]:
     """Get compact context for a specific symbol.
 
@@ -78,7 +86,7 @@ def get_context_for_symbol(project_root: Path, qualified_name: str) -> dict[str,
             "used_by": used_by_truncated,
             "used_by_total": used_by_total,
             "is_truncated_dependents": used_by_total > 10,
-            "related_tests": get_tests_for(project_root, qualified_name),
+            "related_tests": _related_test_files(project_root, qualified_name),
             "entrypoints": [],
             "dependencies": imports_truncated,
             "summary": f"Symbol {qualified_name} with {used_by_total} dependents",
@@ -213,7 +221,7 @@ def get_context_for_refactor(project_root: Path, target: str) -> dict[str, Any]:
         }
 
     dependents = get_dependents(project_root, target)
-    related_tests = get_tests_for(project_root, target)
+    related_tests = _related_test_files(project_root, target)
 
     symbol_details = get_symbol_context(project_root, target)
     file_path = symbol_details.get("symbol", {}).get("file") if symbol_details.get("found") else None

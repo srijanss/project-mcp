@@ -82,7 +82,7 @@ def test_describe_symbol_lists_tests_covering_its_module(tmp_path):
     (tmp_path / "app" / "models.py").write_text("def value():\n    return 1\n")
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_models.py").write_text(
-        "from app.models import value\n\n\ndef test_value():\n    assert value()\n"
+        "from app.models import value\n\n\ndef test_imports_only():\n    assert True\n"
     )
 
     details = describe_symbol(tmp_path, "app.models.value")
@@ -93,6 +93,30 @@ def test_describe_symbol_lists_tests_covering_its_module(tmp_path):
             "confidence": "high",
             "evidence": ["direct_import"],
             "scope": "module",
+        }
+    ]
+
+
+def test_describe_symbol_prefers_the_tests_that_reference_it_by_name(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("def value():\n    return 1\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_models.py").write_text(
+        "from app.models import value\n\n\ndef test_value():\n    assert value()\n"
+    )
+    (tmp_path / "tests" / "test_other.py").write_text(
+        "from app.models import value\n\n\ndef test_imports_only():\n    assert True\n"
+    )
+
+    details = describe_symbol(tmp_path, "app.models.value")
+
+    assert details["tests"] == [
+        {
+            "test_file": "tests/test_models.py",
+            "confidence": "high",
+            "evidence": ["symbol_reference"],
+            "tests": ["tests.test_models.test_value"],
+            "scope": "symbol",
         }
     ]
 

@@ -455,3 +455,35 @@ class TestContextPackFormat:
         """Verify result is substantially smaller than reading all files."""
         for context in self._all_packs(tmp_path):
             assert len(str(context)) < 5000
+
+
+def _order_project_with_tests(root: Path) -> Path:
+    (root / "app").mkdir()
+    (root / "app" / "models.py").write_text(
+        "class Order:\n    def refund(self):\n        return 1\n"
+    )
+    (root / "tests").mkdir()
+    (root / "tests" / "test_orders.py").write_text(
+        "from app.models import Order\n\n\n"
+        "def test_refund():\n    order = Order()\n    assert order.refund()\n"
+    )
+    return root
+
+
+def test_symbol_and_refactor_packs_list_related_test_files_without_naming_each_test(
+    tmp_path,
+):
+    project_root = _order_project_with_tests(tmp_path)
+    expected = [
+        {
+            "test_file": "tests/test_orders.py",
+            "confidence": "high",
+            "evidence": ["symbol_reference"],
+        }
+    ]
+
+    symbol_pack = get_context_for_symbol(project_root, "app.models.Order.refund")
+    refactor_pack = get_context_for_refactor(project_root, "app.models.Order.refund")
+
+    assert symbol_pack["related_tests"] == expected
+    assert refactor_pack["related_tests"] == expected
