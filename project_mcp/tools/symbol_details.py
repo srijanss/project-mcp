@@ -139,15 +139,21 @@ def describe_symbol(project_root: Path, qualified_name: str) -> dict:
         if symbol["kind"] == "class" and source["source_truncated"]
         else {}
     )
+    dependencies = get_dependencies(project_root, qualified_name)
+
+    def linked(relationship_type: str) -> list[dict]:
+        return [
+            {"symbol": row["target"], "confidence": row["confidence"]}
+            for row in dependencies
+            if row["relationship_type"] == relationship_type
+        ]
+
     return {
         **context,
         **source,
         **outline,
         "callers": _callers(project_root, qualified_name),
-        "callees": [
-            {"symbol": row["target"], "confidence": row["confidence"]}
-            for row in get_dependencies(project_root, qualified_name)
-            if row["relationship_type"] == "calls"
-        ],
+        "callees": linked("calls"),
+        "references": linked("references"),
         "tests": _covering_tests(project_root, qualified_name),
     }

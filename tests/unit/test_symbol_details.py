@@ -213,3 +213,23 @@ def test_describe_symbol_gives_no_outline_for_a_long_function(tmp_path):
 
     assert details["source_truncated"] is True
     assert "outline" not in details
+
+
+def test_describe_symbol_lists_what_the_symbol_references(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text(
+        "LIMIT = 3\n\n\nclass Watch:\n    objects = None\n"
+    )
+    (tmp_path / "app" / "service.py").write_text(
+        "from app.models import LIMIT, Watch\n\n\n"
+        "def watches():\n    return Watch.objects, LIMIT\n\n\n"
+        "def nothing():\n    return 1\n"
+    )
+
+    details = describe_symbol(tmp_path, "app.service.watches")
+
+    assert {(ref["symbol"], ref["confidence"]) for ref in details["references"]} == {
+        ("app.models.LIMIT", "high"),
+        ("app.models.Watch.objects", "low"),
+    }
+    assert describe_symbol(tmp_path, "app.service.nothing")["references"] == []
