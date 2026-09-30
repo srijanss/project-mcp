@@ -140,10 +140,18 @@ class _ScopeTrackingVisitor(ast.NodeVisitor):
         self.class_scopes: list[str] = []
 
     def visit_ClassDef(self, node):
+        # Decorators, bases and keywords are evaluated in the enclosing scope.
+        for expression in [
+            *node.decorator_list,
+            *node.bases,
+            *(keyword.value for keyword in node.keywords),
+        ]:
+            self.visit(expression)
         qualified_name = f"{self.scopes[-1]}.{node.name}"
         self.scopes.append(qualified_name)
         self.class_scopes.append(qualified_name)
-        self.generic_visit(node)
+        for statement in node.body:
+            self.visit(statement)
         self.class_scopes.pop()
         self.scopes.pop()
 
@@ -345,9 +353,11 @@ class _ReferenceCollector(_ScopeTrackingVisitor):
             and id(node) not in self._typed_targets
         ):
             self._function_types[-1].assign(node.id, _FunctionTypes.UNTYPED)
-        if self.callers and isinstance(node.ctx, ast.Load):
+        # A read in a class body belongs to the class, which has no caller.
+        referrer = self.callers[-1] if self.callers else self.scopes[-1]
+        if (self.callers or self.class_scopes) and isinstance(node.ctx, ast.Load):
             self.name_loads.append(
-                {"referrer": self.callers[-1], "name": node.id, "line": node.lineno}
+                {"referrer": referrer, "name": node.id, "line": node.lineno}
             )
 
 

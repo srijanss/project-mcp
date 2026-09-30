@@ -302,6 +302,35 @@ def test_extract_name_loads_finds_bare_names_read_inside_functions():
     ]
 
 
+def test_extract_name_loads_attributes_class_body_reads_to_the_class():
+    source = (
+        "TOP = LIMIT\n"
+        "\n"
+        "\n"
+        "class Watch:\n"
+        "    brand = FK(Brand)\n"
+        "\n"
+        "    class Meta:\n"
+        "        model = Other\n"
+        "\n"
+        "    def run(self):\n"
+        "        return Third\n"
+        "\n"
+        "\n"
+        "class Child(Watch, metaclass=Meta):\n"
+        "    pass\n"
+    )
+
+    loads = extract_name_loads("app/models.py", source)
+
+    assert loads == [
+        {"referrer": "app.models.Watch", "name": "FK", "line": 5},
+        {"referrer": "app.models.Watch", "name": "Brand", "line": 5},
+        {"referrer": "app.models.Watch.Meta", "name": "Other", "line": 8},
+        {"referrer": "app.models.Watch.run", "name": "Third", "line": 11},
+    ]
+
+
 ANALYSIS_SOURCE = (
     "import app.helpers as h\n"
     "from app.settings import LIMIT\n"

@@ -2787,6 +2787,44 @@ def test_run_scan_links_class_attribute_access_within_the_same_file(tmp_path):
     ]
 
 
+def test_run_scan_links_a_class_to_the_classes_its_body_reads(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "brands.py").write_text("class Brand:\n    pass\n")
+    (project_root / "app" / "watch.py").write_text(
+        "from app.brands import Brand\n"
+        "\n"
+        "\n"
+        "class Local:\n"
+        "    pass\n"
+        "\n"
+        "\n"
+        "class Watch:\n"
+        "    brand = FK(Brand)\n"
+        "    other = FK(Local)\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'references'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND s.qualified_name = 'app.watch.Watch'
+        ORDER BY t.qualified_name
+        """
+    ).fetchall()
+
+    assert rows == [
+        ("app.watch.Watch", "app.brands.Brand", "high"),
+        ("app.watch.Watch", "app.watch.Local", "high"),
+    ]
+
+
 def test_run_scan_links_calls_made_on_a_constructor_expression(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)
