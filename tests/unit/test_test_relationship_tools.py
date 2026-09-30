@@ -124,3 +124,43 @@ def test_get_tests_for_a_method_caps_the_tests_it_names_per_file(tmp_path):
 
     assert row["tests"] == [f"tests.test_models.test_value_{i:02d}" for i in range(5)]
     assert row["tests_total"] == 12
+
+
+def test_get_tests_for_a_method_leaves_helpers_out_of_the_tests_it_names(tmp_path):
+    project_root = _order_project(tmp_path)
+    (project_root / "tests" / "test_helpers.py").write_text(
+        "from app.models import Order\n"
+        "\n"
+        "\n"
+        "class TestCancel:\n"
+        "    def _hit(self):\n"
+        "        return Order().cancel()\n"
+        "\n"
+        "    def test_cancel(self):\n"
+        "        assert self._hit()\n"
+        "\n"
+        "    def test_direct(self):\n"
+        "        assert Order().cancel()\n"
+    )
+
+    tests_for = get_tests_for(project_root, "app.models.Order.cancel")
+
+    helpers_file = next(t for t in tests_for if t["test_file"] == "tests/test_helpers.py")
+    assert helpers_file["tests"] == ["tests.test_helpers.TestCancel.test_direct"]
+
+
+def test_get_tests_for_a_method_reached_only_through_a_helper_keeps_the_file(tmp_path):
+    project_root = _order_project(tmp_path)
+    (project_root / "tests" / "test_only_helper.py").write_text(
+        "from app.models import Order\n"
+        "\n"
+        "\n"
+        "def make_cancelled():\n"
+        "    return Order().cancel()\n"
+    )
+
+    tests_for = get_tests_for(project_root, "app.models.Order.cancel")
+
+    entry = next(t for t in tests_for if t["test_file"] == "tests/test_only_helper.py")
+    assert entry["confidence"] == "high"
+    assert "tests" not in entry

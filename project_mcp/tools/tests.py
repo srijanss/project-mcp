@@ -89,13 +89,17 @@ def _referencing_tests(conn, symbol_id: int) -> list[dict]:
                 "tests": set(),
             },
         )
-        entry["tests"].add(test_name)
+        # Helpers and fixtures reach the symbol too; only real tests are named.
+        if test_name.rsplit(".", 1)[-1].startswith("test"):
+            entry["tests"].add(test_name)
         if confidence == "high":
             entry["confidence"] = "high"
     results = []
     for _, entry in sorted(by_file.items()):
-        names = sorted(entry["tests"])
-        row = {**entry, "tests": names[:MAX_TESTS_NAMED_PER_FILE]}
+        names = sorted(entry.pop("tests"))
+        row = dict(entry)
+        if names:
+            row["tests"] = names[:MAX_TESTS_NAMED_PER_FILE]
         if len(names) > MAX_TESTS_NAMED_PER_FILE:
             row["tests_total"] = len(names)
         results.append(row)
