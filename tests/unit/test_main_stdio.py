@@ -368,6 +368,35 @@ def test_tool_failure_reports_the_underlying_error_message(tmp_path, monkeypatch
         asyncio.run(server.call_tool("find_symbol", {"query": "x"}))
 
 
+def test_oversized_list_result_is_truncated_and_says_so(tmp_path, monkeypatch):
+    """Huge results overflow the client's token limit and get saved to a file."""
+    import json
+
+    from project_mcp.main_stdio import MAX_TOOL_OUTPUT_CHARS
+
+    rows = [{"name": f"symbol_{i}", "file": "app/models.py"} for i in range(5000)]
+    monkeypatch.setattr("project_mcp.main_stdio.find_symbol", lambda *a, **k: rows)
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("find_symbol", {"query": "symbol"}))
+
+    payload = result.structured_content["result"]
+    assert payload["truncated"] is True
+    assert payload["total"] == 5000
+    assert payload["returned"] == len(payload["items"]) < 5000
+    assert len(json.dumps(payload["items"])) <= MAX_TOOL_OUTPUT_CHARS
+
+
+def test_small_list_result_is_returned_unchanged(tmp_path, monkeypatch):
+    rows = [{"name": "symbol_1", "file": "app/models.py"}]
+    monkeypatch.setattr("project_mcp.main_stdio.find_symbol", lambda *a, **k: rows)
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("find_symbol", {"query": "symbol"}))
+
+    assert result.structured_content == {"result": rows}
+
+
 def test_find_symbol_tool_call_sees_edits_made_after_first_index(tmp_path):
     """A tool call must not silently serve stale data (MVP 13)."""
     import time

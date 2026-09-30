@@ -1,6 +1,9 @@
 import functools
+import inspect
+import json
 import os
 import sys
+import typing
 from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
@@ -34,6 +37,9 @@ from project_mcp.tools.context_packs import (
 )
 
 
+MAX_TOOL_OUTPUT_CHARS = 20_000
+
+
 def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> list[dict]:
     if ecosystem not in (None, "python"):
         return []
@@ -63,11 +69,32 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
     ]
 
 
-def _report_tool_errors(server: MCPServer) -> None:
-    """Make every tool registered on `server` surface its real failure.
+def _cap_output(result):
+    """Trim an oversized list so clients don't overflow into a saved file."""
+    if not isinstance(result, list) or len(json.dumps(result)) <= MAX_TOOL_OUTPUT_CHARS:
+        return result
+    low, high = 0, len(result)  # largest prefix that fits, by bisection
+    while low < high:
+        mid = (low + high + 1) // 2
+        if len(json.dumps(result[:mid])) <= MAX_TOOL_OUTPUT_CHARS:
+            low = mid
+        else:
+            high = mid - 1
+    kept = result[:low]
+    return {
+        "truncated": True,
+        "total": len(result),
+        "returned": len(kept),
+        "items": kept,
+    }
 
-    The framework hides the text of unexpected exceptions behind a bare
-    "Error executing tool"; a ToolError keeps its message.
+
+def _guard_tools(server: MCPServer) -> None:
+    """Make every tool registered on `server` well behaved.
+
+    Failures surface their real message (the framework hides the text of
+    unexpected exceptions behind a bare "Error executing tool"; a ToolError
+    keeps it), and oversized list results are trimmed and flagged.
     """
     register = server.tool
 
@@ -78,12 +105,18 @@ def _report_tool_errors(server: MCPServer) -> None:
             @functools.wraps(fn)
             def guarded(*fn_args, **fn_kwargs):
                 try:
-                    return fn(*fn_args, **fn_kwargs)
+                    return _cap_output(fn(*fn_args, **fn_kwargs))
                 except ToolError:
                     raise
                 except Exception as exc:
                     raise ToolError(f"{type(exc).__name__}: {exc}") from exc
 
+            signature = inspect.signature(fn)
+            if typing.get_origin(signature.return_annotation) is list:
+                # A trimmed list is returned as a dict, so widen the output schema.
+                guarded.__signature__ = signature.replace(
+                    return_annotation=list[dict] | dict
+                )
             return decorate(guarded)
 
         return wrap
@@ -94,7 +127,7 @@ def _report_tool_errors(server: MCPServer) -> None:
 def build_server(project_root: Path) -> MCPServer:
     config = load_config(project_root)
     server = MCPServer("project-mcp")
-    _report_tool_errors(server)
+    _guard_tools(server)
 
     @server.tool()
     def list_dependencies(ecosystem: str | None = None) -> list[dict]:
