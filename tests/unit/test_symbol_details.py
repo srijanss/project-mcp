@@ -120,3 +120,30 @@ def test_describe_symbol_reports_missing_symbols(tmp_path):
     details = describe_symbol(_project(tmp_path), "app.models.Nope")
 
     assert details == {"found": False, "symbol": None}
+
+
+def test_describe_symbol_reports_unavailable_source_when_the_file_is_gone(
+    tmp_path, monkeypatch
+):
+    context = {
+        "found": True,
+        "symbol": {
+            "name": "gone",
+            "qualified_name": "app.gone.gone",
+            "kind": "function",
+            "start_line": 1,
+            "end_line": 2,
+            "file": "app/gone.py",
+        },
+    }
+    monkeypatch.setattr(
+        "project_mcp.tools.symbol_details._resolve", lambda *a, **k: context
+    )
+
+    details = describe_symbol(tmp_path, "app.gone.gone")
+
+    assert details["found"] is True
+    assert details["source"] is None
+    assert details["source_error"] == "FileNotFoundError"
+    assert details["source_truncated"] is False
+    assert details["source_total_lines"] == 0

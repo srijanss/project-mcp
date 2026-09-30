@@ -86,13 +86,25 @@ def describe_symbol(project_root: Path, qualified_name: str) -> dict:
 
     symbol = context["symbol"]
     qualified_name = symbol["qualified_name"]
-    lines = (Path(project_root) / symbol["file"]).read_text().splitlines()
-    definition = lines[symbol["start_line"] - 1 : symbol["end_line"]]
+    try:
+        lines = (Path(project_root) / symbol["file"]).read_text().splitlines()
+    except OSError as exc:  # e.g. the file was deleted after indexing
+        source = {
+            "source": None,
+            "source_error": type(exc).__name__,
+            "source_truncated": False,
+            "source_total_lines": 0,
+        }
+    else:
+        definition = lines[symbol["start_line"] - 1 : symbol["end_line"]]
+        source = {
+            "source": "\n".join(definition[:MAX_SOURCE_LINES]),
+            "source_truncated": len(definition) > MAX_SOURCE_LINES,
+            "source_total_lines": len(definition),
+        }
     return {
         **context,
-        "source": "\n".join(definition[:MAX_SOURCE_LINES]),
-        "source_truncated": len(definition) > MAX_SOURCE_LINES,
-        "source_total_lines": len(definition),
+        **source,
         "callers": _callers(project_root, qualified_name),
         "callees": [
             {"symbol": row["target"], "confidence": row["confidence"]}
