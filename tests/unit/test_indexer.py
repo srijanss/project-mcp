@@ -1741,6 +1741,32 @@ def test_run_scan_enriches_symbols_with_django_framework_metadata(tmp_path):
         assert metadata.get("framework_kind") == "django_model"
 
 
+def test_run_scan_tags_symbols_in_django_migration_files(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    migrations = project_root / "app" / "migrations"
+    migrations.mkdir()
+    (migrations / "__init__.py").write_text("")
+    (migrations / "0001_initial.py").write_text(
+        "class Migration:\n    dependencies = []\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    def framework_kind_of(path):
+        rows = conn.execute(
+            "SELECT s.metadata_json FROM symbols s JOIN files f ON f.id = s.file_id"
+            " WHERE f.path = ? AND s.kind = 'class'",
+            (path,),
+        ).fetchall()
+        assert rows
+        return {json.loads(row[0] or "{}").get("framework_kind") for row in rows}
+
+    assert framework_kind_of("app/migrations/0001_initial.py") == {"django_migration"}
+    assert "django_migration" not in framework_kind_of("app/models.py")
+
+
 def test_run_scan_enriches_only_current_project_symbols(tmp_path):
     """Enrichment should only affect symbols in current project, not other projects."""
     import json

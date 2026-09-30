@@ -14,7 +14,9 @@ import sqlite3
 #    `obj.method()` resolves when `obj` is built by `Cls()` or annotated `Cls`
 #    in the calling function, and a function calling another several times
 #    yields a single edge.
-CURRENT_SCHEMA_VERSION = 5
+# 6: symbols in framework-classified files (e.g. Django migrations) carry the
+#    file's framework_kind, which find_symbol uses to rank and filter.
+CURRENT_SCHEMA_VERSION = 6
 
 REQUIRED_TABLES = {
     "projects",

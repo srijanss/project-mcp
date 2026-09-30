@@ -1709,6 +1709,19 @@ def _enrich_framework_metadata(conn: sqlite3.Connection, project_id: int) -> Non
                 AND file_id IN (SELECT id FROM files WHERE project_id = ?)""",
                 (enrichment.get("framework_kind"), enrichment["qualified_name"], project_id),
             )
+        elif "path" in enrichment:
+            # A file-level kind applies to its symbols unless they have their own.
+            conn.execute(
+                """UPDATE symbols SET metadata_json = json_set(
+                    COALESCE(metadata_json, '{}'),
+                    '$.framework_kind',
+                    ?
+                ) WHERE json_extract(COALESCE(metadata_json, '{}'), '$.framework_kind') IS NULL
+                AND file_id IN (
+                    SELECT id FROM files WHERE project_id = ? AND path = ?
+                )""",
+                (enrichment.get("framework_kind"), project_id, enrichment["path"]),
+            )
 
 
 def _detect_stale_index(
