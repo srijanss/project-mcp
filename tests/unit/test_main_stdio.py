@@ -592,3 +592,19 @@ def test_symbol_tools_say_which_argument_is_missing(tmp_path):
 
     with pytest.raises(ToolError, match="qualified_name is required"):
         asyncio.run(server.call_tool("get_dependents", {}))
+
+
+def test_dict_results_are_serialized_compactly(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_symbol_context", {"qualified_name": "app.models.Widget"})
+    )
+
+    text = result.content[0].text
+    assert result.is_error is False
+    assert len(result.content) == 1
+    assert "\n  " not in text
+    assert json.loads(text)["symbol"]["qualified_name"] == "app.models.Widget"

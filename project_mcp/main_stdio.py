@@ -8,6 +8,7 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
 
 from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
@@ -93,6 +94,20 @@ def _cap_output(result):
     return result
 
 
+def _compact(result, wrapped: bool = False):
+    """Send a dict as compact JSON; the framework would indent it by two spaces.
+
+    `wrapped` marks a tool whose output schema nests its value under `result`.
+    """
+    if not isinstance(result, dict):
+        return result
+    text = json.dumps(result, default=str, separators=(",", ":"))
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)],
+        structured_content={"result": result} if wrapped else None,
+    )
+
+
 def _cap_list(result: list) -> dict:
     def wrap(count: int) -> dict:
         return {
@@ -141,17 +156,20 @@ def _guard_tools(server: MCPServer) -> None:
         decorate = register(*args, **kwargs)
 
         def wrap(fn):
+            signature = inspect.signature(fn)
+            returns_list = typing.get_origin(signature.return_annotation) is list
+
             @functools.wraps(fn)
             def guarded(*fn_args, **fn_kwargs):
                 try:
-                    return _cap_output(fn(*fn_args, **fn_kwargs))
+                    result = _cap_output(fn(*fn_args, **fn_kwargs))
+                    return _compact(result, wrapped=returns_list)
                 except ToolError:
                     raise
                 except Exception as exc:
                     raise ToolError(f"{type(exc).__name__}: {exc}") from exc
 
-            signature = inspect.signature(fn)
-            if typing.get_origin(signature.return_annotation) is list:
+            if returns_list:
                 # A trimmed list is returned as a dict, so widen the output schema.
                 guarded.__signature__ = signature.replace(
                     return_annotation=list[dict] | dict
