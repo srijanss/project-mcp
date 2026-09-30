@@ -86,20 +86,22 @@ def _cap_output(result):
 
 
 def _cap_list(result: list) -> dict:
+    def wrap(count: int) -> dict:
+        return {
+            "truncated": True,
+            "total": len(result),
+            "returned": count,
+            "items": result[:count],
+        }
+
     low, high = 0, len(result)  # largest prefix that fits, by bisection
     while low < high:
         mid = (low + high + 1) // 2
-        if _size(result[:mid]) <= MAX_TOOL_OUTPUT_CHARS:
+        if _size(wrap(mid)) <= MAX_TOOL_OUTPUT_CHARS:
             low = mid
         else:
             high = mid - 1
-    kept = result[:low]
-    return {
-        "truncated": True,
-        "total": len(result),
-        "returned": len(kept),
-        "items": kept,
-    }
+    return wrap(low)
 
 
 def _cap_dict(result: dict) -> dict:

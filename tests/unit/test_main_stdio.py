@@ -414,6 +414,23 @@ def test_oversized_list_result_is_truncated_and_says_so(tmp_path, monkeypatch):
     assert len(json.dumps(payload["items"])) <= MAX_TOOL_OUTPUT_CHARS
 
 
+def test_truncated_list_result_fits_the_cap_including_its_wrapper(tmp_path, monkeypatch):
+    import json
+
+    from project_mcp.main_stdio import MAX_TOOL_OUTPUT_CHARS
+
+    rows = [{"n": "x" * 37} for _ in range(5000)]  # ~48 chars each, wrapper ~70
+    monkeypatch.setattr("project_mcp.main_stdio.get_dependents", lambda *a, **k: rows)
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool("get_dependents", {"qualified_name": "app.models"})
+    )
+
+    payload = result.structured_content["result"]
+    assert len(json.dumps(payload)) <= MAX_TOOL_OUTPUT_CHARS
+
+
 def test_oversized_dict_result_trims_its_longest_list_and_says_so(tmp_path, monkeypatch):
     import json
 
