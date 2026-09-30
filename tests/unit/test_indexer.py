@@ -2787,6 +2787,37 @@ def test_run_scan_links_class_attribute_access_within_the_same_file(tmp_path):
     ]
 
 
+def test_run_scan_links_a_dotted_nested_class_attribute_in_the_same_file(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "nested.py").write_text(
+        "class Outer:\n"
+        "    class Inner:\n"
+        "        limit = 1\n"
+        "\n"
+        "    def read(self):\n"
+        "        return Outer.Inner.limit, unknown.thing.limit, Outer.Inner.nope\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    rows = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'references'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND t.kind = 'field' AND s.qualified_name LIKE 'app.nested.%'
+        """
+    ).fetchall()
+
+    assert rows == [
+        ("app.nested.Outer.read", "app.nested.Outer.Inner.limit", "high"),
+    ]
+
+
 def test_run_scan_links_a_class_to_the_classes_its_body_reads(tmp_path):
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)
