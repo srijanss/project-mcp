@@ -74,6 +74,8 @@ def _resolve(project_root: Path, name: str) -> dict:
     }
     if len(matches) == 1:
         return get_symbol_context(project_root, matches.pop())
+    if matches:
+        return {**context, "candidates": sorted(matches)}
     return context
 
 

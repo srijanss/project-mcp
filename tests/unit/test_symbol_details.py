@@ -105,6 +105,17 @@ def test_describe_symbol_resolves_a_unique_short_name(tmp_path):
     assert details["source"].startswith("class Widget:")
 
 
+def test_describe_symbol_lists_candidates_for_an_ambiguous_short_name(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "a.py").write_text("class Widget:\n    pass\n")
+    (tmp_path / "app" / "b.py").write_text("class Widget:\n    pass\n")
+
+    details = describe_symbol(tmp_path, "Widget")
+
+    assert details["found"] is False
+    assert details["candidates"] == ["app.a.Widget", "app.b.Widget"]
+
+
 def test_describe_symbol_reports_missing_symbols(tmp_path):
     details = describe_symbol(_project(tmp_path), "app.models.Nope")
 
