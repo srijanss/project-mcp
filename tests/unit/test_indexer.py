@@ -2470,3 +2470,20 @@ def test_run_scan_links_method_calls_on_constructed_and_annotated_objects(tmp_pa
         ("app.service.by_local_class", "app.service.Local.go", "high"),
         ("app.service.by_module", "app.models.Payment.charge", "high"),
     ]
+
+
+def test_run_scan_indexes_a_file_that_is_not_valid_utf8(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    (project_root / "app" / "legacy.py").write_bytes(
+        b"def cafe():\n    return 1  # caf\xe9\n"
+    )
+
+    run_scan(conn, project_root, config)
+
+    qualified_names = {
+        row[0] for row in conn.execute("SELECT qualified_name FROM symbols").fetchall()
+    }
+    assert "app.legacy.cafe" in qualified_names
+    assert "app.models.Widget" in qualified_names

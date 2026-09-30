@@ -38,6 +38,15 @@ from project_mcp.tools.dependencies import list_dependencies
 from project_mcp.schema import get_schema_version
 
 
+def _read_source(path: Path) -> str:
+    """Read a source file, replacing bytes that are not valid UTF-8.
+
+    One legacy-encoded file must not abort the whole index, and replacement
+    keeps line numbers intact.
+    """
+    return path.read_text(errors="replace")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -1179,7 +1188,7 @@ def refresh_cross_module_edges_for_importers(
         path = id_to_path.get(importer_id)
         if path is None or path in refreshed_paths:
             continue
-        source = (Path(project_root) / path).read_text()
+        source = _read_source(Path(project_root) / path)
         analyses.append((importer_id, _analyze_python_file(path, source)))
     _index_python_cross_file_edges_for_files(conn, analyses, path_to_file_id)
 
@@ -1387,7 +1396,7 @@ def index_legacy_signals(
     files_input = []
     for path in path_to_file_id:
         try:
-            line_count = len((Path(project_root) / path).read_text().splitlines())
+            line_count = len(_read_source(Path(project_root) / path).splitlines())
         except (OSError, UnicodeDecodeError):
             continue
         files_input.append({"path": path, "line_count": line_count})
@@ -1538,7 +1547,7 @@ def run_scan(
         path_to_file_id[record["path"]] = file_id
 
         if record["language"] == "python":
-            source = (Path(project_root) / record["path"]).read_text()
+            source = _read_source(Path(project_root) / record["path"])
             analysis = _analyze_python_file(record["path"], source)
             changed_python_files[record["path"]] = (source, analysis)
             symbols = index_python_symbols(
@@ -1563,11 +1572,11 @@ def run_scan(
             )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
-            source = (Path(project_root) / record["path"]).read_text()
+            source = _read_source(Path(project_root) / record["path"])
             index_js_symbols(conn, file_id, record["path"], source, record["language"])
             changed_js_files[record["path"]] = extract_js_imports(record["path"], source)
         elif record["language"] == "rust":
-            source = (Path(project_root) / record["path"]).read_text()
+            source = _read_source(Path(project_root) / record["path"])
             index_rust_symbols(conn, file_id, record["path"], source)
             index_rust_impl_relationships(conn, file_id, source)
             changed_rust_files[record["path"]] = extract_rust_use(record["path"], source)
@@ -1595,7 +1604,7 @@ def run_scan(
         if path in changed_python_files:
             source, analysis = changed_python_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
+            source = _read_source(Path(project_root) / path)
             analysis = _analyze_python_file(path, source)
         index_python_import_relationships(
             conn, file_id, analysis["imports"], path_to_file_id
@@ -1618,7 +1627,7 @@ def run_scan(
         if path in changed_js_files:
             imports = changed_js_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
+            source = _read_source(Path(project_root) / path)
             imports = extract_js_imports(path, source)
         index_js_import_relationships(conn, file_id, path, imports, path_to_file_id)
 
@@ -1635,7 +1644,7 @@ def run_scan(
         if path in changed_rust_files:
             uses = changed_rust_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
+            source = _read_source(Path(project_root) / path)
             uses = extract_rust_use(path, source)
         index_rust_use_relationships(conn, file_id, path, uses, path_to_file_id)
 
@@ -1830,7 +1839,7 @@ def refresh_index(
         path_to_file_id[record["path"]] = file_id
 
         if record["language"] == "python":
-            source = (Path(project_root) / record["path"]).read_text()
+            source = _read_source(Path(project_root) / record["path"])
             analysis = _analyze_python_file(record["path"], source)
             changed_python_files[record["path"]] = (source, analysis)
             symbols = index_python_symbols(
@@ -1855,11 +1864,11 @@ def refresh_index(
             )
             index_python_tests(conn, file_id, record["path"], source)
         elif record["language"] in ("javascript", "typescript"):
-            source = (Path(project_root) / record["path"]).read_text()
+            source = _read_source(Path(project_root) / record["path"])
             index_js_symbols(conn, file_id, record["path"], source, record["language"])
             changed_js_files[record["path"]] = extract_js_imports(record["path"], source)
         elif record["language"] == "rust":
-            source = (Path(project_root) / record["path"]).read_text()
+            source = _read_source(Path(project_root) / record["path"])
             index_rust_symbols(conn, file_id, record["path"], source)
             index_rust_impl_relationships(conn, file_id, source)
             changed_rust_files[record["path"]] = extract_rust_use(record["path"], source)
@@ -1883,7 +1892,7 @@ def refresh_index(
         if path in changed_python_files:
             source, analysis = changed_python_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
+            source = _read_source(Path(project_root) / path)
             analysis = _analyze_python_file(path, source)
         index_python_import_relationships(
             conn, file_id, analysis["imports"], path_to_file_id
@@ -1910,7 +1919,7 @@ def refresh_index(
         if path in changed_js_files:
             imports = changed_js_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
+            source = _read_source(Path(project_root) / path)
             imports = extract_js_imports(path, source)
         index_js_import_relationships(conn, file_id, path, imports, path_to_file_id)
 
@@ -1927,7 +1936,7 @@ def refresh_index(
         if path in changed_rust_files:
             uses = changed_rust_files[path]
         else:
-            source = (Path(project_root) / path).read_text()
+            source = _read_source(Path(project_root) / path)
             uses = extract_rust_use(path, source)
         index_rust_use_relationships(conn, file_id, path, uses, path_to_file_id)
 
