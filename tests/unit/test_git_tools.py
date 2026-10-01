@@ -1,18 +1,13 @@
 """Tests for the spec-named git history MCP tool wrappers."""
 
-import shutil
 from pathlib import Path
 
 from project_mcp.tools.git import get_change_coupling, get_change_history, get_hotspots
-
-GIT_FIXTURES_ROOT = Path(__file__).parent.parent / "fixtures" / "git"
+from tests.git_fixtures import build_git_fixture
 
 
 def _copy_git_fixture(fixture_name: str, tmp_path: Path) -> Path:
-    fixture_src = GIT_FIXTURES_ROOT / fixture_name
-    fixture_dest = tmp_path / fixture_name
-    shutil.copytree(fixture_src, fixture_dest)
-    return fixture_dest
+    return build_git_fixture(fixture_name, tmp_path)
 
 
 def test_get_change_history_returns_change_count_and_last_changed():

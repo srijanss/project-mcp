@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from project_mcp.config import load_config
+from tests.git_fixtures import build_git_fixture
 from project_mcp.db import get_connection
 from project_mcp.schema import CURRENT_SCHEMA_VERSION
 from project_mcp.indexer import (
@@ -1977,9 +1978,7 @@ def test_run_scan_persists_git_change_history_for_indexed_files(tmp_path):
 
 
 def test_run_scan_persists_git_facts_using_configured_history_limit(tmp_path):
-    fixture_root = Path(__file__).parent.parent / "fixtures" / "git" / "churn-fixture"
-    project_root = tmp_path / "churn-fixture"
-    shutil.copytree(fixture_root, project_root)
+    project_root = build_git_fixture("churn-fixture", tmp_path)
     (project_root / ".project-mcp").mkdir()
     (project_root / ".project-mcp" / "config.toml").write_text(
         "git_history_limit = 2\n"

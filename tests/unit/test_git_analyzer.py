@@ -3,7 +3,6 @@
 from pathlib import Path
 import pytest
 from datetime import datetime
-import shutil
 
 from project_mcp.analyzers.generic.git import (
     collect_git_file_stats,
@@ -14,15 +13,12 @@ from project_mcp.analyzers.generic.git import (
 )
 from project_mcp.config import ProjectConfig
 
-FIXTURES_ROOT = Path(__file__).parent.parent / "fixtures" / "git"
+from tests.git_fixtures import build_git_fixture
 
 
 def _copy_git_fixture(fixture_name: str, tmp_path: Path) -> Path:
-    """Copy a git fixture repository to a temporary directory."""
-    fixture_src = FIXTURES_ROOT / fixture_name
-    fixture_dest = tmp_path / fixture_name
-    shutil.copytree(fixture_src, fixture_dest)
-    return fixture_dest
+    """Build a git fixture repository in a temporary directory."""
+    return build_git_fixture(fixture_name, tmp_path)
 
 
 class TestGitChurnAnalysis:
