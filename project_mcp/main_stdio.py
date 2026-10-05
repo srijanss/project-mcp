@@ -297,7 +297,9 @@ def build_server(project_root: Path) -> MCPServer:
 
         `query` and `symbol` are aliases for `qualified_name`.
         Each test file names at most `limit` tests (`tests_total` gives the full
-        count when more exist); `limit=0` names every test.
+        count when more exist); `limit=0` names every test. A file reached
+        through several call `paths` names every test at the top level and at
+        most `limit` per path.
         """
         return get_tests_for(
             project_root, _symbol_name(qualified_name, query, symbol), limit

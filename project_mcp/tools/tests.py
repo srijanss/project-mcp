@@ -79,13 +79,18 @@ def _limited(row: dict, limit: int) -> dict:
     names = row.get("tests")
     if not names:
         return row
+    if "paths" in row:
+        # Each path is cut to `limit`; the top-level list names every test, so
+        # none is reachable only through a path.
+        return {
+            **row,
+            "paths": [
+                {**path, "tests": _capped(path["tests"], limit)} for path in row["paths"]
+            ],
+        }
     row = {**row, "tests": _capped(names, limit)}
     if len(row["tests"]) < len(names):
         row["tests_total"] = len(names)
-    if "paths" in row:
-        row["paths"] = [
-            {**path, "tests": _capped(path["tests"], limit)} for path in row["paths"]
-        ]
     return row
 
 

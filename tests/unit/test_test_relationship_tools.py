@@ -540,7 +540,6 @@ def test_get_tests_for_caps_the_tests_each_merged_call_path_names(tmp_path):
         ["tests.test_payments.test_capture_0", "tests.test_payments.test_capture_1"],
         ["tests.test_payments.test_refund_0", "tests.test_payments.test_refund_1"],
     ]
-    assert tests_for[0]["tests_total"] == 6
 
 
 def test_get_tests_for_names_a_test_from_every_path_in_the_capped_tests(tmp_path):
@@ -560,7 +559,27 @@ def test_get_tests_for_names_a_test_from_every_path_in_the_capped_tests(tmp_path
     tests_for = get_tests_for(tmp_path, "app.payments._sign", limit=2)
 
     assert "tests.test_payments.test_z_signing" in tests_for[0]["tests"]
-    assert tests_for[0]["tests_total"] == 4
+
+
+def test_get_tests_for_names_every_test_at_the_top_when_paths_are_listed(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "payments.py").write_text(
+        "def _sign():\n    return 1\n\n\n"
+        "def _post():\n    return _sign()\n\n\n"
+        "def charge():\n    return _post()\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_payments.py").write_text(
+        "from app.payments import _post, charge\n\n\n"
+        + "".join(f"def test_a_charge_{n}():\n    assert charge()\n\n\n" for n in range(3))
+        + "".join(f"def test_b_post_{n}():\n    assert _post()\n\n\n" for n in range(3))
+    )
+
+    (row,) = get_tests_for(tmp_path, "app.payments._sign", limit=2)
+
+    assert len(row["tests"]) == 6
+    assert "tests_total" not in row
+    assert [len(path["tests"]) for path in row["paths"]] == [2, 2]
 
 
 def test_get_tests_for_names_tests_in_other_files_that_call_a_test_helper(tmp_path):
