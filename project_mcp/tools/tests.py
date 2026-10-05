@@ -140,12 +140,17 @@ def _referencing_tests(conn, symbol_id: int) -> list[dict]:
 
 
 def _mocked_symbols(conn, test_names: list[str]) -> dict[str, set[int]]:
-    """The symbols each named test replaces with a mock while it runs."""
+    """The symbols each named test replaces with a mock while it runs: a
+    mocked class takes its methods with it."""
     rows = conn.execute(
         f"""
-        SELECT s.qualified_name, r.target_entity_id
+        SELECT s.qualified_name, m.id
         FROM relationships r
         JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        JOIN symbols m ON m.file_id = t.file_id
+          AND (m.id = t.id OR substr(m.qualified_name, 1, length(t.qualified_name) + 1)
+                              = t.qualified_name || '.')
         WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
           AND r.relationship_type = 'mocks'
           AND s.qualified_name IN ({", ".join("?" * len(test_names))})
@@ -288,7 +293,8 @@ def get_tests_for(
             if "tests" not in existing:
                 by_file[row["test_file"]] = row
             else:
-                existing["tests"] = sorted({*existing["tests"], *row["tests"]})
+                # Tests calling the symbol come before those using a helper.
+                existing["tests"] = list(dict.fromkeys([*existing["tests"], *row["tests"]]))
                 existing["evidence"] = [*existing["evidence"], "helper_call"]
         if by_file:
             return [_limited(by_file[path], limit) for path in sorted(by_file)]

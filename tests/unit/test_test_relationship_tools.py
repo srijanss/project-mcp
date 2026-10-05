@@ -615,10 +615,33 @@ def test_get_tests_for_adds_tests_reaching_a_symbol_through_a_helper_in_the_same
 
     helpers_file = next(t for t in tests_for if t["test_file"] == "tests/test_helpers.py")
     assert helpers_file["tests"] == [
-        "tests.test_helpers.test_cancel",
         "tests.test_helpers.test_direct",
+        "tests.test_helpers.test_cancel",
     ]
     assert helpers_file["evidence"] == ["symbol_reference", "helper_call"]
+
+
+def test_get_tests_for_names_tests_calling_a_symbol_before_those_reaching_it_through_a_helper(
+    tmp_path,
+):
+    project_root = _order_project(tmp_path)
+    (project_root / "tests" / "test_helpers.py").write_text(
+        "from app.models import Order\n"
+        "\n"
+        "\n"
+        "def _hit():\n"
+        "    return Order().cancel()\n"
+        "\n"
+        "\n"
+        + "".join(f"def test_a_via_helper_{n}():\n    assert _hit()\n\n\n" for n in range(5))
+        + "def test_z_direct():\n    assert Order().cancel()\n"
+    )
+
+    tests_for = get_tests_for(project_root, "app.models.Order.cancel")
+
+    helpers_file = next(t for t in tests_for if t["test_file"] == "tests/test_helpers.py")
+    assert helpers_file["tests"][0] == "tests.test_helpers.test_z_direct"
+    assert helpers_file["tests_total"] == 6
 
 
 def _mocked_checkout_project(root: Path) -> Path:
@@ -730,6 +753,48 @@ def test_get_tests_for_sets_aside_tests_patching_a_call_on_the_way_on_an_instanc
             "confidence": "low",
             "evidence": ["indirect_call", "mocked"],
             "mocked": ["tests.test_gateway.test_charge"],
+        }
+    ]
+
+
+def test_get_tests_for_sets_aside_tests_patching_the_class_whose_method_is_on_the_way(
+    tmp_path,
+):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "cybersource.py").write_text(
+        "class CybersourceApi:\n"
+        "    def _sign(self):\n"
+        "        return 1\n"
+        "\n"
+        "    def post(self):\n"
+        "        return self._sign()\n"
+    )
+    (tmp_path / "app" / "fiserv.py").write_text(
+        "from app.cybersource import CybersourceApi\n"
+        "\n"
+        "\n"
+        "class FiservGateway:\n"
+        "    def charge(self):\n"
+        "        return CybersourceApi().post()\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_fiserv.py").write_text(
+        "from app.fiserv import FiservGateway\n"
+        "\n"
+        "\n"
+        "def test_charge(mocker):\n"
+        '    mocker.patch("app.fiserv.CybersourceApi")\n'
+        "    assert FiservGateway().charge()\n"
+    )
+
+    tests_for = get_tests_for(tmp_path, "app.cybersource.CybersourceApi._sign")
+
+    assert tests_for == [
+        {
+            "test_file": "tests/test_fiserv.py",
+            "confidence": "low",
+            "evidence": ["indirect_call", "mocked"],
+            "mocked": ["tests.test_fiserv.test_charge"],
         }
     ]
 
