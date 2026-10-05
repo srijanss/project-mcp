@@ -5,6 +5,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from project_mcp.analyzers.frameworks.django import enrich_django_metadata
+from project_mcp.analyzers.frameworks.django_urls import (
+    extract_url_patterns,
+    extract_url_reverses,
+)
 from project_mcp.analyzers.generic.architecture import (
     detect_architecture_doc_sources,
     extract_architecture_facts,
@@ -29,6 +33,7 @@ from project_mcp.analyzers.python.parser import (
     analyze_python_source,
     parse_python_source,
 )
+from project_mcp.analyzers.python.mock_patches import extract_mock_patches
 from project_mcp.analyzers.python.pytest_analyzer import (
     build_test_relationships,
     discover_tests,
@@ -694,6 +699,37 @@ def resolve_relative_imports(path: str, imports: list[dict]) -> list[dict]:
         if imp["module"]:
             base = base + [imp["module"]]
         resolved.append({**imp, "module": ".".join(base), "level": 0})
+    return resolved
+
+
+def resolve_source_root_imports(
+    imports: list[dict], source_roots: list[str], path_to_file_id: dict
+) -> list[dict]:
+    """Rewrite absolute imports of modules under a source root as their indexed names.
+
+    With `src` as a source root, `shop.billing` is indexed as `src.shop.billing`
+    (qualified names follow the file path), so `from shop.billing import X`
+    becomes `from src.shop.billing import X`. Modules that already resolve
+    from the project root are left alone.
+    """
+
+    def resolves(module: str, names: list[str]) -> bool:
+        module_path = module.replace(".", "/")
+        candidates = [f"{module_path}.py", f"{module_path}/__init__.py"]
+        candidates.extend(f"{module_path}/{name}.py" for name in names)
+        return any(path in path_to_file_id for path in candidates)
+
+    normalized = (posixpath.normpath(root) for root in source_roots)
+    roots = [root.replace("/", ".") for root in normalized if root != "."]
+    resolved = []
+    for imp in imports:
+        module, names = imp["module"], imp.get("names", [])
+        if imp["level"] == 0 and module and not resolves(module, names):
+            for root in roots:
+                if resolves(f"{root}.{module}", names):
+                    imp = {**imp, "module": f"{root}.{module}"}
+                    break
+        resolved.append(imp)
     return resolved
 
 
@@ -1391,12 +1427,260 @@ def _index_python_cross_file_edges_for_files(
         _index_python_cross_file_edges(conn, file_id, analysis, path_to_file_id)
 
 
+def _django_views_by_url_name(
+    project_root: Path, path_to_file_id: dict, source_roots: list[str]
+) -> dict[str, str]:
+    """Map each `namespace:name` URL in the project's urls.py files to its view.
+
+    A urls module's namespaces come from the `include()`s reaching it (their
+    `namespace=` and the included app name, nested includes joined with `:`);
+    a module nothing includes is namespaced by its own `app_name`.
+    """
+    url_modules = {}
+    for path in sorted(path_to_file_id):
+        if posixpath.basename(path) != "urls.py":
+            continue
+        source = _read_source(Path(project_root) / path)
+        try:
+            url_modules[path] = (source, extract_url_patterns(source))
+        except SyntaxError:
+            continue
+
+    includers: dict[str, list[tuple[str, set]]] = {}
+    for path, (_, urls) in url_modules.items():
+        for included in urls["includes"]:
+            (resolved,) = resolve_source_root_imports(
+                [{"module": included["module"], "level": 0}],
+                source_roots,
+                path_to_file_id,
+            )
+            child = resolved["module"].replace(".", "/") + ".py"
+            if child not in url_modules:
+                continue
+            app_name = included["app_name"] or url_modules[child][1]["app_name"]
+            segments = {included["namespace"], app_name} - {None}
+            includers.setdefault(child, []).append((path, segments))
+
+    def prefixes(path: str, visiting: frozenset) -> set[str]:
+        parents = [p for p in includers.get(path, []) if p[0] not in visiting]
+        if not parents:
+            return {url_modules[path][1]["app_name"] or ""}
+        found = set()
+        for parent, segments in parents:
+            for prefix in prefixes(parent, visiting | {path}):
+                found.update(
+                    ":".join(part for part in (prefix, segment) if part)
+                    for segment in segments or {""}
+                )
+        return found
+
+    views = {}
+    for path, (source, urls) in url_modules.items():
+        imports = resolve_source_root_imports(
+            _analyze_python_file(path, source)["imports"], source_roots, path_to_file_id
+        )
+        imported_names = _imported_names(imports)
+        imported_modules = _imported_modules(imports)
+        module = path[: -len(".py")].replace("/", ".")
+        namespaces = sorted(prefixes(path, frozenset()))
+        for pattern in urls["patterns"]:
+            head, _, rest = pattern["view"].partition(".")
+            if head in imported_names:
+                base = ".".join(imported_names[head])
+            else:
+                base = imported_modules.get(head, f"{module}.{head}")
+            for namespace in namespaces:
+                url_name = f"{namespace}:{pattern['name']}" if namespace else pattern["name"]
+                views.setdefault(url_name, f"{base}.{rest}" if rest else base)
+    return views
+
+
+def _link_test_symbol(
+    conn: sqlite3.Connection,
+    project_id: int,
+    file_id: int,
+    caller: str,
+    target: str,
+    relationship_type: str,
+    evidence: str,
+) -> None:
+    """Insert a high-confidence edge from a test-file symbol to a project symbol."""
+    caller_row = conn.execute(
+        "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
+        (file_id, caller),
+    ).fetchone()
+    target_row = conn.execute(
+        """
+        SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id
+        WHERE f.project_id = ? AND s.qualified_name = ?
+        """,
+        (project_id, target),
+    ).fetchone()
+    if caller_row is None or target_row is None:
+        return
+    conn.execute(
+        """
+        INSERT INTO relationships (
+            source_entity_type, source_entity_id,
+            target_entity_type, target_entity_id,
+            relationship_type, confidence, evidence_json
+        ) VALUES ('symbol', ?, 'symbol', ?, ?, 'high', ?)
+        """,
+        (caller_row[0], target_row[0], relationship_type, json.dumps([evidence])),
+    )
+
+
+def index_django_url_relationships(
+    conn: sqlite3.Connection,
+    project_id: int,
+    project_root: Path,
+    path_to_file_id: dict,
+    source_roots: list[str],
+) -> None:
+    """Link tests to the views their `reverse("ns:name")` calls route to."""
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE evidence_json = '["url_reverse"]' AND source_entity_type = 'symbol'
+          AND source_entity_id IN (
+            SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id
+            WHERE f.project_id = ?
+          )
+        """,
+        (project_id,),
+    )
+    views = _django_views_by_url_name(project_root, path_to_file_id, source_roots)
+    if not views:
+        return
+    test_files = conn.execute(
+        """
+        SELECT id, path FROM files
+        WHERE project_id = ? AND file_kind = 'test' AND language = 'python'
+        """,
+        (project_id,),
+    ).fetchall()
+    for file_id, path in test_files:
+        source = _read_source(Path(project_root) / path)
+        if "reverse" not in source:
+            continue
+        try:
+            reverses = extract_url_reverses(path, source)
+        except SyntaxError:
+            continue
+        for reverse in reverses:
+            view = views.get(reverse["url_name"])
+            if view is not None:
+                _link_test_symbol(
+                    conn, project_id, file_id, reverse["caller"], view,
+                    "references", "url_reverse",
+                )
+
+
+class _PatchTargetResolver:
+    """Follow a dotted name as `patch()` sees it to the symbol it names.
+
+    `patch("app.checkout.process_payment")` replaces the name where checkout
+    looks it up; when checkout imported it, the symbol is defined elsewhere.
+    """
+
+    def __init__(self, project_root: Path, path_to_file_id: dict, source_roots: list[str]):
+        self.project_root = Path(project_root)
+        self.path_to_file_id = path_to_file_id
+        self.source_roots = source_roots
+        self._imports: dict[str, list[dict]] = {}
+
+    def module_imports(self, path: str) -> list[dict]:
+        if path not in self._imports:
+            source = _read_source(self.project_root / path)
+            try:
+                imports = _analyze_python_file(path, source)["imports"]
+            except SyntaxError:
+                imports = []
+            self._imports[path] = resolve_source_root_imports(
+                imports, self.source_roots, self.path_to_file_id
+            )
+        return self._imports[path]
+
+    def local(self, path: str, dotted: str) -> str:
+        """A dotted name written in the module at `path`, as a project-wide name."""
+        head, _, rest = dotted.partition(".")
+        imports = self.module_imports(path)
+        imported_names = _imported_names(imports)
+        if head in imported_names:
+            base = ".".join(imported_names[head])
+        else:
+            module = path[: -len(".py")].replace("/", ".")
+            base = _imported_modules(imports).get(head, f"{module}.{head}")
+        return f"{base}.{rest}" if rest else base
+
+    def resolve(self, dotted: str) -> str:
+        parts = dotted.split(".")
+        for split in range(len(parts) - 1, 0, -1):
+            (imp,) = resolve_source_root_imports(
+                [{"module": ".".join(parts[:split]), "level": 0}],
+                self.source_roots,
+                self.path_to_file_id,
+            )
+            module_path = imp["module"].replace(".", "/")
+            for path in (f"{module_path}.py", f"{module_path}/__init__.py"):
+                if path in self.path_to_file_id:
+                    return self.local(path, ".".join(parts[split:]))
+        return dotted
+
+
+def index_mock_patch_relationships(
+    conn: sqlite3.Connection,
+    project_id: int,
+    project_root: Path,
+    path_to_file_id: dict,
+    source_roots: list[str],
+) -> None:
+    """Link tests to the symbols their `patch(...)` calls replace."""
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'mocks' AND source_entity_type = 'symbol'
+          AND source_entity_id IN (
+            SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id
+            WHERE f.project_id = ?
+          )
+        """,
+        (project_id,),
+    )
+    resolver = _PatchTargetResolver(project_root, path_to_file_id, source_roots)
+    test_files = conn.execute(
+        """
+        SELECT id, path FROM files
+        WHERE project_id = ? AND file_kind = 'test' AND language = 'python'
+        """,
+        (project_id,),
+    ).fetchall()
+    for file_id, path in test_files:
+        source = _read_source(Path(project_root) / path)
+        if "patch" not in source:
+            continue
+        try:
+            patches = extract_mock_patches(path, source)
+        except SyntaxError:
+            continue
+        for patch in patches:
+            if "target" in patch:
+                target = resolver.resolve(patch["target"])
+            else:
+                obj = resolver.local(path, patch["object"])
+                target = resolver.resolve(f"{obj}.{patch['attribute']}")
+            _link_test_symbol(
+                conn, project_id, file_id, patch["caller"], target, "mocks", "mock_patch"
+            )
+
+
 def refresh_cross_module_edges_for_importers(
     conn: sqlite3.Connection,
     project_root: Path,
     changed_paths: list[str],
     refreshed_paths: list[str],
     path_to_file_id: dict,
+    source_roots: list[str],
 ) -> None:
     """Recompute cross-module edges for unchanged files importing a changed file.
 
@@ -1427,7 +1711,11 @@ def refresh_cross_module_edges_for_importers(
         if path is None or path in refreshed_paths:
             continue
         source = _read_source(Path(project_root) / path)
-        analyses.append((importer_id, _analyze_python_file(path, source)))
+        analysis = _analyze_python_file(path, source)
+        analysis["imports"] = resolve_source_root_imports(
+            analysis["imports"], source_roots, path_to_file_id
+        )
+        analyses.append((importer_id, analysis))
     _index_python_cross_file_edges_for_files(conn, analyses, path_to_file_id)
 
 
@@ -1437,6 +1725,7 @@ def index_python_test_relationships(
     path: str,
     source: str,
     path_to_file_id: dict,
+    source_roots: list[str],
 ) -> None:
     conn.execute(
         """
@@ -1448,7 +1737,12 @@ def index_python_test_relationships(
     )
 
     for relationship in build_test_relationships(path, source):
-        module_path = relationship["target_module"].replace(".", "/")
+        (target,) = resolve_source_root_imports(
+            [{"module": relationship["target_module"], "level": 0}],
+            source_roots,
+            path_to_file_id,
+        )
+        module_path = target["module"].replace(".", "/")
         target_file_id = path_to_file_id.get(module_path + ".py")
         if target_file_id is None:
             continue
@@ -1852,12 +2146,24 @@ def run_scan(
         else:
             source = _read_source(Path(project_root) / path)
             analysis = _analyze_python_file(path, source)
+        analysis["imports"] = resolve_source_root_imports(
+            analysis["imports"], config.source_roots, path_to_file_id
+        )
         index_python_import_relationships(
             conn, file_id, analysis["imports"], path_to_file_id
         )
         cross_file_analyses.append((file_id, analysis))
-        index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
+        index_python_test_relationships(
+            conn, file_id, path, source, path_to_file_id, config.source_roots
+        )
     _index_python_cross_file_edges_for_files(conn, cross_file_analyses, path_to_file_id)
+    if changed_python_files:
+        index_django_url_relationships(
+            conn, project_id, project_root, path_to_file_id, config.source_roots
+        )
+        index_mock_patch_relationships(
+            conn, project_id, project_root, path_to_file_id, config.source_roots
+        )
 
     js_new_file_added = any(path not in existing_rows for path in changed_js_files)
     if js_new_file_added:
@@ -2148,16 +2454,29 @@ def refresh_index(
         else:
             source = _read_source(Path(project_root) / path)
             analysis = _analyze_python_file(path, source)
+        analysis["imports"] = resolve_source_root_imports(
+            analysis["imports"], config.source_roots, path_to_file_id
+        )
         index_python_import_relationships(
             conn, file_id, analysis["imports"], path_to_file_id
         )
         cross_file_analyses.append((file_id, analysis))
-        index_python_test_relationships(conn, file_id, path, source, path_to_file_id)
+        index_python_test_relationships(
+            conn, file_id, path, source, path_to_file_id, config.source_roots
+        )
     _index_python_cross_file_edges_for_files(conn, cross_file_analyses, path_to_file_id)
 
     refresh_cross_module_edges_for_importers(
-        conn, project_root, list(changed_python_files), paths_to_refresh, path_to_file_id
+        conn, project_root, list(changed_python_files), paths_to_refresh, path_to_file_id,
+        config.source_roots,
     )
+    if changed_python_files:
+        index_django_url_relationships(
+            conn, project_id, project_root, path_to_file_id, config.source_roots
+        )
+        index_mock_patch_relationships(
+            conn, project_id, project_root, path_to_file_id, config.source_roots
+        )
 
     js_new_file_added = any(path not in existing_rows for path in changed_js_files)
     if js_new_file_added:

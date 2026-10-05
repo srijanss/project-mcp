@@ -16,7 +16,9 @@ import sqlite3
 #    yields a single edge.
 # 6: symbols in framework-classified files (e.g. Django migrations) carry the
 #    file's framework_kind, which find_symbol uses to rank and filter.
-CURRENT_SCHEMA_VERSION = 6
+# 7: tests link to the Django views their `reverse("ns:name")` calls route to,
+#    and to the symbols their `patch(...)` calls replace (`mocks` edges).
+CURRENT_SCHEMA_VERSION = 7
 
 REQUIRED_TABLES = {
     "projects",

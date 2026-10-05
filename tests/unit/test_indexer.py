@@ -18,6 +18,7 @@ from project_mcp.indexer import (
     refresh_index,
     remove_file,
     resolve_relative_imports,
+    resolve_source_root_imports,
     run_scan,
     upsert_file,
 )
@@ -2880,3 +2881,394 @@ def test_run_scan_links_calls_made_on_a_constructor_expression(tmp_path):
     ).fetchall()
 
     assert edges == [("app.service.run", "app.models.Payment.charge", "high")]
+
+
+def test_resolve_source_root_imports_prefixes_modules_found_under_a_source_root():
+    path_to_file_id = {
+        "src/shop/billing.py": 1,
+        "src/shop/tests/test_billing.py": 2,
+        "tools/report.py": 3,
+    }
+    imports = [
+        {"module": "shop.billing", "names": ["Invoice"], "level": 0, "line": 1},
+        {"module": "shop", "names": ["billing"], "level": 0, "line": 2},
+        {"module": "tools.report", "names": [], "level": 0, "line": 3},
+        {"module": "os", "names": [], "level": 0, "line": 4},
+        {"module": None, "names": ["deep"], "level": 4, "line": 5},
+    ]
+
+    assert resolve_source_root_imports(imports, ["src"], path_to_file_id) == [
+        {"module": "src.shop.billing", "names": ["Invoice"], "level": 0, "line": 1},
+        {"module": "src.shop", "names": ["billing"], "level": 0, "line": 2},
+        {"module": "tools.report", "names": [], "level": 0, "line": 3},
+        {"module": "os", "names": [], "level": 0, "line": 4},
+        {"module": None, "names": ["deep"], "level": 4, "line": 5},
+    ]
+
+
+def test_run_scan_links_calls_through_imports_relative_to_a_source_root(tmp_path):
+    (tmp_path / ".project-mcp").mkdir()
+    (tmp_path / ".project-mcp" / "config.toml").write_text('source_roots = ["src"]\n')
+    (tmp_path / "src" / "shop").mkdir(parents=True)
+    (tmp_path / "src" / "shop" / "billing.py").write_text(
+        "def total():\n    return 1\n"
+    )
+    (tmp_path / "src" / "shop" / "test_billing.py").write_text(
+        "from shop.billing import total\n\n\ndef test_total():\n    assert total()\n"
+    )
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+        """
+    ).fetchall()
+    assert ("src.shop.test_billing.test_total", "src.shop.billing.total") in edges
+
+
+def test_refresh_index_links_calls_through_imports_relative_to_a_source_root(tmp_path):
+    (tmp_path / ".project-mcp").mkdir()
+    (tmp_path / ".project-mcp" / "config.toml").write_text('source_roots = ["src"]\n')
+    (tmp_path / "src" / "shop").mkdir(parents=True)
+    (tmp_path / "src" / "shop" / "billing.py").write_text(
+        "def total():\n    return 1\n"
+    )
+    test_file = tmp_path / "src" / "shop" / "test_billing.py"
+    test_file.write_text("def test_nothing():\n    assert True\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config)
+    test_file.write_text(
+        "from shop.billing import total\n\n\ndef test_total():\n    assert total()\n"
+    )
+
+    refresh_index(conn, tmp_path, config)
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+        """
+    ).fetchall()
+    assert ("src.shop.test_billing.test_total", "src.shop.billing.total") in edges
+
+
+def test_refresh_index_keeps_source_root_calls_from_an_unchanged_importer(tmp_path):
+    (tmp_path / ".project-mcp").mkdir()
+    (tmp_path / ".project-mcp" / "config.toml").write_text('source_roots = ["src"]\n')
+    (tmp_path / "src" / "shop").mkdir(parents=True)
+    billing = tmp_path / "src" / "shop" / "billing.py"
+    billing.write_text("def total():\n    return 1\n")
+    (tmp_path / "src" / "shop" / "test_billing.py").write_text(
+        "from shop.billing import total\n\n\ndef test_total():\n    assert total()\n"
+    )
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config)
+    billing.write_text("def total():\n    return 2\n")
+
+    refresh_index(conn, tmp_path, config)
+
+    edges = conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'calls'
+          AND r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+        """
+    ).fetchall()
+    assert ("src.shop.test_billing.test_total", "src.shop.billing.total") in edges
+
+
+def test_run_scan_links_test_files_to_modules_under_a_source_root(tmp_path):
+    (tmp_path / ".project-mcp").mkdir()
+    (tmp_path / ".project-mcp" / "config.toml").write_text('source_roots = ["src"]\n')
+    (tmp_path / "src" / "shop" / "tests").mkdir(parents=True)
+    (tmp_path / "src" / "shop" / "billing.py").write_text(
+        "def total():\n    return 1\n"
+    )
+    (tmp_path / "src" / "shop" / "tests" / "test_billing.py").write_text(
+        "from shop.billing import total\n\n\ndef test_total():\n    assert total()\n"
+    )
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    edges = conn.execute(
+        """
+        SELECT s.path, t.path, r.confidence FROM relationships r
+        JOIN files s ON s.id = r.source_entity_id
+        JOIN files t ON t.id = r.target_entity_id
+        WHERE r.relationship_type = 'tests'
+        """
+    ).fetchall()
+    assert edges == [
+        ("src/shop/tests/test_billing.py", "src/shop/billing.py", "high")
+    ]
+
+
+def test_resolve_source_root_imports_normalizes_how_a_source_root_is_written():
+    path_to_file_id = {"src/shop/billing.py": 1}
+    imports = [{"module": "shop.billing", "names": [], "level": 0}]
+
+    rewritten = {
+        root: resolve_source_root_imports(imports, [root], path_to_file_id)[0]["module"]
+        for root in ("./src", "src/", "./src/", "src")
+    }
+
+    assert set(rewritten.values()) == {"src.shop.billing"}
+
+
+def test_resolve_source_root_imports_prefixes_a_package_imported_by_name():
+    path_to_file_id = {"src/shop/__init__.py": 1}
+    imports = [{"module": "shop", "names": [], "level": 0}]
+
+    (rewritten,) = resolve_source_root_imports(imports, ["src"], path_to_file_id)
+
+    assert rewritten["module"] == "src.shop"
+
+
+def test_resolve_source_root_imports_prefers_the_first_source_root_that_resolves():
+    path_to_file_id = {"src/shop/billing.py": 1, "lib/shop/billing.py": 2}
+    imports = [{"module": "shop.billing", "names": [], "level": 0}]
+
+    modules = [
+        resolve_source_root_imports(imports, roots, path_to_file_id)[0]["module"]
+        for roots in (["src", "lib"], ["lib", "src"])
+    ]
+
+    assert modules == ["src.shop.billing", "lib.shop.billing"]
+
+
+def _django_checkout_app(root: Path) -> Path:
+    (root / ".project-mcp").mkdir()
+    (root / ".project-mcp" / "config.toml").write_text('source_roots = ["src"]\n')
+    app = root / "src" / "shop" / "checkout"
+    (app / "tests").mkdir(parents=True)
+    (app / "views.py").write_text(
+        "class CardPayment:\n    def get(self, request):\n        return None\n"
+    )
+    (app / "urls.py").write_text(
+        "from django.urls import path\n"
+        "\n"
+        "from shop.checkout.views import CardPayment\n"
+        "\n"
+        'app_name = "checkout"\n'
+        "\n"
+        "urlpatterns = [\n"
+        '    path("card/", CardPayment.as_view(), name="card-payment"),\n'
+        "]\n"
+    )
+    (app / "tests" / "test_views.py").write_text(
+        "from django.urls import reverse\n"
+        "\n"
+        "\n"
+        "def test_shows_the_form(client):\n"
+        '    assert client.get(reverse("checkout:card-payment"))\n'
+    )
+    return root
+
+
+def _url_reverse_edges(conn) -> list[tuple]:
+    return conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.relationship_type,
+               r.confidence, r.evidence_json
+        FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND r.evidence_json = '["url_reverse"]'
+        """
+    ).fetchall()
+
+
+def test_run_scan_links_tests_to_the_views_their_reversed_url_names_route_to(tmp_path):
+    _django_checkout_app(tmp_path)
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert _url_reverse_edges(conn) == [
+        (
+            "src.shop.checkout.tests.test_views.test_shows_the_form",
+            "src.shop.checkout.views.CardPayment",
+            "references",
+            "high",
+            '["url_reverse"]',
+        )
+    ]
+
+
+def test_refresh_index_keeps_url_reverse_links_to_a_view_that_changed(tmp_path):
+    _django_checkout_app(tmp_path)
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config)
+    (tmp_path / "src" / "shop" / "checkout" / "views.py").write_text(
+        "class CardPayment:\n    def get(self, request):\n        return 'changed'\n"
+    )
+
+    refresh_index(conn, tmp_path, config)
+
+    assert [edge[:2] for edge in _url_reverse_edges(conn)] == [
+        (
+            "src.shop.checkout.tests.test_views.test_shows_the_form",
+            "src.shop.checkout.views.CardPayment",
+        )
+    ]
+
+
+def test_run_scan_links_url_names_namespaced_through_nested_includes(tmp_path):
+    _django_checkout_app(tmp_path)
+    (tmp_path / "src" / "config").mkdir()
+    (tmp_path / "src" / "config" / "urls.py").write_text(
+        "from django.urls import include, path\n"
+        "\n"
+        'urlpatterns = [path("shop/", include("shop.urls", namespace="store"))]\n'
+    )
+    (tmp_path / "src" / "shop" / "urls.py").write_text(
+        "from django.urls import include, path\n"
+        "\n"
+        'urlpatterns = [path("checkout/", include("shop.checkout.urls"))]\n'
+    )
+    (tmp_path / "src" / "shop" / "checkout" / "tests" / "test_views.py").write_text(
+        "from django.urls import reverse\n"
+        "\n"
+        "\n"
+        "def test_shows_the_form(client):\n"
+        '    assert client.get(reverse("store:checkout:card-payment"))\n'
+    )
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert [edge[:2] for edge in _url_reverse_edges(conn)] == [
+        (
+            "src.shop.checkout.tests.test_views.test_shows_the_form",
+            "src.shop.checkout.views.CardPayment",
+        )
+    ]
+
+
+def _mocked_payments_app(root: Path) -> Path:
+    (root / "app").mkdir()
+    (root / "app" / "payments.py").write_text(
+        "class Api:\n"
+        "    def _post(self):\n"
+        "        return 1\n"
+        "\n"
+        "\n"
+        "def process_payment():\n"
+        "    return Api()._post()\n"
+    )
+    (root / "app" / "checkout.py").write_text(
+        "from app.payments import process_payment\n\n\n"
+        "def checkout():\n    return process_payment()\n"
+    )
+    (root / "tests").mkdir()
+    (root / "tests" / "test_checkout.py").write_text(
+        "from unittest.mock import patch\n"
+        "\n"
+        "from app.checkout import checkout\n"
+        "from app.payments import Api\n"
+        "\n"
+        "\n"
+        '@patch("app.checkout.process_payment")\n'
+        "def test_checkout_mocked(process_payment):\n"
+        "    assert checkout()\n"
+        "\n"
+        "\n"
+        "def test_post_mocked(mocker):\n"
+        '    mocker.patch.object(Api, "_post")\n'
+        "    assert checkout()\n"
+    )
+    return root
+
+
+def _mock_edges(conn) -> list[tuple]:
+    return conn.execute(
+        """
+        SELECT s.qualified_name, t.qualified_name, r.confidence, r.evidence_json
+        FROM relationships r
+        JOIN symbols s ON s.id = r.source_entity_id
+        JOIN symbols t ON t.id = r.target_entity_id
+        WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
+          AND r.relationship_type = 'mocks'
+        ORDER BY s.qualified_name
+        """
+    ).fetchall()
+
+
+def test_run_scan_links_tests_to_the_symbols_they_patch_where_those_are_defined(
+    tmp_path,
+):
+    _mocked_payments_app(tmp_path)
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert _mock_edges(conn) == [
+        (
+            "tests.test_checkout.test_checkout_mocked",
+            "app.payments.process_payment",
+            "high",
+            '["mock_patch"]',
+        ),
+        (
+            "tests.test_checkout.test_post_mocked",
+            "app.payments.Api._post",
+            "high",
+            '["mock_patch"]',
+        ),
+    ]
+
+
+def test_refresh_index_keeps_mock_links_to_a_module_that_changed(tmp_path):
+    _mocked_payments_app(tmp_path)
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config)
+    (tmp_path / "app" / "payments.py").write_text(
+        "class Api:\n"
+        "    def _post(self):\n"
+        "        return 2\n"
+        "\n"
+        "\n"
+        "def process_payment():\n"
+        "    return Api()._post()\n"
+    )
+
+    refresh_index(conn, tmp_path, config)
+
+    assert [edge[:2] for edge in _mock_edges(conn)] == [
+        ("tests.test_checkout.test_checkout_mocked", "app.payments.process_payment"),
+        ("tests.test_checkout.test_post_mocked", "app.payments.Api._post"),
+    ]
+
+
+def test_an_index_written_before_mock_links_existed_is_rebuilt_with_them(tmp_path):
+    _mocked_payments_app(tmp_path)
+    config = load_config(tmp_path)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, config)
+    # What an index left by schema 6 code looks like: no mock links.
+    conn.execute("DELETE FROM relationships WHERE relationship_type = 'mocks'")
+    conn.execute("UPDATE index_metadata SET value = '6' WHERE key = 'schema_version'")
+    conn.commit()
+    conn.close()
+
+    conn = get_connection(tmp_path)
+    ensure_fresh_index(conn, tmp_path, config)
+
+    assert len(_mock_edges(conn)) == 2

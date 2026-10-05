@@ -133,6 +133,16 @@ def test_build_server_registers_test_relationship_tools(tmp_path):
     assert {"get_tests_for", "get_test_summary"} <= tool_names
 
 
+def test_get_tests_for_tool_advertises_a_limit_argument(tmp_path):
+    server = build_server(tmp_path)
+
+    tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
+
+    limit = tools["get_tests_for"].input_schema["properties"]["limit"]
+    assert limit["type"] == "integer"
+    assert limit["default"] == 5
+
+
 def test_get_tests_for_tool_call_returns_relationships(tmp_path):
     (tmp_path / "app").mkdir()
     (tmp_path / "app" / "models.py").write_text("VALUE = 1\n")
@@ -148,6 +158,31 @@ def test_get_tests_for_tool_call_returns_relationships(tmp_path):
 
     assert result.is_error is False
     assert "tests/test_models.py" in result.content[0].text
+
+
+def test_get_tests_for_tool_call_with_limit_zero_names_every_test(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text(
+        "class Box:\n    def value(self):\n        return 1\n"
+    )
+    (tmp_path / "tests").mkdir()
+    many = "".join(
+        f"def test_value_{i:02d}():\n    assert Box().value()\n\n\n" for i in range(7)
+    )
+    (tmp_path / "tests" / "test_models.py").write_text(
+        "from app.models import Box\n\n\n" + many
+    )
+    server = build_server(tmp_path)
+
+    result = asyncio.run(
+        server.call_tool(
+            "get_tests_for", {"qualified_name": "app.models.Box.value", "limit": 0}
+        )
+    )
+
+    assert result.is_error is False
+    text = result.content[0].text
+    assert all(f"tests.test_models.test_value_{i:02d}" in text for i in range(7))
 
 
 def test_get_test_summary_tool_call_returns_totals(tmp_path):

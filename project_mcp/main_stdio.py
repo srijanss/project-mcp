@@ -28,7 +28,11 @@ from project_mcp.tools.symbols import (
     get_dependencies,
     get_dependents,
 )
-from project_mcp.tools.tests import get_test_summary, get_tests_for
+from project_mcp.tools.tests import (
+    MAX_TESTS_NAMED_PER_FILE,
+    get_test_summary,
+    get_tests_for,
+)
 from project_mcp.tools.context_packs import (
     get_context_for_architecture,
     get_context_for_bug,
@@ -287,12 +291,17 @@ def build_server(project_root: Path) -> MCPServer:
         qualified_name: str | None = None,
         query: str | None = None,
         symbol: str | None = None,
+        limit: int = MAX_TESTS_NAMED_PER_FILE,
     ) -> list[dict]:
         """Return tests associated with a source module or symbol, with confidence and evidence.
 
         `query` and `symbol` are aliases for `qualified_name`.
+        Each test file names at most `limit` tests (`tests_total` gives the full
+        count when more exist); `limit=0` names every test.
         """
-        return get_tests_for(project_root, _symbol_name(qualified_name, query, symbol))
+        return get_tests_for(
+            project_root, _symbol_name(qualified_name, query, symbol), limit
+        )
 
     @server.tool(name="get_test_summary")
     def get_test_summary_tool() -> dict:
