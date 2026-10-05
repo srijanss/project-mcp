@@ -33,7 +33,10 @@ from project_mcp.analyzers.python.parser import (
     analyze_python_source,
     parse_python_source,
 )
-from project_mcp.analyzers.python.mock_patches import extract_mock_patches
+from project_mcp.analyzers.python.mock_patches import (
+    extract_fixture_patches,
+    extract_mock_patches,
+)
 from project_mcp.analyzers.python.pytest_analyzer import (
     build_test_relationships,
     discover_tests,
@@ -1503,8 +1506,9 @@ def _link_test_symbol(
     target: str,
     relationship_type: str,
     evidence: str,
-) -> None:
-    """Insert a high-confidence edge from a test-file symbol to a project symbol."""
+) -> bool:
+    """Insert a high-confidence edge from a test-file symbol to a project symbol,
+    returning whether both were found."""
     caller_row = conn.execute(
         "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
         (file_id, caller),
@@ -1517,7 +1521,7 @@ def _link_test_symbol(
         (project_id, target),
     ).fetchone()
     if caller_row is None or target_row is None:
-        return
+        return False
     conn.execute(
         """
         INSERT INTO relationships (
@@ -1528,6 +1532,7 @@ def _link_test_symbol(
         """,
         (caller_row[0], target_row[0], relationship_type, json.dumps([evidence])),
     )
+    return True
 
 
 def index_django_url_relationships(
@@ -1648,6 +1653,7 @@ def index_mock_patch_relationships(
         (project_id,),
     )
     resolver = _PatchTargetResolver(project_root, path_to_file_id, source_roots)
+    conftest_fixtures = _conftest_fixture_patches(project_root, path_to_file_id, resolver)
     test_files = conn.execute(
         """
         SELECT id, path FROM files
@@ -1656,22 +1662,91 @@ def index_mock_patch_relationships(
         (project_id,),
     ).fetchall()
     for file_id, path in test_files:
+        # Nearer conftest.py files override fixtures of the same name.
+        outer_fixtures = {}
+        for directory in reversed(Path(path).parents):
+            outer_fixtures.update(conftest_fixtures.get(directory.as_posix(), {}))
         source = _read_source(Path(project_root) / path)
-        if "patch" not in source:
+        if "patch" not in source and not outer_fixtures:
             continue
         try:
-            patches = extract_mock_patches(path, source)
+            patches = extract_mock_patches(path, source, outer_fixtures)
         except SyntaxError:
             continue
         for patch in patches:
-            if "target" in patch:
-                target = resolver.resolve(patch["target"])
-            else:
-                obj = resolver.local(path, patch["object"])
-                target = resolver.resolve(f"{obj}.{patch['attribute']}")
-            _link_test_symbol(
-                conn, project_id, file_id, patch["caller"], target, "mocks", "mock_patch"
+            linked = _link_test_symbol(
+                conn,
+                project_id,
+                file_id,
+                patch["caller"],
+                _patched_symbol(resolver, path, patch),
+                "mocks",
+                "mock_patch",
             )
+            if not linked and "attribute" in patch:
+                _link_test_to_methods_named(
+                    conn, project_id, file_id, patch["caller"], patch["attribute"]
+                )
+
+
+def _link_test_to_methods_named(
+    conn: sqlite3.Connection, project_id: int, file_id: int, caller: str, name: str
+) -> None:
+    """`patch.object(self.api, "_post")` on an object no import names: link the
+    test to every method so named outside the tests, at low confidence."""
+    conn.execute(
+        """
+        INSERT INTO relationships (
+            source_entity_type, source_entity_id,
+            target_entity_type, target_entity_id,
+            relationship_type, confidence, evidence_json
+        )
+        SELECT 'symbol', c.id, 'symbol', s.id, 'mocks', 'low', '["mock_patch_by_name"]'
+        FROM symbols c, symbols s JOIN files f ON f.id = s.file_id
+        WHERE c.file_id = ? AND c.qualified_name = ?
+          AND f.project_id = ? AND f.file_kind != 'test'
+          AND s.kind = 'method' AND s.name = ?
+        """,
+        (file_id, caller, project_id, name),
+    )
+
+
+def _patched_symbol(resolver: _PatchTargetResolver, path: str, patch: dict) -> str:
+    """The qualified name a patch written in the module at `path` replaces."""
+    if "symbol" in patch:
+        return patch["symbol"]
+    if "target" in patch:
+        return resolver.resolve(patch["target"])
+    obj = resolver.local(path, patch["object"])
+    return resolver.resolve(f"{obj}.{patch['attribute']}")
+
+
+def _conftest_fixture_patches(
+    project_root: Path, path_to_file_id: dict, resolver: _PatchTargetResolver
+) -> dict[str, dict]:
+    """Per directory, the fixtures its conftest.py defines, with the symbols
+    each one's patches replace already resolved where the conftest wrote them."""
+    by_directory = {}
+    for path in path_to_file_id:
+        if Path(path).name != "conftest.py":
+            continue
+        source = _read_source(Path(project_root) / path)
+        try:
+            fixtures = extract_fixture_patches(path, source)
+        except SyntaxError:
+            continue
+        by_directory[Path(path).parent.as_posix()] = {
+            name: {
+                "autouse": fixture["autouse"],
+                # The attribute stays for a patch on an object no import names.
+                "patches": [
+                    {**patch, "symbol": _patched_symbol(resolver, path, patch)}
+                    for patch in fixture["patches"]
+                ],
+            }
+            for name, fixture in fixtures.items()
+        }
+    return by_directory
 
 
 def refresh_cross_module_edges_for_importers(

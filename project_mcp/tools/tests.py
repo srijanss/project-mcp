@@ -182,6 +182,15 @@ def _only_mocked(row: dict, mocked: list[str]) -> dict:
     }
 
 
+def _taking_turns(groups: list[list[str]]) -> list[str]:
+    """Each group's first name, then each one's second, ...: a capped prefix
+    still names a test from every group it can."""
+    names = []
+    for depth in range(max(map(len, groups), default=0)):
+        names.extend(group[depth] for group in groups if depth < len(group))
+    return names
+
+
 def _indirect_tests(conn, symbol_id: int, through_test_helpers: bool = False) -> list[dict]:
     """Tests that reach the symbol only through the code calling it, nearest first.
 
@@ -247,7 +256,7 @@ def _indirect_tests(conn, symbol_id: int, through_test_helpers: bool = False) ->
             "confidence": "medium",
             "evidence": [evidence],
             "via": paths[0]["via"],
-            "tests": sorted(name for path in paths for name in path["tests"]),
+            "tests": _taking_turns([path["tests"] for path in paths]),
         }
         if len(paths) > 1:
             row["paths"] = paths

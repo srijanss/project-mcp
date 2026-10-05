@@ -108,3 +108,88 @@ def test_extract_url_reverses_reads_a_viewname_passed_by_keyword():
             "url_name": "checkout:card-payment",
         }
     ]
+
+
+def test_extract_url_reverses_leaves_out_a_reverse_no_request_is_made_to():
+    source = (
+        "from django.urls import reverse\n"
+        "\n"
+        "\n"
+        "def test_url_is_stable():\n"
+        '    assert reverse("checkout:card-payment") == "/card/"\n'
+    )
+
+    assert extract_url_reverses("tests/test_views.py", source) == []
+
+
+def test_extract_url_reverses_follows_a_reversed_url_through_a_variable():
+    source = (
+        "from django.urls import reverse\n"
+        "\n"
+        "\n"
+        "def test_shows_the_form(client):\n"
+        '    url = reverse("checkout:card-payment")\n'
+        '    assert client.get(f"{url}?step=2")\n'
+        "\n"
+        "\n"
+        "def test_url_is_stable():\n"
+        '    url = reverse("checkout:receipt")\n'
+        '    assert url == "/receipt/"\n'
+    )
+
+    assert extract_url_reverses("tests/test_views.py", source) == [
+        {
+            "caller": "tests.test_views.test_shows_the_form",
+            "url_name": "checkout:card-payment",
+        }
+    ]
+
+
+def test_extract_url_reverses_follows_a_url_a_test_class_reversed_onto_self():
+    source = (
+        "from django.test import TestCase\n"
+        "from django.urls import reverse, reverse_lazy\n"
+        "\n"
+        "\n"
+        "class TestCardPayment(TestCase):\n"
+        '    receipt_url = reverse_lazy("checkout:receipt")\n'
+        "\n"
+        "    def test_shows_the_form(self):\n"
+        "        assert self.client.get(self.url)\n"
+        "\n"
+        "    def test_shows_the_receipt(self):\n"
+        "        assert self.client.get(self.receipt_url)\n"
+        "\n"
+        "    def setUp(self):\n"
+        '        self.url = reverse("checkout:card-payment")\n'
+    )
+
+    assert extract_url_reverses("tests/test_views.py", source) == [
+        {
+            "caller": "tests.test_views.TestCardPayment.test_shows_the_form",
+            "url_name": "checkout:card-payment",
+        },
+        {
+            "caller": "tests.test_views.TestCardPayment.test_shows_the_receipt",
+            "url_name": "checkout:receipt",
+        },
+    ]
+
+
+def test_extract_url_reverses_follows_a_url_reversed_at_module_level():
+    source = (
+        "from django.urls import reverse\n"
+        "\n"
+        'URL = reverse("checkout:card-payment")\n'
+        "\n"
+        "\n"
+        "def test_shows_the_form(client):\n"
+        "    assert client.get(URL)\n"
+    )
+
+    assert extract_url_reverses("tests/test_views.py", source) == [
+        {
+            "caller": "tests.test_views.test_shows_the_form",
+            "url_name": "checkout:card-payment",
+        }
+    ]

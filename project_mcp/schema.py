@@ -18,7 +18,9 @@ import sqlite3
 #    file's framework_kind, which find_symbol uses to rank and filter.
 # 7: tests link to the Django views their `reverse("ns:name")` calls route to,
 #    and to the symbols their `patch(...)` calls replace (`mocks` edges).
-CURRENT_SCHEMA_VERSION = 7
+# 8: a `reverse()` links only when a test client requests its url, and
+#    patches made in fixtures (conftest.py too) or on instances are `mocks`.
+CURRENT_SCHEMA_VERSION = 8
 
 REQUIRED_TABLES = {
     "projects",

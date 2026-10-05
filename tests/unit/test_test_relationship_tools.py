@@ -322,7 +322,7 @@ def test_get_tests_for_a_django_view_names_tests_that_reverse_its_url_name(tmp_p
     ]
 
 
-def test_get_tests_for_does_not_name_a_test_module_reversing_a_url_at_module_level(
+def test_get_tests_for_names_a_test_requesting_a_url_reversed_at_module_level(
     tmp_path,
 ):
     project_root = _django_checkout_project(tmp_path)
@@ -336,15 +336,32 @@ def test_get_tests_for_does_not_name_a_test_module_reversing_a_url_at_module_lev
         "    assert client.get(URL)\n"
     )
 
-    tests_for = get_tests_for(project_root, "src.shop.checkout.views.CardPayment")
+    (row,) = get_tests_for(project_root, "src.shop.checkout.views.CardPayment")
 
-    assert tests_for == [
-        {
-            "test_file": "src/shop/checkout/tests/test_views.py",
-            "confidence": "medium",
-            "evidence": ["helper_reference"],
-        }
-    ]
+    assert row["tests"] == ["src.shop.checkout.tests.test_views.test_shows_the_form"]
+
+
+def test_get_tests_for_a_django_view_names_only_tests_requesting_the_reversed_url(
+    tmp_path,
+):
+    project_root = _django_checkout_project(tmp_path)
+    (project_root / "src" / "shop" / "checkout" / "tests" / "test_views.py").write_text(
+        "from django.urls import reverse\n"
+        "\n"
+        "\n"
+        "def test_url_is_stable():\n"
+        '    assert reverse("checkout:card-payment") == "/card/"\n'
+        "\n"
+        "\n"
+        "def test_shows_the_form(client):\n"
+        '    url = reverse("checkout:card-payment")\n'
+        "    response = client.get(url)\n"
+        "    assert response.status_code == 200\n"
+    )
+
+    (row,) = get_tests_for(project_root, "src.shop.checkout.views.CardPayment")
+
+    assert row["tests"] == ["src.shop.checkout.tests.test_views.test_shows_the_form"]
 
 
 def test_get_tests_for_a_django_view_follows_the_namespace_an_include_gives_it(
@@ -481,8 +498,8 @@ def test_get_tests_for_merges_every_call_path_that_reaches_the_same_test_file(
     assert len(tests_for) == 1
     assert tests_for[0]["tests"] == [
         "tests.test_payments.test_capture",
-        "tests.test_payments.test_charge",
         "tests.test_payments.test_process",
+        "tests.test_payments.test_charge",
     ]
     assert tests_for[0]["paths"] == [
         {
@@ -524,6 +541,26 @@ def test_get_tests_for_caps_the_tests_each_merged_call_path_names(tmp_path):
         ["tests.test_payments.test_refund_0", "tests.test_payments.test_refund_1"],
     ]
     assert tests_for[0]["tests_total"] == 6
+
+
+def test_get_tests_for_names_a_test_from_every_path_in_the_capped_tests(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "payments.py").write_text(
+        "def _sign():\n    return 1\n\n\n"
+        "def _post():\n    return _sign()\n\n\n"
+        "def charge():\n    return _post()\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_payments.py").write_text(
+        "from app.payments import _post, charge\n\n\n"
+        + "".join(f"def test_a_charge_{n}():\n    assert charge()\n\n\n" for n in range(3))
+        + "def test_z_signing():\n    assert _post()\n"
+    )
+
+    tests_for = get_tests_for(tmp_path, "app.payments._sign", limit=2)
+
+    assert "tests.test_payments.test_z_signing" in tests_for[0]["tests"]
+    assert tests_for[0]["tests_total"] == 4
 
 
 def test_get_tests_for_names_tests_in_other_files_that_call_a_test_helper(tmp_path):
@@ -625,6 +662,74 @@ def test_get_tests_for_sets_aside_tests_that_mock_a_call_on_the_way(tmp_path):
             "via": ["app.checkout.checkout", "app.payments.process_payment"],
             "tests": ["tests.test_checkout.test_checkout_real"],
             "mocked": ["tests.test_checkout.test_checkout_mocked"],
+        }
+    ]
+
+
+def test_get_tests_for_sets_aside_tests_whose_conftest_fixture_mocks_a_call_on_the_way(
+    tmp_path,
+):
+    project_root = _mocked_checkout_project(tmp_path)
+    (project_root / "tests" / "conftest.py").write_text(
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def paid(mocker):\n"
+        '    return mocker.patch("app.checkout.process_payment")\n'
+    )
+    (project_root / "tests" / "test_paid.py").write_text(
+        "from app.checkout import checkout\n"
+        "\n"
+        "\n"
+        "def test_checkout_paid(paid):\n"
+        "    assert checkout()\n"
+    )
+
+    tests_for = get_tests_for(project_root, "app.payments._post")
+
+    assert tests_for[1] == {
+        "test_file": "tests/test_paid.py",
+        "confidence": "low",
+        "evidence": ["indirect_call", "mocked"],
+        "mocked": ["tests.test_paid.test_checkout_paid"],
+    }
+
+
+def test_get_tests_for_sets_aside_tests_patching_a_call_on_the_way_on_an_instance(
+    tmp_path,
+):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "gateway.py").write_text(
+        "class Gateway:\n"
+        "    def _sign(self):\n"
+        "        return 1\n"
+        "\n"
+        "    def _post(self):\n"
+        "        return self._sign()\n"
+        "\n"
+        "    def charge(self):\n"
+        "        return self._post()\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_gateway.py").write_text(
+        "from app.gateway import Gateway\n"
+        "\n"
+        "\n"
+        "def test_charge(mocker):\n"
+        "    gateway = Gateway()\n"
+        '    mocker.patch.object(gateway, "_post")\n'
+        "    assert gateway.charge()\n"
+    )
+
+    tests_for = get_tests_for(tmp_path, "app.gateway.Gateway._sign")
+
+    assert tests_for == [
+        {
+            "test_file": "tests/test_gateway.py",
+            "confidence": "low",
+            "evidence": ["indirect_call", "mocked"],
+            "mocked": ["tests.test_gateway.test_charge"],
         }
     ]
 

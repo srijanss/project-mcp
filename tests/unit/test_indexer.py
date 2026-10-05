@@ -3234,6 +3234,99 @@ def test_run_scan_links_tests_to_the_symbols_they_patch_where_those_are_defined(
     ]
 
 
+def test_run_scan_links_tests_to_the_symbols_their_conftest_fixtures_patch(tmp_path):
+    _mocked_payments_app(tmp_path)
+    (tmp_path / "conftest.py").write_text(
+        "import pytest\n"
+        "\n"
+        "from app.payments import Api\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def quiet(mocker):\n"
+        '    mocker.patch.object(Api, "_post")\n'
+    )
+    (tmp_path / "tests" / "test_quiet.py").write_text(
+        "def test_quiet(quiet):\n    assert quiet is None\n"
+    )
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert (
+        "tests.test_quiet.test_quiet",
+        "app.payments.Api._post",
+        "high",
+        '["mock_patch"]',
+    ) in _mock_edges(conn)
+
+
+def test_run_scan_links_a_patch_on_an_instance_to_methods_of_that_name_at_low_confidence(
+    tmp_path,
+):
+    _mocked_payments_app(tmp_path)
+    (tmp_path / "app" / "refunds.py").write_text(
+        "class Refunds:\n    def _post(self):\n        return 2\n\n    def _sign(self):\n        return 3\n"
+    )
+    (tmp_path / "tests" / "test_instance.py").write_text(
+        "from app.payments import Api\n"
+        "\n"
+        "\n"
+        "class TestApi:\n"
+        "    def setup_method(self):\n"
+        "        self.api = Api()\n"
+        "\n"
+        "    def test_post(self, mocker):\n"
+        '        mocker.patch.object(self.api, "_post")\n'
+        "        assert self.api\n"
+    )
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert [edge for edge in _mock_edges(conn) if "test_instance" in edge[0]] == [
+        (
+            "tests.test_instance.TestApi.test_post",
+            "app.payments.Api._post",
+            "low",
+            '["mock_patch_by_name"]',
+        ),
+        (
+            "tests.test_instance.TestApi.test_post",
+            "app.refunds.Refunds._post",
+            "low",
+            '["mock_patch_by_name"]',
+        ),
+    ]
+
+
+def test_run_scan_links_a_conftest_patch_on_an_instance_to_methods_of_that_name(
+    tmp_path,
+):
+    _mocked_payments_app(tmp_path)
+    (tmp_path / "tests" / "conftest.py").write_text(
+        "import pytest\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def quiet_api(api, mocker):\n"
+        '    mocker.patch.object(api, "_post")\n'
+    )
+    (tmp_path / "tests" / "test_quiet.py").write_text(
+        "def test_quiet(quiet_api):\n    assert quiet_api is None\n"
+    )
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert (
+        "tests.test_quiet.test_quiet",
+        "app.payments.Api._post",
+        "low",
+        '["mock_patch_by_name"]',
+    ) in _mock_edges(conn)
+
+
 def test_refresh_index_keeps_mock_links_to_a_module_that_changed(tmp_path):
     _mocked_payments_app(tmp_path)
     conn = get_connection(tmp_path)
@@ -3272,3 +3365,42 @@ def test_an_index_written_before_mock_links_existed_is_rebuilt_with_them(tmp_pat
     ensure_fresh_index(conn, tmp_path, config)
 
     assert len(_mock_edges(conn)) == 2
+
+
+def test_an_index_written_before_fixture_mock_links_existed_is_rebuilt_with_them(
+    tmp_path,
+):
+    _mocked_payments_app(tmp_path)
+    (tmp_path / "conftest.py").write_text(
+        "import pytest\n"
+        "\n"
+        "from app.payments import Api\n"
+        "\n"
+        "\n"
+        "@pytest.fixture\n"
+        "def quiet(mocker):\n"
+        '    mocker.patch.object(Api, "_post")\n'
+    )
+    (tmp_path / "tests" / "test_quiet.py").write_text(
+        "def test_quiet(quiet):\n    assert quiet is None\n"
+    )
+    config = load_config(tmp_path)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, config)
+    # What an index left by schema 7 code looks like: no fixture mock links.
+    conn.execute(
+        """
+        DELETE FROM relationships WHERE relationship_type = 'mocks'
+          AND source_entity_id IN (
+            SELECT id FROM symbols WHERE qualified_name = 'tests.test_quiet.test_quiet'
+          )
+        """
+    )
+    conn.execute("UPDATE index_metadata SET value = '7' WHERE key = 'schema_version'")
+    conn.commit()
+    conn.close()
+
+    conn = get_connection(tmp_path)
+    ensure_fresh_index(conn, tmp_path, config)
+
+    assert "tests.test_quiet.test_quiet" in [edge[0] for edge in _mock_edges(conn)]
