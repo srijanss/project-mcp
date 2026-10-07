@@ -38,11 +38,7 @@ def coverage_block(
     No paths means the query touched no particular file, so its scope is
     the whole project.
     """
-    plugin_by_language = {
-        language: descriptor.name
-        for descriptor in registry.language_descriptors()
-        for language in descriptor.extensions.values()
-    }
+    plugin_by_language = _plugin_by_language(registry)
     failed_by_language: dict[str, dict[str, str]] = {}
     not_installed: set[str] = set()
     for path, language, status, error in _files(conn, paths):
@@ -50,8 +46,8 @@ def coverage_block(
             errors = failed_by_language.setdefault(language, {})
             if status == "file_failed":
                 errors[path] = error
-        elif language is None and PurePosixPath(path).suffix in PLUGIN_FOR_EXTENSION:
-            not_installed.add(PLUGIN_FOR_EXTENSION[PurePosixPath(path).suffix])
+        elif language is None and _suggested_plugin(path):
+            not_installed.add(_suggested_plugin(path))
     languages = {
         language: _language_entry(registry, language, plugin_by_language[language], errors)
         for language, errors in failed_by_language.items()
@@ -62,6 +58,34 @@ def coverage_block(
         "status": _status([entry["analyzed"] for entry in languages.values()]),
         "active_plugins": registry.active_plugins(),
         "languages": languages,
+    }
+
+
+def uncovered_languages(conn: sqlite3.Connection, registry: PluginRegistry) -> dict:
+    """File counts of the project's languages no active plugin covers: those
+    whose plugin is disabled or failed, or that no installed plugin claims."""
+    plugin_by_language = _plugin_by_language(registry)
+    counts: dict[str, int] = {}
+    for path, language, _, _ in _files(conn, set()):
+        if language in plugin_by_language:
+            plugin = plugin_by_language[language]
+            if plugin in registry.failed_plugins or not registry.analyzed(language):
+                counts[language] = counts.get(language, 0) + 1
+        elif language is None and (plugin := _suggested_plugin(path)):
+            counts[plugin] = counts.get(plugin, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _suggested_plugin(path: str) -> str | None:
+    """The plugin to suggest for an unlabelled file, from its extension."""
+    return PLUGIN_FOR_EXTENSION.get(PurePosixPath(path).suffix)
+
+
+def _plugin_by_language(registry: PluginRegistry) -> dict[str, str]:
+    return {
+        language: descriptor.name
+        for descriptor in registry.language_descriptors()
+        for language in descriptor.extensions.values()
     }
 
 

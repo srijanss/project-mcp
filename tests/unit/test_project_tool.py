@@ -114,3 +114,17 @@ def test_indexing_stores_the_dependencies_of_registered_plugins_only(tmp_path):
     assert get_connection(tmp_path).execute(
         "SELECT name, ecosystem FROM dependencies"
     ).fetchall() == [("requests", "python")]
+
+
+def test_get_project_overview_lists_active_plugins_and_uncovered_languages(tmp_path):
+    from project_mcp.plugins.registry import builtin_registry
+
+    (tmp_path / "app.py").write_text("def run():\n    pass\n")
+    (tmp_path / "lib.rs").write_text("pub fn run() {}\n")
+    registry = builtin_registry()
+    registry.disable("rust")
+
+    overview = get_project_overview(tmp_path, registry=registry)
+
+    assert overview["active_plugins"] == ["python", "javascript", "django"]
+    assert overview["uncovered_languages"] == {"rust": 1}

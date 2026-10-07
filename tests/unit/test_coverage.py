@@ -144,3 +144,15 @@ def test_files_of_a_known_language_with_no_installed_plugin_name_the_plugin(tmp_
             " project_mcp.plugins group) and enable it in mcpctl.toml [plugins]."
         ),
     }
+
+
+def test_uncovered_languages_count_files_no_active_plugin_analyzes(tmp_path):
+    from project_mcp.coverage import uncovered_languages
+
+    (tmp_path / "b.rs").write_text("pub fn b() {}\n")
+    (tmp_path / "main.go").write_text("package main\n")
+    registry = builtin_registry()
+    registry.disable("rust")
+    conn = _scanned(tmp_path, registry)
+
+    assert uncovered_languages(conn, registry) == {"go": 1, "rust": 2}

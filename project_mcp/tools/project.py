@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from project_mcp.config import load_config
+from project_mcp.coverage import uncovered_languages
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status
 from project_mcp.plugins.registry import PluginRegistry, configured_registry
@@ -74,4 +75,6 @@ def get_project_overview(
         "framework_hints": [],
         "file_counts": file_counts,
         "index_status": get_index_status(conn),
+        "active_plugins": registry.active_plugins(),
+        "uncovered_languages": uncovered_languages(conn, registry),
     }
