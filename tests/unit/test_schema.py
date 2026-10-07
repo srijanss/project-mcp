@@ -71,3 +71,13 @@ def test_init_schema_indexes_hot_symbol_and_relationship_lookups():
         )
         if "USING" not in plan or "INDEX" not in plan:
             pytest.fail(f"full scan for {query!r}: {plan}")
+
+
+def test_files_record_whether_their_plugin_analyzed_them():
+    conn = sqlite3.connect(":memory:")
+
+    init_schema(conn)
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(files)").fetchall()}
+    assert {"analysis_status", "analysis_error"} <= columns
+    assert CURRENT_SCHEMA_VERSION >= 9  # older indexes lack the columns and are rebuilt

@@ -20,7 +20,9 @@ import sqlite3
 #    and to the symbols their `patch(...)` calls replace (`mocks` edges).
 # 8: a `reverse()` links only when a test client requests its url, and
 #    patches made in fixtures (conftest.py too) or on instances are `mocks`.
-CURRENT_SCHEMA_VERSION = 8
+# 9: files record whether their language plugin analyzed them
+#    (analysis_status) and the error when it failed on them (analysis_error).
+CURRENT_SCHEMA_VERSION = 9
 
 REQUIRED_TABLES = {
     "projects",
@@ -56,6 +58,8 @@ _TABLE_DDL = [
         content_hash TEXT,
         parser_version TEXT,
         indexed_at TEXT,
+        analysis_status TEXT,
+        analysis_error TEXT,
         UNIQUE(project_id, path)
     )
     """,

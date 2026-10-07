@@ -3548,3 +3548,57 @@ def test_scans_warn_about_plugins_that_failed_to_load(tmp_path):
     assert get_index_status(conn)["warnings"] == [
         "ghost plugin failed to load: No module named 'project_mcp.plugins.no_such_module'"
     ]
+
+
+class _FailsOnSecondLook:
+    def is_test_file(self, path):
+        return False
+
+    def analyze(self, path, source):
+        from project_mcp.plugins.analysis import FileAnalysis
+
+        if "v2" in source:
+            raise RuntimeError("boom")
+        return FileAnalysis(
+            symbols=[
+                {
+                    "name": "a",
+                    "qualified_name": "a",
+                    "kind": "module",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "visibility": "public",
+                }
+            ]
+        )
+
+    def resolve_import(self, importer, spec):
+        return []
+
+
+def test_a_file_its_plugin_fails_on_keeps_no_symbols_from_an_earlier_analysis(tmp_path):
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=1,
+            extensions={".toy": "toy"},
+            analyzer=f"{__name__}:_FailsOnSecondLook",
+        )
+    )
+    (tmp_path / "a.toy").write_text("v1\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config, registry=registry)
+
+    (tmp_path / "a.toy").write_text("v2 now\n")
+    refresh_index(conn, tmp_path, config, registry=registry)
+
+    assert conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT analysis_status, analysis_error FROM files WHERE path = 'a.toy'"
+    ).fetchone() == ("file_failed", "RuntimeError: boom")

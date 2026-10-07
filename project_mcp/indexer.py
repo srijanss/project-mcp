@@ -10,6 +10,7 @@ from project_mcp.analyzers.generic.architecture import (
 )
 from project_mcp.analyzers.generic.filesystem import discover_files
 from project_mcp.language_index import (
+    clear_file_symbols,
     link_imports,
     write_file_analysis,
 )
@@ -89,7 +90,9 @@ def upsert_file(
             mtime_ns = excluded.mtime_ns,
             content_hash = excluded.content_hash,
             parser_version = excluded.parser_version,
-            indexed_at = excluded.indexed_at
+            indexed_at = excluded.indexed_at,
+            analysis_status = NULL,
+            analysis_error = NULL
         """,
         (
             project_id,
@@ -388,6 +391,37 @@ def index_legacy_signals(
     )
 
 
+def _analyze_file(
+    conn: sqlite3.Connection,
+    project_root: Path,
+    file_id: int,
+    path: str,
+    language: str,
+    analyzer,
+) -> ChangedFile | None:
+    """Index the plugin's analysis of one file.
+
+    An exception from the plugin drops only this file's output, recording
+    the file as `file_failed` with the error.
+    """
+    source = _read_source(Path(project_root) / path)
+    try:
+        analysis = analyzer.analyze(path, source)
+    except Exception as exc:
+        clear_file_symbols(conn, file_id)
+        conn.execute(
+            "UPDATE files SET analysis_status = 'file_failed', analysis_error = ?"
+            " WHERE id = ?",
+            (f"{type(exc).__name__}: {exc}", file_id),
+        )
+        return None
+    write_file_analysis(conn, file_id, language, analysis)
+    conn.execute(
+        "UPDATE files SET analysis_status = 'analyzed' WHERE id = ?", (file_id,)
+    )
+    return ChangedFile(file_id, source, analysis)
+
+
 def _group_by_analyzer(
     registry: PluginRegistry, changed_plugin_files: dict[str, ChangedFile]
 ) -> dict[object, dict[str, ChangedFile]]:
@@ -428,7 +462,10 @@ def _link_plugin_imports(
                 imports = changed[path].analysis.imports
             else:
                 source = _read_source(Path(project_root) / path)
-                imports = analyzer.analyze(path, source).imports
+                try:
+                    imports = analyzer.analyze(path, source).imports
+                except Exception:
+                    continue  # recorded as file_failed when the file was indexed
             link_imports(conn, path, imports, analyzer, path_to_file_id, source_roots)
 
 
@@ -525,11 +562,12 @@ def run_scan(
 
         analyzer = registry.analyzer_for(record["language"])
         if analyzer is not None:
-            source = _read_source(Path(project_root) / record["path"])
-            analysis = analyzer.analyze(record["path"], source)
-            write_file_analysis(conn, file_id, record["language"], analysis)
-            changed_plugin_files[record["path"]] = ChangedFile(file_id, source, analysis)
-            changed_languages.add(record["language"])
+            changed_file = _analyze_file(
+                conn, project_root, file_id, record["path"], record["language"], analyzer
+            )
+            if changed_file is not None:
+                changed_plugin_files[record["path"]] = changed_file
+                changed_languages.add(record["language"])
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -697,11 +735,12 @@ def refresh_index(
 
         analyzer = registry.analyzer_for(record["language"])
         if analyzer is not None:
-            source = _read_source(Path(project_root) / record["path"])
-            analysis = analyzer.analyze(record["path"], source)
-            write_file_analysis(conn, file_id, record["language"], analysis)
-            changed_plugin_files[record["path"]] = ChangedFile(file_id, source, analysis)
-            changed_languages.add(record["language"])
+            changed_file = _analyze_file(
+                conn, project_root, file_id, record["path"], record["language"], analyzer
+            )
+            if changed_file is not None:
+                changed_plugin_files[record["path"]] = changed_file
+                changed_languages.add(record["language"])
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
