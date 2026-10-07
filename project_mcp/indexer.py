@@ -26,7 +26,7 @@ from project_mcp.analyzers.generic.legacy import (
     detect_test_signals,
 )
 from project_mcp.config import ProjectConfig
-from project_mcp.tools.dependencies import list_dependencies
+from project_mcp.tools.dependencies import read_dependencies
 from project_mcp.schema import get_schema_version
 
 
@@ -145,7 +145,10 @@ def remove_file(conn: sqlite3.Connection, project_id: int, path: str) -> None:
 
 
 def record_scan_warnings(
-    conn: sqlite3.Connection, registry: PluginRegistry, file_count: int
+    conn: sqlite3.Connection,
+    registry: PluginRegistry,
+    file_count: int,
+    dependency_warnings: tuple[str, ...] | list[str] = (),
 ) -> None:
     """Store (and log) why a scan's results are partial; clear stale warnings."""
     warnings = []
@@ -164,6 +167,7 @@ def record_scan_warnings(
             f"{framework} plugin skipped: it requires the {', '.join(missing)} plugin,"
             " which is not active"
         )
+    warnings.extend(dependency_warnings)
     for warning in warnings:
         logger.warning(warning)
     conn.execute(
@@ -197,10 +201,14 @@ def index_dependencies(
     project_id: int,
     project_root: Path,
     registry: PluginRegistry,
-) -> None:
-    """Store the dependencies every language plugin reads from its manifests."""
+) -> list[str]:
+    """Store the dependencies every language plugin reads from its manifests.
+
+    Returns a warning for each ecosystem whose manifests cannot be read.
+    """
     conn.execute("DELETE FROM dependencies WHERE project_id = ?", (project_id,))
-    for dependency in list_dependencies(project_root, registry=registry):
+    dependencies, errors = read_dependencies(project_root, None, registry)
+    for dependency in dependencies:
         status = dependency["version_status"]
         conn.execute(
             """
@@ -216,6 +224,10 @@ def index_dependencies(
                 dependency["version"] if status == "resolved" else None,
             ),
         )
+    return [
+        f"{ecosystem} dependencies not indexed: {error}"
+        for ecosystem, error in errors.items()
+    ]
 
 
 def index_git_facts(
@@ -617,7 +629,7 @@ def run_scan(
     )
 
 
-    index_dependencies(conn, project_id, project_root, registry)
+    dependency_warnings = index_dependencies(conn, project_id, project_root, registry)
     _run_frameworks(
         registry,
         FrameworkContext(
@@ -643,7 +655,7 @@ def run_scan(
         git_stats,
         analyzed_paths=analyzed_paths,
     )
-    record_scan_warnings(conn, registry, len(path_to_file_id))
+    record_scan_warnings(conn, registry, len(path_to_file_id), dependency_warnings)
     mark_index_complete(conn)
     return project_id
 
@@ -824,7 +836,7 @@ def refresh_index(
     )
 
 
-    index_dependencies(conn, project_id, project_root, registry)
+    dependency_warnings = index_dependencies(conn, project_id, project_root, registry)
     _run_frameworks(
         registry,
         FrameworkContext(
@@ -855,7 +867,7 @@ def refresh_index(
         git_stats,
         analyzed_paths=analyzed_paths,
     )
-    record_scan_warnings(conn, registry, len(path_to_file_id))
+    record_scan_warnings(conn, registry, len(path_to_file_id), dependency_warnings)
     mark_index_complete(conn)
 
 

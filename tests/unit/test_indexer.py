@@ -3696,7 +3696,7 @@ def test_a_changed_file_unreadable_at_refresh_is_failed_and_drops_its_symbols(
     conn = get_connection(tmp_path)
     config = load_config(tmp_path)
     run_scan(conn, tmp_path, config)
-    (tmp_path / "a.py").write_text("def new():\n    pass\n")
+    (tmp_path / "a.py").write_text("def renamed_and_longer():\n    pass\n")
 
     def deny(path):
         raise PermissionError("Permission denied")
@@ -3736,3 +3736,36 @@ def test_an_unchanged_file_unreadable_while_relinking_does_not_abort_the_refresh
         "b.py": "analyzed",
         "c.py": "analyzed",
     }
+
+
+def test_index_dependencies_stores_readable_manifests_and_returns_warnings_for_broken_ones(
+    tmp_path,
+):
+    from project_mcp.indexer import begin_index, index_dependencies
+    from project_mcp.plugins.registry import builtin_registry
+
+    (tmp_path / "package.json").write_text("{broken")
+    conn = get_connection(tmp_path)
+    project_id = begin_index(conn, tmp_path)
+
+    warnings = index_dependencies(conn, project_id, tmp_path, builtin_registry())
+
+    assert warnings == ["npm dependencies not indexed: invalid package.json"]
+    assert conn.execute("SELECT COUNT(*) FROM dependencies").fetchone()[0] == 0
+
+
+def test_a_scan_and_a_refresh_report_unreadable_manifests_as_index_warnings(tmp_path):
+    from project_mcp.indexer import get_index_status
+
+    (tmp_path / "Cargo.toml").write_text("[dependencies\nserde = '1'")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+
+    run_scan(conn, tmp_path, config)
+    after_scan = get_index_status(conn, tmp_path).get("warnings")
+    (tmp_path / "app.py").write_text("x = 1\n")
+    refresh_index(conn, tmp_path, config)
+
+    expected = ["rust dependencies not indexed: invalid Cargo.toml"]
+    assert after_scan == expected
+    assert get_index_status(conn, tmp_path).get("warnings") == expected

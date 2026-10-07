@@ -14,6 +14,24 @@ def _ecosystem_analyzers(registry: PluginRegistry, ecosystem: str | None) -> dic
     return analyzers
 
 
+def read_dependencies(
+    project_root: Path, ecosystem: str | None, registry: PluginRegistry
+) -> tuple[list[dict], dict[str, ValueError]]:
+    """The dependencies each language plugin reads from its manifests, and
+    the error of each ecosystem whose manifests cannot be read."""
+    result = []
+    errors: dict[str, ValueError] = {}
+    for name, analyzer in _ecosystem_analyzers(registry, ecosystem).items():
+        reader = getattr(analyzer, "list_dependencies", None)
+        if not callable(reader):
+            continue
+        try:
+            result.extend(reader(Path(project_root)))
+        except ValueError as exc:
+            errors[name] = exc
+    return result, errors
+
+
 def list_dependencies(
     project_root: Path,
     ecosystem: str | None = None,
@@ -21,16 +39,16 @@ def list_dependencies(
 ) -> list[dict]:
     """The dependencies each language plugin reads from its manifests.
 
-    `ecosystem` keeps only the plugin of that ecosystem.
+    `ecosystem` keeps only the plugin of that ecosystem. A manifest that
+    cannot be read is reported as `{"ecosystem", "error"}` beside the other
+    ecosystems' dependencies, and raised when there are none.
     """
     if registry is None:
         registry = builtin_registry()
-    result = []
-    for analyzer in _ecosystem_analyzers(registry, ecosystem).values():
-        reader = getattr(analyzer, "list_dependencies", None)
-        if callable(reader):
-            result.extend(reader(Path(project_root)))
-    return result
+    result, errors = read_dependencies(project_root, ecosystem, registry)
+    if errors and not result:
+        raise next(iter(errors.values()))
+    return result + [{"ecosystem": name, "error": str(exc)} for name, exc in errors.items()]
 
 
 def matching_dependency(
@@ -40,6 +58,8 @@ def matching_dependency(
     `dependency_key` compares names (exactly, when it has none)."""
     analyzers = _ecosystem_analyzers(registry, None)
     for dependency in dependencies:
+        if "error" in dependency:
+            continue
         key = getattr(analyzers.get(dependency["ecosystem"]), "dependency_key", None)
         if not callable(key):
             key = str
@@ -64,4 +84,5 @@ def get_dependency_version(
         undeclared = getattr(analyzer, "undeclared_dependency", None)
         if callable(undeclared) and (found := undeclared(Path(project_root), name)):
             return found
-    return {"status": "not_found"}
+    errors = [dependency for dependency in dependencies if "error" in dependency]
+    return {"status": "not_found", **({"manifest_errors": errors} if errors else {})}

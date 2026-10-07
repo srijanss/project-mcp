@@ -503,3 +503,37 @@ def test_get_dependency_version_matches_and_falls_back_through_the_plugins_hooks
     assert get_dependency_version(tmp_path, "lock-only", registry=keyed)["version"] == "2.0"
     assert get_dependency_version(tmp_path, "GEAR", registry=plain) == {"status": "not_found"}
     assert get_dependency_version(tmp_path, "gear", registry=plain)["name"] == "gear"
+
+
+def test_list_dependencies_reports_a_broken_manifest_beside_other_ecosystems(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["rich==13.7.1"]\n')
+    (tmp_path / "Cargo.toml").write_text("[dependencies\nserde = '1'")
+
+    assert list_dependencies(tmp_path) == [
+        {
+            "name": "rich",
+            "ecosystem": "python",
+            "version": "13.7.1",
+            "version_status": "declared",
+        },
+        {"ecosystem": "rust", "error": "invalid Cargo.toml"},
+    ]
+
+
+def test_get_dependency_version_finds_a_dependency_beside_a_broken_manifest(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["rich==13.7.1"]\n')
+    (tmp_path / "Cargo.toml").write_text("[dependencies\nserde = '1'")
+
+    assert get_dependency_version(tmp_path, "rich")["version"] == "13.7.1"
+
+
+def test_get_dependency_version_not_found_names_the_manifests_it_could_not_read(
+    tmp_path: Path,
+):
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["rich==13.7.1"]\n')
+    (tmp_path / "Cargo.toml").write_text("[dependencies\nserde = '1'")
+
+    assert get_dependency_version(tmp_path, "absent") == {
+        "status": "not_found",
+        "manifest_errors": [{"ecosystem": "rust", "error": "invalid Cargo.toml"}],
+    }
