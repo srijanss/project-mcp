@@ -2,6 +2,7 @@ from pathlib import Path
 
 from project_mcp.plugins.analysis import FileAnalysis
 from project_mcp.plugins.rust.parser import (
+    _module_qualified_name,
     extract_rust_impls,
     extract_rust_use,
     parse_rust_source,
@@ -9,6 +10,10 @@ from project_mcp.plugins.rust.parser import (
 
 
 class RustAnalyzer:
+    def module_name(self, path: str) -> str:
+        """The qualified name of the module symbol this file is indexed as."""
+        return _module_qualified_name(path)
+
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)
         in_test_dir = bool({"tests", "test"} & set(path.parts[:-1]))

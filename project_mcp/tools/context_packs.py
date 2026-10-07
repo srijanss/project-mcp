@@ -14,8 +14,18 @@ from project_mcp.tools.tests import get_tests_for
 from project_mcp.tools.git import get_change_history, get_hotspots, get_change_coupling
 from project_mcp.tools.legacy import get_legacy_signals
 from project_mcp.db import get_connection
+from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 
 logger = logging.getLogger(__name__)
+
+
+def module_name_for(path: str, registry: PluginRegistry | None = None) -> str | None:
+    """The module name the plugin owning `path` indexes it as, if any."""
+    if registry is None:
+        registry = builtin_registry()
+    analyzer = registry.analyzer_for(registry.language_for(Path(path)))
+    module_name = getattr(analyzer, "module_name", None)
+    return module_name(path) if callable(module_name) else None
 
 
 def _related_test_files(project_root: Path, target: str) -> list[dict]:
@@ -264,11 +274,12 @@ def get_context_for_architecture(project_root: Path, area: str) -> dict[str, Any
     matches = find_symbol(project_root, area)
     files = sorted({m["file"] for m in matches if not m["file"].startswith("tests/")})
 
+    registry = builtin_registry()
     inferred_structure = []
     for path in files[:10]:
-        if not path.endswith(".py"):
+        module_qualified_name = module_name_for(path, registry)
+        if module_qualified_name is None:
             continue
-        module_qualified_name = path[: -len(".py")].replace("/", ".")
         deps = get_dependencies(project_root, module_qualified_name)
         if deps:
             inferred_structure.append({

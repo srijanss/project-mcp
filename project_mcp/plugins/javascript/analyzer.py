@@ -2,12 +2,20 @@ import posixpath
 from pathlib import Path
 
 from project_mcp.plugins.analysis import FileAnalysis
-from project_mcp.plugins.javascript.parser import extract_js_imports, parse_js_source
+from project_mcp.plugins.javascript.parser import (
+    _module_qualified_name,
+    extract_js_imports,
+    parse_js_source,
+)
 
 _EXTENSIONS = (".js", ".jsx", ".ts", ".tsx")
 
 
 class JavaScriptAnalyzer:
+    def module_name(self, path: str) -> str:
+        """The qualified name of the module symbol this file is indexed as."""
+        return _module_qualified_name(path)
+
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)
         in_test_dir = bool({"tests", "__tests__"} & set(path.parts[:-1]))

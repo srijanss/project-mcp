@@ -1,6 +1,9 @@
 from pathlib import Path
 
-from project_mcp.analyzers.python.parser import analyze_python_source
+from project_mcp.analyzers.python.parser import (
+    _module_qualified_name,
+    analyze_python_source,
+)
 from project_mcp.plugins.analysis import FileAnalysis
 
 
@@ -128,6 +131,10 @@ def _same_file_edges(symbols: list[dict], parsed: dict) -> list[tuple[str, str, 
 
 
 class PythonAnalyzer:
+    def module_name(self, path: str) -> str:
+        """The qualified name of the module symbol this file is indexed as."""
+        return _module_qualified_name(path)
+
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)
         in_test_dir = bool({"tests", "test"} & set(path.parts[:-1]))
