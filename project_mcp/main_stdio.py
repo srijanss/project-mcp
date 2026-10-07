@@ -11,7 +11,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 
 from project_mcp.config import ConfigError, load_config
-from project_mcp.coverage import coverage_block, referenced_paths
+from project_mcp.coverage import coverage_block, referenced_paths, server_instructions
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
 from project_mcp.plugins import registry as registry_module
@@ -217,7 +217,7 @@ def build_server(project_root: Path) -> MCPServer:
     config = load_config(project_root)
     # Built now so an invalid plugin selection fails startup.
     registry = registry_module.configured_registry(config)
-    server = MCPServer("project-mcp")
+    server = MCPServer("project-mcp", instructions=server_instructions(registry))
 
     def coverage(result, arguments) -> dict:
         conn = get_connection(project_root)

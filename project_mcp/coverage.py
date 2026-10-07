@@ -76,6 +76,31 @@ def uncovered_languages(conn: sqlite3.Connection, registry: PluginRegistry) -> d
     return dict(sorted(counts.items()))
 
 
+def server_instructions(registry: PluginRegistry) -> str:
+    """The MCP server instructions: which plugins and languages are analyzed,
+    and how to tell the user about files outside them."""
+    active = registry.active_plugins()
+    languages = sorted(
+        {
+            language
+            for descriptor in registry.language_descriptors()
+            if descriptor.name in active
+            for language in descriptor.extensions.values()
+        }
+    )
+    return (
+        "project-mcp indexes this project's files and analyzes source code"
+        " through plugins.\n"
+        f"Active plugins: {', '.join(active) or 'none'}.\n"
+        f"Analyzed languages: {', '.join(languages) or 'none'}.\n"
+        "Files in other languages are indexed at file level only: no symbols or"
+        " relationships. Every tool response carries a `coverage` block. When its"
+        " status is not \"full\", tell the user which files were not analyzed and"
+        " relay each unanalyzed language's `note`, so an empty or partial result"
+        " is not mistaken for a complete one."
+    )
+
+
 def _suggested_plugin(path: str) -> str | None:
     """The plugin to suggest for an unlabelled file, from its extension."""
     return PLUGIN_FOR_EXTENSION.get(PurePosixPath(path).suffix)

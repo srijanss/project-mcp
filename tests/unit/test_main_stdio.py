@@ -714,3 +714,16 @@ def test_index_status_tools_report_the_servers_plugins(tmp_path, tool):
 
     plugins = json.loads(result.content[0].text)["plugins"]
     assert plugins["active"] == ["python", "javascript", "django"]
+
+
+def test_build_server_sets_instructions_from_its_plugin_registry(tmp_path):
+    from project_mcp.coverage import server_instructions
+    from project_mcp.plugins.registry import configured_registry
+    from project_mcp.config import load_config
+
+    (tmp_path / "mcpctl.toml").write_text('[plugins]\ndisabled = ["rust"]\n')
+
+    server = build_server(tmp_path)
+
+    expected = server_instructions(configured_registry(load_config(tmp_path)))
+    assert server.instructions == expected

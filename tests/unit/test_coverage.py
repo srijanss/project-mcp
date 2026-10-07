@@ -156,3 +156,17 @@ def test_uncovered_languages_count_files_no_active_plugin_analyzes(tmp_path):
     conn = _scanned(tmp_path, registry)
 
     assert uncovered_languages(conn, registry) == {"go": 1, "rust": 2}
+
+
+def test_server_instructions_are_built_from_the_active_plugins():
+    from project_mcp.coverage import server_instructions
+
+    registry = builtin_registry()
+    registry.disable("javascript")
+
+    instructions = server_instructions(registry)
+
+    assert "Active plugins: python, rust, django." in instructions
+    assert "Analyzed languages: python, rust." in instructions
+    assert "javascript" not in instructions and "typescript" not in instructions
+    assert "relay each unanalyzed language's `note`" in instructions
