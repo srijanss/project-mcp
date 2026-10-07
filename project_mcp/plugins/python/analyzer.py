@@ -150,6 +150,16 @@ class PythonAnalyzer:
             extra=parsed,
         )
 
+    def link_cross_file(self, context) -> None:
+        from project_mcp.plugins.python import linking
+
+        linking.link_cross_file(context)
+
+    def link_test_evidence(self, context) -> None:
+        from project_mcp.plugins.python import linking
+
+        linking.link_test_evidence(context)
+
     def resolve_import(self, importer: str, spec: tuple[str, tuple[str, ...]]) -> list[str]:
         """`import a.b` -> a/b.py; `from a import x, y` also tries a/x.py, a/y.py."""
         module, names = spec

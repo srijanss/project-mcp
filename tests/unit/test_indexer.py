@@ -15,11 +15,11 @@ from project_mcp.indexer import (
     mark_index_complete,
     refresh_index,
     remove_file,
-    resolve_relative_imports,
-    resolve_source_root_imports,
     run_scan,
     upsert_file,
 )
+from project_mcp.plugins.python.analyzer import resolve_relative_imports
+from project_mcp.plugins.python.linking import resolve_source_root_imports
 
 FIXTURE_ROOT = (
     Path(__file__).resolve().parents[1] / "fixtures" / "python" / "sample_project"
@@ -970,7 +970,8 @@ def test_run_scan_refreshes_unchanged_importer_when_target_file_is_added(tmp_pat
 def test_run_scan_does_not_reparse_unchanged_python_files_for_import_relationships(
     tmp_path, monkeypatch
 ):
-    import project_mcp.indexer as indexer_module
+    import project_mcp.plugins.python.analyzer as analyzer_module
+    import project_mcp.plugins.python.linking as linking_module
 
     project_root = _copy_fixture(tmp_path)
     config = load_config(project_root)
@@ -979,13 +980,14 @@ def test_run_scan_does_not_reparse_unchanged_python_files_for_import_relationshi
     run_scan(conn, project_root, config)
 
     calls = []
-    original_analyze = indexer_module.analyze_python_source
+    original_analyze = linking_module.analyze_python_source
 
     def spy(path, source):
         calls.append(path)
         return original_analyze(path, source)
 
-    monkeypatch.setattr(indexer_module, "analyze_python_source", spy)
+    monkeypatch.setattr(analyzer_module, "analyze_python_source", spy)
+    monkeypatch.setattr(linking_module, "analyze_python_source", spy)
 
     run_scan(conn, project_root, config)
 

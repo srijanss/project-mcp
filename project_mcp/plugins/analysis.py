@@ -20,3 +20,30 @@ class FileAnalysis:
     symbol_edges: list[tuple[str, str, str]] = field(default_factory=list)
     imports: list = field(default_factory=list)
     extra: object = None
+
+
+@dataclass
+class ChangedFile:
+    """A file indexed in this run, with the analysis its plugin made of it."""
+
+    file_id: int
+    source: str
+    analysis: FileAnalysis
+
+
+@dataclass
+class LinkContext:
+    """What a plugin's link hooks get once every changed file is written.
+
+    `changed` holds this plugin's files indexed in this run, `added` the
+    ones among them that are new, and `plugin_paths` every indexed file of
+    this plugin, changed or not.
+    """
+
+    conn: object
+    project_root: object
+    source_roots: list[str]
+    path_to_file_id: dict[str, int]
+    changed: dict[str, ChangedFile]
+    added: set[str]
+    plugin_paths: list[str]
