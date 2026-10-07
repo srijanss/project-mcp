@@ -10,6 +10,14 @@ from project_mcp.plugins.formats import FORMAT_DESCRIPTORS
 
 SUPPORTED_API_VERSIONS = (1,)
 ENTRY_POINT_GROUP = "project_mcp.plugins"
+# The plugins shipped with project-mcp, as "module:attribute" of each descriptor,
+# loaded by name so that core never imports a plugin module.
+BUILTIN_PLUGINS = (
+    "project_mcp.plugins.python.descriptor:DESCRIPTOR",
+    "project_mcp.plugins.javascript.descriptor:DESCRIPTOR",
+    "project_mcp.plugins.rust.descriptor:DESCRIPTOR",
+    "project_mcp.plugins.django.descriptor:DESCRIPTOR",
+)
 
 
 class PluginRegistry:
@@ -157,14 +165,18 @@ class PluginRegistry:
     def _load(self, descriptor: PluginDescriptor):
         """The plugin's analyzer; a plugin whose analyzer cannot load is failed."""
         if descriptor.name not in self._analyzers:
-            module_name, _, attribute = descriptor.analyzer.partition(":")
             try:
-                analyzer_class = getattr(importlib.import_module(module_name), attribute)
-                self._analyzers[descriptor.name] = analyzer_class()
+                self._analyzers[descriptor.name] = _import_object(descriptor.analyzer)()
             except Exception as exc:
                 self.failed_plugins[descriptor.name] = f"failed to load: {exc}"
                 return None
         return self._analyzers[descriptor.name]
+
+
+def _import_object(spec: str):
+    """The object a "module:attribute" spec names."""
+    module_name, _, attribute = spec.partition(":")
+    return getattr(importlib.import_module(module_name), attribute)
 
 
 def builtin_registry() -> PluginRegistry:
@@ -173,14 +185,9 @@ def builtin_registry() -> PluginRegistry:
     Installed plugins publish their descriptor in the `project_mcp.plugins`
     entry-point group.
     """
-    from project_mcp.plugins.django.descriptor import DESCRIPTOR as django
-    from project_mcp.plugins.javascript.descriptor import DESCRIPTOR as javascript
-    from project_mcp.plugins.python.descriptor import DESCRIPTOR as python
-    from project_mcp.plugins.rust.descriptor import DESCRIPTOR as rust
-
     registry = PluginRegistry()
-    for descriptor in (python, javascript, rust, django):
-        registry.register(descriptor)
+    for spec in BUILTIN_PLUGINS:
+        registry.register(_import_object(spec))
     for entry_point in entry_points(group=ENTRY_POINT_GROUP):
         try:
             descriptor = entry_point.load()

@@ -15,7 +15,7 @@ from project_mcp.coverage import coverage_block, referenced_paths, server_instru
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
 from project_mcp.plugins import registry as registry_module
-from project_mcp.tools.dependencies import normalize_dependency_name
+from project_mcp.tools.dependencies import matching_dependency
 from project_mcp.tools.architecture import get_architecture_context, get_architecture_facts
 from project_mcp.tools.legacy import get_legacy_hotspots, get_legacy_signals
 from project_mcp.tools.git import (
@@ -235,16 +235,9 @@ def build_server(project_root: Path) -> MCPServer:
         name: str, ecosystem: str | None = None
     ) -> dict:
         """Return a project's declared or resolved dependency version."""
-        for dependency in _indexed_dependencies(project_root, config, ecosystem):
-            if dependency["ecosystem"] == "python":
-                matches = normalize_dependency_name(dependency["name"]) == (
-                    normalize_dependency_name(name)
-                )
-            else:
-                matches = dependency["name"] == name
-            if matches:
-                return dependency
-        return {"status": "not_found"}
+        dependencies = _indexed_dependencies(project_root, config, ecosystem)
+        dependency = matching_dependency(dependencies, name, registry)
+        return {"status": "not_found"} if dependency is None else dependency
 
     @server.tool(name="get_project_overview")
     def get_project_overview_tool() -> dict:

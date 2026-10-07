@@ -5,7 +5,13 @@ from project_mcp.analyzers.python.parser import (
     analyze_python_source,
 )
 from project_mcp.plugins.analysis import FileAnalysis
-from project_mcp.plugins.python.dependencies import list_python_dependencies
+from project_mcp.plugins.python.dependencies import (
+    declared_dependencies,
+    list_python_dependencies,
+    normalize_dependency_name,
+    python_dependency,
+    resolved_versions,
+)
 
 
 def resolve_relative_imports(path: str, imports: list[dict]) -> list[dict]:
@@ -139,6 +145,18 @@ class PythonAnalyzer:
     def list_dependencies(self, project_root: Path) -> list[dict]:
         """The dependencies this project's manifests declare for the ecosystem."""
         return list_python_dependencies(Path(project_root))
+
+    def dependency_key(self, name: str) -> str:
+        """The name two spellings of one package share (PEP 503 normalized)."""
+        return normalize_dependency_name(name)
+
+    def undeclared_dependency(self, project_root: Path, name: str) -> dict | None:
+        """`name` at its uv.lock version when the project declares no dependencies."""
+        root = Path(project_root)
+        if declared_dependencies(root):
+            return None
+        version = resolved_versions(root).get(normalize_dependency_name(name))
+        return python_dependency(name, version, "resolved") if version else None
 
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)

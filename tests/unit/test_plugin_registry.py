@@ -354,3 +354,25 @@ def test_active_plugins_leave_out_disabled_failed_and_skipped_plugins():
 
     assert registry.active_plugins() == ["python", "django"]
     assert without_python.active_plugins() == ["javascript", "rust"]
+
+
+TOY_DESCRIPTOR = PluginDescriptor(
+    name="toy",
+    version="0.1.0",
+    api_version=1,
+    extensions={".toy": "toy"},
+    analyzer="toy_plugin:ToyAnalyzer",
+)
+
+
+def test_builtin_registry_loads_the_built_in_plugins_named_as_module_attribute(monkeypatch):
+    from project_mcp.plugins import registry as registry_module
+
+    monkeypatch.setattr(
+        registry_module, "BUILTIN_PLUGINS", (f"{__name__}:TOY_DESCRIPTOR",)
+    )
+    monkeypatch.setattr(registry_module, "entry_points", lambda group: [])
+
+    registry = builtin_registry()
+
+    assert registry.plugin_names() == ["toy"]

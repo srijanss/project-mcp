@@ -120,3 +120,19 @@ def test_builtin_registry_serves_the_python_analyzer():
     from project_mcp.plugins.registry import builtin_registry
 
     assert isinstance(builtin_registry().analyzer_for("python"), PythonAnalyzer)
+
+
+def test_python_analyzer_keys_dependencies_by_normalized_name_and_reads_uv_lock(tmp_path):
+    analyzer = PythonAnalyzer()
+    (tmp_path / "uv.lock").write_text('[[package]]\nname = "Requests"\nversion = "2.32.3"\n')
+
+    assert analyzer.dependency_key("Typing_Extensions") == analyzer.dependency_key("typing-extensions")
+    assert analyzer.undeclared_dependency(tmp_path, "requests") == {
+        "name": "requests",
+        "ecosystem": "python",
+        "version": "2.32.3",
+        "version_status": "resolved",
+    }
+    assert analyzer.undeclared_dependency(tmp_path, "missing") is None
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["flask"]\n')
+    assert analyzer.undeclared_dependency(tmp_path, "requests") is None

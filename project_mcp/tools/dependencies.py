@@ -1,12 +1,17 @@
 from pathlib import Path
 
-from project_mcp.plugins.python.dependencies import (
-    declared_dependencies,
-    normalize_dependency_name,
-    python_dependency,
-    resolved_versions,
-)
 from project_mcp.plugins.registry import PluginRegistry, builtin_registry
+
+
+def _ecosystem_analyzers(registry: PluginRegistry, ecosystem: str | None) -> dict:
+    """The analyzer of each language plugin's ecosystem, or only of `ecosystem`."""
+    analyzers = {}
+    for descriptor in registry.language_descriptors():
+        if descriptor.ecosystem is None or ecosystem not in (None, descriptor.ecosystem):
+            continue
+        language = next(iter(descriptor.extensions.values()))
+        analyzers[descriptor.ecosystem] = registry.analyzer_for(language)
+    return analyzers
 
 
 def list_dependencies(
@@ -21,29 +26,42 @@ def list_dependencies(
     if registry is None:
         registry = builtin_registry()
     result = []
-    for descriptor in registry.language_descriptors():
-        if descriptor.ecosystem is None or ecosystem not in (None, descriptor.ecosystem):
-            continue
-        language = next(iter(descriptor.extensions.values()))
-        reader = getattr(registry.analyzer_for(language), "list_dependencies", None)
+    for analyzer in _ecosystem_analyzers(registry, ecosystem).values():
+        reader = getattr(analyzer, "list_dependencies", None)
         if callable(reader):
             result.extend(reader(Path(project_root)))
     return result
 
 
-def get_dependency_version(
-    project_root: Path, name: str, ecosystem: str | None = None
-) -> dict:
-    for dependency in list_dependencies(project_root, ecosystem):
-        if dependency["ecosystem"] == "python":
-            matches = normalize_dependency_name(dependency["name"]) == normalize_dependency_name(name)
-        else:
-            matches = dependency["name"] == name
-        if matches:
+def matching_dependency(
+    dependencies: list[dict], name: str, registry: PluginRegistry
+) -> dict | None:
+    """The first of `dependencies` named `name`, as its plugin's
+    `dependency_key` compares names (exactly, when it has none)."""
+    analyzers = _ecosystem_analyzers(registry, None)
+    for dependency in dependencies:
+        key = getattr(analyzers.get(dependency["ecosystem"]), "dependency_key", None)
+        if not callable(key):
+            key = str
+        if key(dependency["name"]) == key(name):
             return dependency
-    root = Path(project_root)
-    if not declared_dependencies(root) and ecosystem in (None, "python"):
-        version = resolved_versions(root).get(normalize_dependency_name(name))
-        if version:
-            return python_dependency(name, version, "resolved")
+    return None
+
+
+def get_dependency_version(
+    project_root: Path,
+    name: str,
+    ecosystem: str | None = None,
+    registry: PluginRegistry | None = None,
+) -> dict:
+    if registry is None:
+        registry = builtin_registry()
+    dependencies = list_dependencies(project_root, ecosystem, registry)
+    dependency = matching_dependency(dependencies, name, registry)
+    if dependency is not None:
+        return dependency
+    for analyzer in _ecosystem_analyzers(registry, ecosystem).values():
+        undeclared = getattr(analyzer, "undeclared_dependency", None)
+        if callable(undeclared) and (found := undeclared(Path(project_root), name)):
+            return found
     return {"status": "not_found"}

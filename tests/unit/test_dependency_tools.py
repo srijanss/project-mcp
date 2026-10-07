@@ -465,3 +465,41 @@ def test_list_dependencies_reads_each_language_plugins_ecosystem(tmp_path: Path)
     assert list_dependencies(tmp_path, registry=registry) == [gear]
     assert list_dependencies(tmp_path, ecosystem="toy", registry=registry) == [gear]
     assert list_dependencies(tmp_path, ecosystem="rust", registry=registry) == []
+
+
+class _KeyedGearAnalyzer(_GearAnalyzer):
+    def dependency_key(self, name):
+        return name.lower().replace("_", "-")
+
+    def undeclared_dependency(self, project_root, name):
+        if name == "lock-only":
+            return {"name": name, "ecosystem": "toy", "version": "2.0", "version_status": "resolved"}
+        return None
+
+
+def _toy_registry(analyzer):
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=1,
+            extensions={".toy": "toy"},
+            analyzer=f"{__name__}:{analyzer}",
+            ecosystem="toy",
+        )
+    )
+    return registry
+
+
+def test_get_dependency_version_matches_and_falls_back_through_the_plugins_hooks(tmp_path):
+    keyed = _toy_registry("_KeyedGearAnalyzer")
+    plain = _toy_registry("_GearAnalyzer")
+
+    assert get_dependency_version(tmp_path, "GEAR", registry=keyed)["name"] == "gear"
+    assert get_dependency_version(tmp_path, "lock-only", registry=keyed)["version"] == "2.0"
+    assert get_dependency_version(tmp_path, "GEAR", registry=plain) == {"status": "not_found"}
+    assert get_dependency_version(tmp_path, "gear", registry=plain)["name"] == "gear"
