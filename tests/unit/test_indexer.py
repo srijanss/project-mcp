@@ -3685,3 +3685,54 @@ def test_get_index_status_with_a_registry_reports_active_and_failed_plugins(tmp_
         "failed": {"toy": "failed to load: missing toolchain"},
     }
     assert "plugins" not in get_index_status(conn)
+
+
+def test_a_changed_file_unreadable_at_refresh_is_failed_and_drops_its_symbols(
+    tmp_path, monkeypatch
+):
+    from project_mcp import indexer
+
+    (tmp_path / "a.py").write_text("def old():\n    pass\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config)
+    (tmp_path / "a.py").write_text("def new():\n    pass\n")
+
+    def deny(path):
+        raise PermissionError("Permission denied")
+
+    monkeypatch.setattr(indexer, "_read_source", deny)
+    refresh_index(conn, tmp_path, config)
+
+    assert conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT analysis_status, analysis_error FROM files WHERE path = 'a.py'"
+    ).fetchone() == ("file_failed", "PermissionError: Permission denied")
+
+
+def test_an_unchanged_file_unreadable_while_relinking_does_not_abort_the_refresh(
+    tmp_path, monkeypatch
+):
+    from project_mcp import indexer
+
+    (tmp_path / "a.py").write_text("import b\n")
+    (tmp_path / "b.py").write_text("def run():\n    pass\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config)
+    (tmp_path / "c.py").write_text("import b\n")
+    read_source = indexer._read_source
+
+    def deny_a(path):
+        if path.name == "a.py":
+            raise PermissionError("Permission denied")
+        return read_source(path)
+
+    monkeypatch.setattr(indexer, "_read_source", deny_a)
+    refresh_index(conn, tmp_path, config)
+
+    assert dict(conn.execute("SELECT path, analysis_status FROM files")) == {
+        "a.py": "analyzed",
+        "b.py": "analyzed",
+        "c.py": "analyzed",
+    }

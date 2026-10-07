@@ -413,11 +413,12 @@ def _analyze_file(
 ) -> ChangedFile | None:
     """Index the plugin's analysis of one file.
 
-    An exception from the plugin drops only this file's output, recording
-    the file as `file_failed` with the error.
+    An exception from the plugin, or a file that can no longer be read,
+    drops only this file's output, recording the file as `file_failed`
+    with the error.
     """
-    source = _read_source(Path(project_root) / path)
     try:
+        source = _read_source(Path(project_root) / path)
         analysis = analyzer.analyze(path, source)
     except Exception as exc:
         clear_file_symbols(conn, file_id)
@@ -473,11 +474,12 @@ def _link_plugin_imports(
             if path in changed:
                 imports = changed[path].analysis.imports
             else:
-                source = _read_source(Path(project_root) / path)
                 try:
+                    source = _read_source(Path(project_root) / path)
                     imports = analyzer.analyze(path, source).imports
                 except Exception:
-                    continue  # recorded as file_failed when the file was indexed
+                    # Failed when indexed (and recorded then), or unreadable now.
+                    continue
             link_imports(conn, path, imports, analyzer, path_to_file_id, source_roots)
 
 
