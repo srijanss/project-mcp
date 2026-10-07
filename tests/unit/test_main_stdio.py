@@ -643,3 +643,26 @@ def test_dict_results_are_serialized_compactly(tmp_path):
     assert len(result.content) == 1
     assert "\n  " not in text
     assert json.loads(text)["symbol"]["qualified_name"] == "app.models.Widget"
+
+
+def test_list_dependencies_filters_indexed_dependencies_by_any_ecosystem(tmp_path):
+    (tmp_path / "requirements.txt").write_text("requests>=2.31\n")
+    (tmp_path / "Cargo.toml").write_text('[dependencies]\nserde = "1"\n')
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("list_dependencies", {"ecosystem": "rust"}))
+
+    assert result.structured_content["result"] == [
+        {"name": "serde", "ecosystem": "rust", "version": "1", "version_status": "declared"}
+    ]
+
+
+def test_get_dependency_version_matches_non_python_names_exactly(tmp_path):
+    (tmp_path / "package.json").write_text('{"dependencies": {"lodash.merge": "^4.6.2"}}\n')
+    server = build_server(tmp_path)
+
+    loose = asyncio.run(server.call_tool("get_dependency_version", {"name": "Lodash-Merge"}))
+    exact = asyncio.run(server.call_tool("get_dependency_version", {"name": "lodash.merge"}))
+
+    assert json.loads(loose.content[0].text) == {"status": "not_found"}
+    assert json.loads(exact.content[0].text)["ecosystem"] == "npm"

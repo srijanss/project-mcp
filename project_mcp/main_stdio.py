@@ -47,8 +47,7 @@ DEFAULT_FIND_SYMBOL_LIMIT = 50
 
 
 def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> list[dict]:
-    if ecosystem not in (None, "python"):
-        return []
+    """Indexed dependencies of every ecosystem, or only of `ecosystem`."""
     conn = get_connection(project_root)
     ensure_fresh_index(conn, project_root, config)
     project_id = conn.execute(
@@ -57,10 +56,10 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
     rows = conn.execute(
         """
         SELECT name, ecosystem, declared_version, resolved_version
-        FROM dependencies WHERE project_id = ? AND ecosystem = 'python'
-        ORDER BY name
+        FROM dependencies WHERE project_id = ? AND (? IS NULL OR ecosystem = ?)
+        ORDER BY ecosystem, name
         """,
-        (project_id,),
+        (project_id, ecosystem, ecosystem),
     ).fetchall()
     return [
         {
@@ -192,7 +191,7 @@ def build_server(project_root: Path) -> MCPServer:
 
     @server.tool()
     def list_dependencies(ecosystem: str | None = None) -> list[dict]:
-        """List Python dependencies declared by the project."""
+        """List the dependencies the project's manifests declare, per ecosystem."""
         return _indexed_dependencies(project_root, config, ecosystem)
 
     @server.tool()
@@ -200,9 +199,14 @@ def build_server(project_root: Path) -> MCPServer:
         name: str, ecosystem: str | None = None
     ) -> dict:
         """Return a project's declared or resolved dependency version."""
-        target = normalize_dependency_name(name)
         for dependency in _indexed_dependencies(project_root, config, ecosystem):
-            if normalize_dependency_name(dependency["name"]) == target:
+            if dependency["ecosystem"] == "python":
+                matches = normalize_dependency_name(dependency["name"]) == (
+                    normalize_dependency_name(name)
+                )
+            else:
+                matches = dependency["name"] == name
+            if matches:
                 return dependency
         return {"status": "not_found"}
 
