@@ -256,3 +256,27 @@ def test_classify_file_takes_the_file_kind_from_the_registry():
         "language": "hcl",
         "file_kind": "config",
     }
+
+
+class _SpecSuffixAnalyzer:
+    def is_test_file(self, path: Path) -> bool:
+        return Path(path).stem.endswith("_spec")
+
+
+def test_classify_file_asks_the_language_analyzer_whether_a_file_is_a_test():
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=1,
+            extensions={".toy": "toy"},
+            analyzer=f"{__name__}:_SpecSuffixAnalyzer",
+        )
+    )
+
+    assert classify_file(Path("src/shape_spec.toy"), registry)["file_kind"] == "test"
+    assert classify_file(Path("tests/shape.toy"), registry)["file_kind"] == "source"

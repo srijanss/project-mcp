@@ -77,3 +77,33 @@ def test_every_registry_labels_config_and_docs_formats():
         "README.md": ("markdown", "docs"),
         "index.rst": ("restructuredtext", "docs"),
     }
+
+
+class _RecordingAnalyzer:
+    loaded = 0
+
+    def __init__(self):
+        type(self).loaded += 1
+
+
+def test_registry_loads_a_language_analyzer_from_its_descriptor_once():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=1,
+            extensions={".toy": "toy"},
+            analyzer=f"{__name__}:_RecordingAnalyzer",
+        )
+    )
+    _RecordingAnalyzer.loaded = 0
+
+    first = registry.analyzer_for("toy")
+    second = registry.analyzer_for("toy")
+
+    assert isinstance(first, _RecordingAnalyzer)
+    assert first is second
+    assert _RecordingAnalyzer.loaded == 1
+    assert registry.analyzer_for("toml") is None
+    assert registry.analyzer_for(None) is None

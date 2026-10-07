@@ -3428,3 +3428,90 @@ def test_refresh_index_labels_new_files_with_the_given_registry(tmp_path):
         "app.py": "python",
         "main.go": "go",
     }
+
+
+class _UppercaseAnalyzer:
+    """Each upper-case word is a symbol; `use NAME` imports NAME.toy."""
+
+    analyzed: list[str] = []
+
+    def is_test_file(self, path):
+        return False
+
+    def analyze(self, path, source):
+        from project_mcp.plugins.analysis import FileAnalysis
+
+        type(self).analyzed.append(path)
+        module = Path(path).stem
+        analysis = FileAnalysis()
+        for word in source.split():
+            if word.isupper():
+                analysis.symbols.append(
+                    {
+                        "name": word,
+                        "qualified_name": f"{module}.{word}",
+                        "kind": "class",
+                        "start_line": 1,
+                        "end_line": 1,
+                        "visibility": "public",
+                    }
+                )
+        words = source.split()
+        analysis.imports = [
+            words[i + 1] for i, word in enumerate(words[:-1]) if word == "use"
+        ]
+        return analysis
+
+    def resolve_import(self, importer, module):
+        return [f"{module}.toy"]
+
+
+def _uppercase_registry():
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import builtin_registry
+
+    registry = builtin_registry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=1,
+            extensions={".toy": "toy"},
+            analyzer=f"{__name__}:_UppercaseAnalyzer",
+        )
+    )
+    return registry
+
+
+def test_run_scan_hands_each_file_of_a_plugin_language_to_its_analyzer(tmp_path):
+    (tmp_path / "shapes.toy").write_text("SQUARE CIRCLE\n")
+    (tmp_path / "app.py").write_text("VALUE = 1\n")
+    _UppercaseAnalyzer.analyzed = []
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path), registry=_uppercase_registry())
+
+    assert _UppercaseAnalyzer.analyzed == ["shapes.toy"]
+    assert sorted(
+        conn.execute("SELECT qualified_name FROM symbols WHERE language = 'toy'")
+    ) == [("shapes.CIRCLE",), ("shapes.SQUARE",)]
+
+
+def test_refresh_index_links_a_plugin_import_once_its_target_file_is_added(tmp_path):
+    (tmp_path / "square.toy").write_text("SQUARE use shapes\n")
+    registry = _uppercase_registry()
+    config = load_config(tmp_path)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, config, registry=registry)
+
+    (tmp_path / "shapes.toy").write_text("SHAPE\n")
+    refresh_index(conn, tmp_path, config, registry=registry)
+
+    assert conn.execute(
+        """
+        SELECT source.path, target.path FROM relationships r
+        JOIN files source ON source.id = r.source_entity_id
+        JOIN files target ON target.id = r.target_entity_id
+        WHERE r.relationship_type = 'imports' AND r.source_entity_type = 'file'
+        """
+    ).fetchall() == [("square.toy", "shapes.toy")]

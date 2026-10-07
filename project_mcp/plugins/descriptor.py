@@ -8,7 +8,8 @@ class PluginDescriptor:
 
     Holds data only, no analysis code. `extensions` maps each file extension
     the plugin claims to the language label those files get; `file_kind` is
-    the kind those files are indexed as.
+    the kind those files are indexed as. `analyzer` names the analyzer class
+    as "module:attribute", imported only when the plugin is used.
     """
 
     name: str
@@ -16,3 +17,4 @@ class PluginDescriptor:
     api_version: int
     extensions: Mapping[str, str]
     file_kind: str = "source"
+    analyzer: str | None = None

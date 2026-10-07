@@ -29,12 +29,13 @@ def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
     if registry is None:
         registry = builtin_registry()
     language = registry.language_for(path)
+    analyzer = registry.analyzer_for(language)
 
-    if language == "python" and _is_test_path(path):
+    if analyzer is not None:
+        file_kind = "test" if analyzer.is_test_file(path) else registry.file_kind_for(path)
+    elif language == "python" and _is_test_path(path):
         file_kind = "test"
     elif language in JS_LANGUAGES and _is_js_test_path(path):
-        file_kind = "test"
-    elif language == "rust" and ("tests" in path.parts[:-1] or _is_test_path(path)):
         file_kind = "test"
     else:
         file_kind = registry.file_kind_for(path)

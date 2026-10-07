@@ -1,6 +1,6 @@
 import time
 
-from project_mcp.analyzers.rust.parser import (
+from project_mcp.plugins.rust.parser import (
     extract_rust_impls,
     extract_rust_use,
     parse_rust_source,
