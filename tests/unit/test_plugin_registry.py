@@ -376,3 +376,17 @@ def test_builtin_registry_loads_the_built_in_plugins_named_as_module_attribute(m
     registry = builtin_registry()
 
     assert registry.plugin_names() == ["toy"]
+
+
+def test_configured_registry_rejects_an_unknown_plugin_in_enabled(tmp_path):
+    from project_mcp.config import ConfigError, ProjectConfig
+    from project_mcp.plugins.registry import configured_registry
+
+    config = ProjectConfig(project_root=tmp_path, plugins_enabled=["python", "pyhton"])
+
+    with pytest.raises(
+        ConfigError,
+        match=r"unknown plugin pyhton in mcpctl.toml plugins.enabled"
+        r" \(installed: python, javascript, rust, django\)",
+    ):
+        configured_registry(config)

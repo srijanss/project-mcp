@@ -201,12 +201,20 @@ def builtin_registry() -> PluginRegistry:
 def configured_registry(config) -> PluginRegistry:
     """The built-in plugins, with those the project's config leaves out disabled.
 
-    Without `plugins_enabled` every plugin is enabled; `plugins_disabled`
-    then disables plugins by name. Each plugin's `[plugins.<name>]` settings
+    Without `plugins_enabled` every plugin is enabled; naming a plugin there
+    that isn't installed is a config error. `plugins_disabled` then disables
+    plugins by name. Each plugin's `[plugins.<name>]` settings
     feed its fingerprint.
     """
     registry = builtin_registry()
     registry.plugin_settings = dict(config.plugin_settings)
+    known = set(registry.plugin_names()) | set(registry.failed_plugins)
+    for name in config.plugins_enabled or []:
+        if name not in known:
+            raise ConfigError(
+                f"unknown plugin {name} in mcpctl.toml plugins.enabled"
+                f" (installed: {', '.join(registry.plugin_names())})"
+            )
     for name in registry.plugin_names():
         left_out = config.plugins_enabled is not None and name not in config.plugins_enabled
         if left_out or name in config.plugins_disabled:
