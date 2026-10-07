@@ -1,4 +1,5 @@
 import json
+import logging
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,9 @@ from project_mcp.analyzers.generic.legacy import (
 from project_mcp.config import ProjectConfig
 from project_mcp.tools.dependencies import list_dependencies
 from project_mcp.schema import get_schema_version
+
+
+logger = logging.getLogger(__name__)
 
 
 def _read_source(path: Path) -> str:
@@ -135,6 +139,30 @@ def remove_file(conn: sqlite3.Connection, project_id: int, path: str) -> None:
         )
 
     conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
+
+
+def record_scan_warnings(
+    conn: sqlite3.Connection, registry: PluginRegistry, file_count: int
+) -> None:
+    """Store (and log) why a scan's results are partial; clear stale warnings."""
+    warnings = []
+    if not any(
+        registry.analyzed(language)
+        for descriptor in registry.language_descriptors()
+        for language in descriptor.extensions.values()
+    ):
+        warnings.append(
+            f"no language plugins active; indexed {file_count} files at file level only"
+        )
+    for warning in warnings:
+        logger.warning(warning)
+    conn.execute(
+        """
+        INSERT INTO index_metadata (key, value) VALUES ('warnings', ?)
+        ON CONFLICT (key) DO UPDATE SET value = excluded.value
+        """,
+        (json.dumps(warnings),),
+    )
 
 
 def mark_index_complete(conn: sqlite3.Connection) -> None:
@@ -540,6 +568,7 @@ def run_scan(
     index_legacy_signals(
         conn, project_id, project_root, path_to_file_id, file_kinds, config, git_stats
     )
+    record_scan_warnings(conn, registry, len(path_to_file_id))
     mark_index_complete(conn)
     return project_id
 
@@ -593,11 +622,17 @@ def get_index_status(
         "SELECT value FROM index_metadata WHERE key = 'last_refresh_time'"
     ).fetchone()
 
-    return {
+    result = {
         "status": status,
         "schema_version": get_schema_version(conn),
         "last_refresh_time": last_refresh[0] if last_refresh else None,
     }
+    warnings = conn.execute(
+        "SELECT value FROM index_metadata WHERE key = 'warnings'"
+    ).fetchone()
+    if warnings and json.loads(warnings[0]):
+        result["warnings"] = json.loads(warnings[0])
+    return result
 
 
 def refresh_index(
@@ -710,6 +745,7 @@ def refresh_index(
     index_legacy_signals(
         conn, project_id, project_root, path_to_file_id, file_kinds, config, git_stats
     )
+    record_scan_warnings(conn, registry, len(path_to_file_id))
     mark_index_complete(conn)
 
 

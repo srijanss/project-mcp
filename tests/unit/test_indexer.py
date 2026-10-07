@@ -3492,3 +3492,20 @@ def test_run_scan_without_a_registry_uses_the_projects_plugin_selection(tmp_path
     assert conn.execute(
         "SELECT language FROM files WHERE path = 'lib.rs'"
     ).fetchone()[0] == "rust"
+
+
+def test_scans_warn_while_no_language_plugin_is_active(tmp_path):
+    from project_mcp.plugins.registry import PluginRegistry, builtin_registry
+
+    (tmp_path / "app.py").write_text("x = 1\n")
+    (tmp_path / "README.md").write_text("# demo\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+
+    run_scan(conn, tmp_path, config, registry=PluginRegistry())
+    warned = get_index_status(conn).get("warnings")
+    (tmp_path / "app.py").write_text("x = 2\n")
+    refresh_index(conn, tmp_path, config, registry=builtin_registry())
+
+    assert warned == ["no language plugins active; indexed 2 files at file level only"]
+    assert "warnings" not in get_index_status(conn)
