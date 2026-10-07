@@ -242,3 +242,22 @@ def test_resolving_extension_claims_gives_the_extension_to_its_active_claimant()
     registry.resolve_extension_claims()
 
     assert registry.language_for(Path("app.py")) == "python"
+
+
+def test_a_plugin_whose_analyzer_fails_to_load_is_failed_not_raised():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="ghost",
+            version="0.1.0",
+            api_version=1,
+            extensions={".ghost": "ghost"},
+            analyzer="project_mcp.plugins.no_such_module:Ghost",
+        )
+    )
+
+    assert registry.analyzer_for("ghost") is None
+    assert registry.failed_plugins["ghost"].startswith(
+        "failed to load: No module named 'project_mcp.plugins.no_such_module'"
+    )
+    assert registry.analyzed("ghost") is False

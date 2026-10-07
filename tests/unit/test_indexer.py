@@ -3524,3 +3524,27 @@ def test_scans_warn_about_frameworks_skipped_for_an_inactive_language(tmp_path):
     assert get_index_status(conn)["warnings"] == [
         "django plugin skipped: it requires the python plugin, which is not active"
     ]
+
+
+def test_scans_warn_about_plugins_that_failed_to_load(tmp_path):
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import builtin_registry
+
+    registry = builtin_registry()
+    registry.register(
+        PluginDescriptor(
+            name="ghost",
+            version="0.1.0",
+            api_version=1,
+            extensions={".ghost": "ghost"},
+            analyzer="project_mcp.plugins.no_such_module:Ghost",
+        )
+    )
+    (tmp_path / "a.ghost").write_text("boo\n")
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path), registry=registry)
+
+    assert get_index_status(conn)["warnings"] == [
+        "ghost plugin failed to load: No module named 'project_mcp.plugins.no_such_module'"
+    ]

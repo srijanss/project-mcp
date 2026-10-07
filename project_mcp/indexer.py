@@ -154,6 +154,8 @@ def record_scan_warnings(
         warnings.append(
             f"no language plugins active; indexed {file_count} files at file level only"
         )
+    for name, reason in registry.failed_plugins.items():
+        warnings.append(f"{name} plugin {reason}")
     for framework, missing in registry.skipped_frameworks().items():
         warnings.append(
             f"{framework} plugin skipped: it requires the {', '.join(missing)} plugin,"

@@ -61,8 +61,7 @@ class PluginRegistry:
 
     def analyzed(self, language: str | None) -> bool:
         """Whether an enabled, loadable plugin analyzes `language` files."""
-        descriptor = self._descriptor_by_language.get(language)
-        return descriptor is not None and self._active(descriptor)
+        return self.analyzer_for(language) is not None
 
     def resolve_extension_claims(self) -> None:
         """Give each extension to the one active plugin claiming it.
@@ -99,11 +98,12 @@ class PluginRegistry:
 
     def frameworks(self) -> list:
         """The analyzers of every registered framework plugin, loaded on first use."""
-        return [
+        loaded = [
             self._load(descriptor)
             for descriptor in self._framework_descriptors
             if self._active(descriptor) and not self._inactive_requirements(descriptor)
         ]
+        return [framework for framework in loaded if framework is not None]
 
     def skipped_frameworks(self) -> dict[str, list[str]]:
         """Enabled framework plugins skipped, with the inactive plugins they require."""
@@ -123,10 +123,15 @@ class PluginRegistry:
         ]
 
     def _load(self, descriptor: PluginDescriptor):
+        """The plugin's analyzer; a plugin whose analyzer cannot load is failed."""
         if descriptor.name not in self._analyzers:
             module_name, _, attribute = descriptor.analyzer.partition(":")
-            analyzer_class = getattr(importlib.import_module(module_name), attribute)
-            self._analyzers[descriptor.name] = analyzer_class()
+            try:
+                analyzer_class = getattr(importlib.import_module(module_name), attribute)
+                self._analyzers[descriptor.name] = analyzer_class()
+            except Exception as exc:
+                self.failed_plugins[descriptor.name] = f"failed to load: {exc}"
+                return None
         return self._analyzers[descriptor.name]
 
 
