@@ -233,3 +233,21 @@ def test_detect_circular_dependency_signals_handles_dense_layered_graph_quickly(
 
     assert signals == []
     assert elapsed < 2.0
+
+
+def test_detect_test_signals_marks_tests_of_an_unanalyzed_target_unknown():
+    signals = detect_test_signals(
+        [{"target": "lib.rs", "test_count": 0, "confidences": [], "analyzed": False}]
+    )
+
+    assert signals == [
+        {
+            "target": "lib.rs",
+            "signal": "weak_test_relationship",
+            "severity": "medium",
+            "confidence": "unknown",
+            "evidence": [
+                "no active plugin analyzed this file, so its test relationships are unknown"
+            ],
+        }
+    ]

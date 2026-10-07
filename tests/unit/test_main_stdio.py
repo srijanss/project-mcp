@@ -691,3 +691,15 @@ def test_tool_responses_carry_a_coverage_block_and_lists_move_under_items(tmp_pa
     assert [s["qualified_name"] for s in symbols["items"]] == ["app.Widget"]
     assert symbols["coverage"]["languages"] == {"python": {"analyzed": True}}
     assert json.loads(overview.content[0].text)["coverage"]["status"] == "full"
+
+
+def test_empty_results_of_plugin_backed_tools_say_when_nothing_was_analyzed(tmp_path):
+    (tmp_path / "lib.rs").write_text("pub fn run() {}\n")
+    (tmp_path / "mcpctl.toml").write_text('[plugins]\ndisabled = ["rust"]\n')
+    server = build_server(tmp_path)
+
+    symbols = asyncio.run(server.call_tool("find_symbol", {"query": "run"}))
+    hotspots = asyncio.run(server.call_tool("get_hotspots", {}))
+
+    assert json.loads(symbols.content[0].text)["reason"] == "not_analyzed"
+    assert json.loads(hotspots.content[0].text)["reason"] == "none_found"

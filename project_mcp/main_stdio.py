@@ -148,11 +148,19 @@ def _cap_dict(result: dict, budget: int) -> dict:
     return capped if trimmed else result
 
 
-def _with_coverage(result, block: dict) -> dict:
-    """`result` carrying `block` under "coverage"; a list moves under "items"."""
+def _with_coverage(result, block: dict, needs_plugins: bool) -> dict:
+    """`result` carrying `block` under "coverage"; a list moves under "items".
+
+    An empty list says why: `not_analyzed` when the tool's data comes from
+    plugins and none analyzed its scope, else `none_found`.
+    """
     if isinstance(result, list):
-        return {"items": result, "coverage": block}
-    return {**result, "coverage": block}
+        result = {"items": result}
+    result = {**result, "coverage": block}
+    if result.get("items") == []:
+        unanalyzed = needs_plugins and block["status"] == "none"
+        result["reason"] = "not_analyzed" if unanalyzed else "none_found"
+    return result
 
 
 def _guard_tools(server: MCPServer, coverage=None) -> None:
@@ -162,11 +170,12 @@ def _guard_tools(server: MCPServer, coverage=None) -> None:
     unexpected exceptions behind a bare "Error executing tool"; a ToolError
     keeps it), and oversized list results are trimmed and flagged.
     `coverage(result, arguments)`, when given, builds the coverage block
-    every result carries.
+    every result carries. `server.tool(needs_plugins=True)` marks a tool whose
+    data comes from plugins.
     """
     register = server.tool
 
-    def tool(*args, **kwargs):
+    def tool(*args, needs_plugins: bool = False, **kwargs):
         decorate = register(*args, **kwargs)
 
         def wrap(fn):
@@ -183,7 +192,9 @@ def _guard_tools(server: MCPServer, coverage=None) -> None:
                     else:
                         # Leave room for the block and the key it sits under.
                         budget = MAX_TOOL_OUTPUT_CHARS - _size({"items": [], "coverage": block})
-                        result = _with_coverage(_cap_output(result, budget), block)
+                        result = _with_coverage(
+                            _cap_output(result, budget), block, needs_plugins
+                        )
                     return _compact(result, wrapped=returns_list)
                 except ToolError:
                     raise
@@ -214,12 +225,12 @@ def build_server(project_root: Path) -> MCPServer:
 
     _guard_tools(server, coverage)
 
-    @server.tool()
+    @server.tool(needs_plugins=True)
     def list_dependencies(ecosystem: str | None = None) -> list[dict]:
         """List the dependencies the project's manifests declare, per ecosystem."""
         return _indexed_dependencies(project_root, config, ecosystem)
 
-    @server.tool()
+    @server.tool(needs_plugins=True)
     def get_dependency_version(
         name: str, ecosystem: str | None = None
     ) -> dict:
@@ -240,7 +251,7 @@ def build_server(project_root: Path) -> MCPServer:
         """Return a summary of the project's languages, roots, and manifests."""
         return get_project_overview(project_root)
 
-    @server.tool(name="find_symbol")
+    @server.tool(name="find_symbol", needs_plugins=True)
     def find_symbol_tool(
         query: str,
         limit: int = DEFAULT_FIND_SYMBOL_LIMIT,
@@ -277,7 +288,7 @@ def build_server(project_root: Path) -> MCPServer:
             }
         return rows
 
-    @server.tool(name="get_symbol_context")
+    @server.tool(name="get_symbol_context", needs_plugins=True)
     def get_symbol_context_tool(
         qualified_name: str | None = None,
         query: str | None = None,
@@ -291,7 +302,7 @@ def build_server(project_root: Path) -> MCPServer:
         """
         return describe_symbol(project_root, _symbol_name(qualified_name, query, symbol))
 
-    @server.tool(name="get_dependencies")
+    @server.tool(name="get_dependencies", needs_plugins=True)
     def get_dependencies_tool(
         qualified_name: str | None = None,
         query: str | None = None,
@@ -303,7 +314,7 @@ def build_server(project_root: Path) -> MCPServer:
         """
         return get_dependencies(project_root, _symbol_name(qualified_name, query, symbol))
 
-    @server.tool(name="get_dependents")
+    @server.tool(name="get_dependents", needs_plugins=True)
     def get_dependents_tool(
         qualified_name: str | None = None,
         query: str | None = None,
@@ -315,7 +326,7 @@ def build_server(project_root: Path) -> MCPServer:
         """
         return get_dependents(project_root, _symbol_name(qualified_name, query, symbol))
 
-    @server.tool(name="get_tests_for")
+    @server.tool(name="get_tests_for", needs_plugins=True)
     def get_tests_for_tool(
         qualified_name: str | None = None,
         query: str | None = None,
@@ -334,7 +345,7 @@ def build_server(project_root: Path) -> MCPServer:
             project_root, _symbol_name(qualified_name, query, symbol), limit
         )
 
-    @server.tool(name="get_test_summary")
+    @server.tool(name="get_test_summary", needs_plugins=True)
     def get_test_summary_tool() -> dict:
         """Return project-wide test counts and test-relationship confidence breakdown."""
         return get_test_summary(project_root)
@@ -387,22 +398,22 @@ def build_server(project_root: Path) -> MCPServer:
         """Return evidence-backed legacy signals for a single target."""
         return get_legacy_signals(project_root, target)
 
-    @server.tool(name="get_context_for_symbol")
+    @server.tool(name="get_context_for_symbol", needs_plugins=True)
     def get_context_for_symbol_tool(qualified_name: str) -> dict:
         """Return a compact context pack for a specific symbol."""
         return get_context_for_symbol(project_root, qualified_name)
 
-    @server.tool(name="get_context_for_feature")
+    @server.tool(name="get_context_for_feature", needs_plugins=True)
     def get_context_for_feature_tool(query: str) -> dict:
         """Return a compact context pack for a feature query."""
         return get_context_for_feature(project_root, query)
 
-    @server.tool(name="get_context_for_bug")
+    @server.tool(name="get_context_for_bug", needs_plugins=True)
     def get_context_for_bug_tool(query: str) -> dict:
         """Return a compact context pack for a bug investigation query."""
         return get_context_for_bug(project_root, query)
 
-    @server.tool(name="get_context_for_refactor")
+    @server.tool(name="get_context_for_refactor", needs_plugins=True)
     def get_context_for_refactor_tool(target: str) -> dict:
         """Return a compact context pack for a refactor target."""
         return get_context_for_refactor(project_root, target)

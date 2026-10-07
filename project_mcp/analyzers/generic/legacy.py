@@ -242,13 +242,16 @@ def detect_test_signals(targets: list[dict]) -> list[dict]:
     """Detect weak_test_relationship signals from test coverage data.
 
     Args:
-        targets: list of {"target": str, "test_count": int, "confidences": list[str]}
+        targets: list of {"target": str, "test_count": int, "confidences": list[str],
+            "analyzed": bool}
             confidences holds the confidence ('high'/'medium'/'low') of each
-            test relationship found for that target.
+            test relationship found for that target. `analyzed` (default True)
+            is False when no plugin analyzed the target.
 
     Returns:
         List of weak_test_relationship signal dicts for targets with no
-        tests, or only low/medium-confidence tests.
+        tests, or only low/medium-confidence tests. An unanalyzed target's
+        test relationships are unknown, never absent.
     """
     signals = []
     for entry in targets:
@@ -256,7 +259,20 @@ def detect_test_signals(targets: list[dict]) -> list[dict]:
         test_count = entry["test_count"]
         confidences = entry.get("confidences", [])
 
-        if test_count == 0:
+        if not entry.get("analyzed", True):
+            signals.append(
+                {
+                    "target": target,
+                    "signal": "weak_test_relationship",
+                    "severity": "medium",
+                    "confidence": "unknown",
+                    "evidence": [
+                        "no active plugin analyzed this file, so its test"
+                        " relationships are unknown"
+                    ],
+                }
+            )
+        elif test_count == 0:
             signals.append(
                 {
                     "target": target,

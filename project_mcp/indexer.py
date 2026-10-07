@@ -262,13 +262,15 @@ def index_legacy_signals(
     file_kinds: dict,
     config: ProjectConfig,
     git_stats: dict | None = None,
+    analyzed_paths: set[str] | None = None,
 ) -> None:
     """Persist evidence-backed legacy signals for all indexed files/symbols.
 
-    path_to_file_id/file_kinds are threaded through from the caller's own
-    scan bookkeeping rather than re-queried, to avoid an extra files-table
-    scan on every index run. git_stats is the caller's collect_git_file_stats
-    result for every path, read here when not given.
+    path_to_file_id/file_kinds/analyzed_paths are threaded through from the
+    caller's own scan bookkeeping rather than re-queried, to avoid an extra
+    files-table scan on every index run. git_stats is the caller's
+    collect_git_file_stats result for every path, read here when not given.
+    analyzed_paths (the files a plugin analyzed) is read here when not given.
     """
     if git_stats is None:
         git_stats = collect_git_file_stats(
@@ -370,11 +372,21 @@ def index_legacy_signals(
             continue
         confidences_by_target.setdefault(path, []).append(confidence)
 
+    if analyzed_paths is None:
+        analyzed_paths = {
+            path
+            for (path,) in conn.execute(
+                "SELECT path FROM files WHERE project_id = ?"
+                " AND analysis_status = 'analyzed'",
+                (project_id,),
+            )
+        }
     test_targets = [
         {
             "target": path,
             "test_count": len(confidences_by_target.get(path, [])),
             "confidences": confidences_by_target.get(path, []),
+            "analyzed": path in analyzed_paths,
         }
         for path in path_to_file_id
         if file_kinds.get(path) != "test"
@@ -528,14 +540,13 @@ def run_scan(
         registry = configured_registry(config)
     project_id = begin_index(conn, project_root)
 
-    existing_rows = {
-        row[0]: (row[1], row[2], row[3], row[4])
-        for row in conn.execute(
-            "SELECT path, id, size, mtime_ns, parser_version FROM files"
-            " WHERE project_id = ?",
-            (project_id,),
-        ).fetchall()
-    }
+    file_rows = conn.execute(
+        "SELECT path, id, size, mtime_ns, parser_version, analysis_status FROM files"
+        " WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
+    existing_rows = {row[0]: (row[1], row[2], row[3], row[4]) for row in file_rows}
+    analyzed_paths = {row[0] for row in file_rows if row[5] == "analyzed"}
     path_to_file_id = {path: values[0] for path, values in existing_rows.items()}
 
     discovered = discover_files(project_root, config, registry)
@@ -572,8 +583,12 @@ def run_scan(
             if changed_file is not None:
                 changed_plugin_files[record["path"]] = changed_file
                 changed_languages.add(record["language"])
+                analyzed_paths.add(record["path"])
+            else:
+                analyzed_paths.discard(record["path"])
         else:
             clear_file_symbols(conn, file_id)
+            analyzed_paths.discard(record["path"])
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -617,7 +632,14 @@ def run_scan(
     index_architecture_facts(conn, project_root, config)
     file_kinds = {record["path"]: record["file_kind"] for record in discovered}
     index_legacy_signals(
-        conn, project_id, project_root, path_to_file_id, file_kinds, config, git_stats
+        conn,
+        project_id,
+        project_root,
+        path_to_file_id,
+        file_kinds,
+        config,
+        git_stats,
+        analyzed_paths=analyzed_paths,
     )
     record_scan_warnings(conn, registry, len(path_to_file_id))
     mark_index_complete(conn)
@@ -718,14 +740,13 @@ def refresh_index(
     project_id = project_row[0]
     begin_index(conn, project_root)
 
-    existing_rows = {
-        row[0]: (row[1], row[2], row[3], row[4])
-        for row in conn.execute(
-            "SELECT path, id, size, mtime_ns, parser_version FROM files"
-            " WHERE project_id = ?",
-            (project_id,),
-        ).fetchall()
-    }
+    file_rows = conn.execute(
+        "SELECT path, id, size, mtime_ns, parser_version, analysis_status FROM files"
+        " WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
+    existing_rows = {row[0]: (row[1], row[2], row[3], row[4]) for row in file_rows}
+    analyzed_paths = {row[0] for row in file_rows if row[5] == "analyzed"}
     path_to_file_id = {path: values[0] for path, values in existing_rows.items()}
 
     discovered = discover_files(project_root, config, registry)
@@ -764,8 +785,12 @@ def refresh_index(
             if changed_file is not None:
                 changed_plugin_files[record["path"]] = changed_file
                 changed_languages.add(record["language"])
+                analyzed_paths.add(record["path"])
+            else:
+                analyzed_paths.discard(record["path"])
         else:
             clear_file_symbols(conn, file_id)
+            analyzed_paths.discard(record["path"])
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -814,7 +839,14 @@ def refresh_index(
     index_architecture_facts(conn, project_root, config)
     file_kinds = {record["path"]: record["file_kind"] for record in discovered}
     index_legacy_signals(
-        conn, project_id, project_root, path_to_file_id, file_kinds, config, git_stats
+        conn,
+        project_id,
+        project_root,
+        path_to_file_id,
+        file_kinds,
+        config,
+        git_stats,
+        analyzed_paths=analyzed_paths,
     )
     record_scan_warnings(conn, registry, len(path_to_file_id))
     mark_index_complete(conn)

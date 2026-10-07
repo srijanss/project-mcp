@@ -3651,3 +3651,20 @@ def test_disabling_a_plugin_drops_the_symbols_it_indexed(tmp_path):
     run_scan(conn, tmp_path, config, registry=registry)
 
     assert conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0] == 0
+
+
+def test_run_scan_marks_test_relationships_of_unanalyzed_files_unknown(tmp_path):
+    (tmp_path / "app.py").write_text("def run():\n    pass\n")
+    (tmp_path / "lib.rs").write_text("pub fn run() {}\n")
+    registry = _python_registry("1.0.0")
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path), registry=registry)
+
+    rows = dict(
+        conn.execute(
+            "SELECT target, confidence FROM legacy_signals"
+            " WHERE signal = 'weak_test_relationship'"
+        )
+    )
+    assert (rows["app.py"], rows["lib.rs"]) == ("high", "unknown")
