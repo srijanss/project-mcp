@@ -3,23 +3,19 @@ from pathlib import Path
 from project_mcp.config import load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status
-
-MANIFEST_NAMES = {
-    "pyproject.toml",
-    "setup.cfg",
-    "setup.py",
-    "requirements.txt",
-    "package.json",
-    "Cargo.toml",
-}
+from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 
 
-def get_project_overview(project_root: Path) -> dict:
+def get_project_overview(
+    project_root: Path, registry: PluginRegistry | None = None
+) -> dict:
     project_root = Path(project_root)
+    if registry is None:
+        registry = builtin_registry()
     config = load_config(project_root)
     conn = get_connection(project_root)
 
-    ensure_fresh_index(conn, project_root, config)
+    ensure_fresh_index(conn, project_root, config, registry)
 
     project_row = conn.execute(
         "SELECT id FROM projects WHERE root_path = ?", (str(project_root),)
@@ -37,8 +33,13 @@ def get_project_overview(project_root: Path) -> dict:
     for _, _, file_kind in rows:
         file_counts[file_kind] = file_counts.get(file_kind, 0) + 1
 
+    manifest_names = {
+        name
+        for descriptor in registry.language_descriptors()
+        for name in descriptor.manifests
+    }
     manifests = sorted(
-        path for path, _, _ in rows if Path(path).name in MANIFEST_NAMES
+        path for path, _, _ in rows if Path(path).name in manifest_names
     )
 
     source_roots = (

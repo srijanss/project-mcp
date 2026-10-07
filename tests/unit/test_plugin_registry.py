@@ -128,3 +128,19 @@ def test_registry_fails_a_plugin_with_an_unsupported_api_version():
     assert registry.failed_plugins == {
         "toy": "unsupported api_version 2 (supported: 1)"
     }
+
+
+def test_builtin_language_plugins_declare_their_manifests_and_ecosystem():
+    declared = {
+        descriptor.name: (descriptor.ecosystem, set(descriptor.manifests))
+        for descriptor in builtin_registry().language_descriptors()
+    }
+
+    assert declared == {
+        "python": (
+            "python",
+            {"pyproject.toml", "setup.cfg", "setup.py", "requirements.txt"},
+        ),
+        "javascript": ("npm", {"package.json"}),
+        "rust": ("rust", {"Cargo.toml"}),
+    }

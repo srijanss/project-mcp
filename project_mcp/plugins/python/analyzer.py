@@ -5,6 +5,7 @@ from project_mcp.analyzers.python.parser import (
     analyze_python_source,
 )
 from project_mcp.plugins.analysis import FileAnalysis
+from project_mcp.plugins.python.dependencies import list_python_dependencies
 
 
 def resolve_relative_imports(path: str, imports: list[dict]) -> list[dict]:
@@ -134,6 +135,10 @@ class PythonAnalyzer:
     def module_name(self, path: str) -> str:
         """The qualified name of the module symbol this file is indexed as."""
         return _module_qualified_name(path)
+
+    def list_dependencies(self, project_root: Path) -> list[dict]:
+        """The dependencies this project's manifests declare for the ecosystem."""
+        return list_python_dependencies(Path(project_root))
 
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)

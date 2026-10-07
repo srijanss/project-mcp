@@ -10,6 +10,8 @@ class PluginDescriptor:
     the plugin claims to the language label those files get; `file_kind` is
     the kind those files are indexed as. `analyzer` names the analyzer class
     as "module:attribute", imported only when the plugin is used.
+    `manifests` are the file names that declare a project's dependencies in
+    the plugin's `ecosystem` (e.g. "pyproject.toml" for "python").
     """
 
     name: str
@@ -18,3 +20,5 @@ class PluginDescriptor:
     extensions: Mapping[str, str]
     file_kind: str = "source"
     analyzer: str | None = None
+    manifests: tuple[str, ...] = ()
+    ecosystem: str | None = None

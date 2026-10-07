@@ -6,4 +6,6 @@ DESCRIPTOR = PluginDescriptor(
     api_version=1,
     extensions={".rs": "rust"},
     analyzer="project_mcp.plugins.rust.analyzer:RustAnalyzer",
+    manifests=("Cargo.toml",),
+    ecosystem="rust",
 )

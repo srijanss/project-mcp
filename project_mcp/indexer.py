@@ -281,72 +281,26 @@ def mark_index_complete(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def index_python_dependencies(
-    conn: sqlite3.Connection, project_id: int, project_root: Path
+def index_dependencies(
+    conn: sqlite3.Connection,
+    project_id: int,
+    project_root: Path,
+    registry: PluginRegistry,
 ) -> None:
-    conn.execute(
-        "DELETE FROM dependencies WHERE project_id = ? AND ecosystem = 'python'",
-        (project_id,),
-    )
-    for dependency in list_dependencies(project_root, ecosystem="python"):
+    """Store the dependencies every language plugin reads from its manifests."""
+    conn.execute("DELETE FROM dependencies WHERE project_id = ?", (project_id,))
+    for dependency in list_dependencies(project_root, registry=registry):
         status = dependency["version_status"]
         conn.execute(
             """
             INSERT INTO dependencies (
                 project_id, name, ecosystem, declared_version, resolved_version
-            ) VALUES (?, ?, 'python', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?)
             """,
             (
                 project_id,
                 dependency["name"],
-                dependency["version"] if status == "declared" else None,
-                dependency["version"] if status == "resolved" else None,
-            ),
-        )
-
-
-def index_rust_dependencies(
-    conn: sqlite3.Connection, project_id: int, project_root: Path
-) -> None:
-    conn.execute(
-        "DELETE FROM dependencies WHERE project_id = ? AND ecosystem = 'rust'",
-        (project_id,),
-    )
-    for dependency in list_dependencies(project_root, ecosystem="rust"):
-        status = dependency["version_status"]
-        conn.execute(
-            """
-            INSERT INTO dependencies (
-                project_id, name, ecosystem, declared_version, resolved_version
-            ) VALUES (?, ?, 'rust', ?, ?)
-            """,
-            (
-                project_id,
-                dependency["name"],
-                dependency["version"] if status == "declared" else None,
-                dependency["version"] if status == "resolved" else None,
-            ),
-        )
-
-
-def index_npm_dependencies(
-    conn: sqlite3.Connection, project_id: int, project_root: Path
-) -> None:
-    conn.execute(
-        "DELETE FROM dependencies WHERE project_id = ? AND ecosystem = 'npm'",
-        (project_id,),
-    )
-    for dependency in list_dependencies(project_root, ecosystem="npm"):
-        status = dependency["version_status"]
-        conn.execute(
-            """
-            INSERT INTO dependencies (
-                project_id, name, ecosystem, declared_version, resolved_version
-            ) VALUES (?, ?, 'npm', ?, ?)
-            """,
-            (
-                project_id,
-                dependency["name"],
+                dependency["ecosystem"],
                 dependency["version"] if status == "declared" else None,
                 dependency["version"] if status == "resolved" else None,
             ),
@@ -691,9 +645,7 @@ def run_scan(
             conn, project_id, project_root, path_to_file_id, config.source_roots
         )
 
-    index_python_dependencies(conn, project_id, project_root)
-    index_rust_dependencies(conn, project_id, project_root)
-    index_npm_dependencies(conn, project_id, project_root)
+    index_dependencies(conn, project_id, project_root, registry)
     _enrich_framework_metadata(conn, project_id)
     git_stats = collect_git_file_stats(project_root, list(path_to_file_id), config=config)
     index_git_facts(conn, path_to_file_id, git_stats)
@@ -922,9 +874,7 @@ def refresh_index(
             conn, project_id, project_root, path_to_file_id, config.source_roots
         )
 
-    index_python_dependencies(conn, project_id, project_root)
-    index_rust_dependencies(conn, project_id, project_root)
-    index_npm_dependencies(conn, project_id, project_root)
+    index_dependencies(conn, project_id, project_root, registry)
     _enrich_framework_metadata(conn, project_id)
     changed_file_ids = {
         path: path_to_file_id[path]
@@ -942,7 +892,10 @@ def refresh_index(
 
 
 def ensure_fresh_index(
-    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+    conn: sqlite3.Connection,
+    project_root: Path,
+    config: ProjectConfig,
+    registry: PluginRegistry | None = None,
 ) -> None:
     """Guarantee the index reflects the current filesystem before a tool reads it.
 
@@ -951,6 +904,6 @@ def ensure_fresh_index(
     """
     status = get_index_status(conn, project_root, config)["status"]
     if status == "never_indexed":
-        run_scan(conn, project_root, config)
+        run_scan(conn, project_root, config, registry)
     elif status == "stale":
-        refresh_index(conn, project_root, config)
+        refresh_index(conn, project_root, config, registry)

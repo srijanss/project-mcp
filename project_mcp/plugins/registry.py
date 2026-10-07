@@ -27,6 +27,11 @@ class PluginRegistry:
             self._descriptor_by_extension[extension] = descriptor
             self._descriptor_by_language[language] = descriptor
 
+    def language_descriptors(self) -> list[PluginDescriptor]:
+        """Every registered plugin that analyzes source files, in registration order."""
+        unique = {id(d): d for d in self._descriptor_by_language.values()}.values()
+        return [descriptor for descriptor in unique if descriptor.analyzer is not None]
+
     def language_for(self, path: Path) -> str | None:
         suffix = Path(path).suffix
         descriptor = self._descriptor_by_extension.get(suffix)

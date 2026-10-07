@@ -437,3 +437,31 @@ def test_list_dependencies_reads_declared_npm_dependencies(tmp_path: Path):
             "version_status": "declared",
         },
     ]
+
+
+class _GearAnalyzer:
+    def list_dependencies(self, project_root):
+        return [{"name": "gear", "ecosystem": "toy", "version": "1.0", "version_status": "declared"}]
+
+
+def test_list_dependencies_reads_each_language_plugins_ecosystem(tmp_path: Path):
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=1,
+            extensions={".toy": "toy"},
+            analyzer=f"{__name__}:_GearAnalyzer",
+            ecosystem="toy",
+        )
+    )
+    (tmp_path / "Cargo.toml").write_text('[dependencies]\nserde = "1"\n')
+    gear = {"name": "gear", "ecosystem": "toy", "version": "1.0", "version_status": "declared"}
+
+    assert list_dependencies(tmp_path, registry=registry) == [gear]
+    assert list_dependencies(tmp_path, ecosystem="toy", registry=registry) == [gear]
+    assert list_dependencies(tmp_path, ecosystem="rust", registry=registry) == []

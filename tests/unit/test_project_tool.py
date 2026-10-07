@@ -82,3 +82,35 @@ def test_get_project_overview_only_counts_current_project_files(tmp_path):
 
     assert overview["file_counts"]["source"] == baseline_source_count
     assert "other" not in overview["source_roots"]
+
+
+def test_get_project_overview_lists_only_manifests_of_registered_plugins(tmp_path):
+    from project_mcp.plugins.python.descriptor import DESCRIPTOR as python
+    from project_mcp.plugins.registry import PluginRegistry
+
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'demo'\n")
+    (tmp_path / "Cargo.toml").write_text("[package]\nname = 'demo'\n")
+    registry = PluginRegistry()
+    registry.register(python)
+
+    overview = get_project_overview(tmp_path, registry=registry)
+
+    assert overview["manifests"] == ["pyproject.toml"]
+
+
+def test_indexing_stores_the_dependencies_of_registered_plugins_only(tmp_path):
+    from project_mcp.plugins.python.descriptor import DESCRIPTOR as python
+    from project_mcp.plugins.registry import PluginRegistry
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[project]\nname = 'demo'\ndependencies = ['requests>=2']\n"
+    )
+    (tmp_path / "Cargo.toml").write_text('[dependencies]\nserde = "1"\n')
+    registry = PluginRegistry()
+    registry.register(python)
+
+    get_project_overview(tmp_path, registry=registry)
+
+    assert get_connection(tmp_path).execute(
+        "SELECT name, ecosystem FROM dependencies"
+    ).fetchall() == [("requests", "python")]

@@ -2,6 +2,7 @@ import posixpath
 from pathlib import Path
 
 from project_mcp.plugins.analysis import FileAnalysis
+from project_mcp.plugins.javascript.dependencies import list_npm_dependencies
 from project_mcp.plugins.javascript.parser import (
     _module_qualified_name,
     extract_js_imports,
@@ -15,6 +16,10 @@ class JavaScriptAnalyzer:
     def module_name(self, path: str) -> str:
         """The qualified name of the module symbol this file is indexed as."""
         return _module_qualified_name(path)
+
+    def list_dependencies(self, project_root: Path) -> list[dict]:
+        """The dependencies this project's manifests declare for the ecosystem."""
+        return list_npm_dependencies(Path(project_root))
 
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)

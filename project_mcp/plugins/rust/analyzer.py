@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from project_mcp.plugins.analysis import FileAnalysis
+from project_mcp.plugins.rust.dependencies import list_rust_dependencies
 from project_mcp.plugins.rust.parser import (
     _module_qualified_name,
     extract_rust_impls,
@@ -13,6 +14,10 @@ class RustAnalyzer:
     def module_name(self, path: str) -> str:
         """The qualified name of the module symbol this file is indexed as."""
         return _module_qualified_name(path)
+
+    def list_dependencies(self, project_root: Path) -> list[dict]:
+        """The dependencies this project's manifests declare for the ecosystem."""
+        return list_rust_dependencies(Path(project_root))
 
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)

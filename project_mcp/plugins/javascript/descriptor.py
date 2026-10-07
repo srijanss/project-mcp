@@ -11,4 +11,6 @@ DESCRIPTOR = PluginDescriptor(
         ".tsx": "typescript",
     },
     analyzer="project_mcp.plugins.javascript.analyzer:JavaScriptAnalyzer",
+    manifests=("package.json",),
+    ecosystem="npm",
 )
