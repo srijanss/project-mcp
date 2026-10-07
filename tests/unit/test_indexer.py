@@ -3769,3 +3769,48 @@ def test_a_scan_and_a_refresh_report_unreadable_manifests_as_index_warnings(tmp_
     expected = ["rust dependencies not indexed: invalid Cargo.toml"]
     assert after_scan == expected
     assert get_index_status(conn, tmp_path).get("warnings") == expected
+
+
+def test_an_analysis_error_strips_the_project_root_however_it_was_reached(tmp_path):
+    import os
+
+    from project_mcp.indexer import _analysis_error
+
+    real_root = tmp_path / "real"
+    (real_root / "pkg").mkdir(parents=True)
+    linked_root = tmp_path / "linked"
+    os.symlink(real_root, linked_root)
+
+    given = _analysis_error(
+        PermissionError(13, "Permission denied", str(linked_root / "pkg" / "a.py")),
+        linked_root,
+    )
+    resolved = _analysis_error(
+        FileNotFoundError(2, "No such file", str(real_root / "pkg" / "b.py")),
+        linked_root,
+    )
+
+    assert given == "PermissionError: [Errno 13] Permission denied: 'pkg/a.py'"
+    assert resolved == "FileNotFoundError: [Errno 2] No such file: 'pkg/b.py'"
+
+
+def test_a_refresh_records_an_unreadable_file_error_relative_to_the_root(
+    tmp_path, monkeypatch
+):
+    from project_mcp import indexer
+
+    (tmp_path / "app.py").write_text("def run():\n    pass\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config)
+    (tmp_path / "app.py").write_text("def run_again():\n    pass\n")
+
+    def vanished(path):
+        raise FileNotFoundError(2, "No such file or directory", str(path))
+
+    monkeypatch.setattr(indexer, "_read_source", vanished)
+    refresh_index(conn, tmp_path, config)
+
+    assert conn.execute(
+        "SELECT analysis_error FROM files WHERE path = 'app.py'"
+    ).fetchone() == ("FileNotFoundError: [Errno 2] No such file or directory: 'app.py'",)

@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,6 +41,15 @@ def _read_source(path: Path) -> str:
     keeps line numbers intact.
     """
     return path.read_text(errors="replace")
+
+
+def _analysis_error(exc: Exception, project_root: Path) -> str:
+    """`Type: message` of a file's analysis error, naming project paths
+    relative to the root so the error never reveals where the project lives."""
+    message = f"{type(exc).__name__}: {exc}"
+    for root in {str(Path(project_root).resolve()), str(project_root)}:
+        message = message.replace(root + os.sep, "")
+    return message
 
 
 def _now() -> str:
@@ -437,7 +447,7 @@ def _analyze_file(
         conn.execute(
             "UPDATE files SET analysis_status = 'file_failed', analysis_error = ?"
             " WHERE id = ?",
-            (f"{type(exc).__name__}: {exc}", file_id),
+            (_analysis_error(exc, project_root), file_id),
         )
         return None
     write_file_analysis(conn, file_id, language, analysis)
