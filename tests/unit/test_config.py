@@ -130,3 +130,21 @@ def test_load_config_reads_max_file_bytes_and_defaults_it_to_one_mebibyte(tmp_pa
     (tmp_path / ".project-mcp" / "config.toml").write_text("max_file_bytes = 200\n")
 
     assert load_config(tmp_path).max_file_bytes == 200
+
+
+def test_load_config_reads_plugin_selection_from_mcpctl_toml(tmp_path):
+    (tmp_path / "mcpctl.toml").write_text(
+        'name = "demo"\n\n[plugins]\nenabled = ["python"]\ndisabled = ["django"]\n'
+    )
+
+    config = load_config(tmp_path)
+
+    assert (config.plugins_enabled, config.plugins_disabled) == (["python"], ["django"])
+
+
+def test_load_config_enables_every_plugin_without_a_plugins_section(tmp_path):
+    (tmp_path / "mcpctl.toml").write_text('name = "demo"\n')
+
+    config = load_config(tmp_path)
+
+    assert (config.plugins_enabled, config.plugins_disabled) == (None, [])

@@ -174,3 +174,26 @@ def test_builtin_registry_serves_the_django_framework_plugin():
     from project_mcp.plugins.django.framework import DjangoFramework
 
     assert [type(f) for f in builtin_registry().frameworks()] == [DjangoFramework]
+
+
+def test_configured_registry_disables_plugins_left_out_of_the_selection(tmp_path):
+    from project_mcp.config import ProjectConfig
+    from project_mcp.plugins.registry import configured_registry
+
+    registry = configured_registry(
+        ProjectConfig(
+            project_root=tmp_path,
+            plugins_enabled=["python", "rust", "django"],
+            plugins_disabled=["rust"],
+        )
+    )
+
+    assert registry.language_for(Path("lib.rs")) == "rust"
+    assert registry.language_for(Path("app.ts")) == "typescript"
+    assert [registry.analyzed(lang) for lang in ("python", "rust", "typescript")] == [
+        True,
+        False,
+        False,
+    ]
+    assert registry.analyzer_for("rust") is None
+    assert registry.disabled_plugins == {"javascript", "rust"}

@@ -3479,3 +3479,16 @@ def test_refresh_index_relinks_every_language_of_a_plugin_when_a_file_is_added(
         WHERE r.relationship_type = 'imports' AND r.source_entity_type = 'file'
         """
     ).fetchall() == [("square.toy", "shapes.toyx")]
+
+
+def test_run_scan_without_a_registry_uses_the_projects_plugin_selection(tmp_path):
+    (tmp_path / "lib.rs").write_text("pub fn run() {}\n")
+    (tmp_path / "mcpctl.toml").write_text('[plugins]\ndisabled = ["rust"]\n')
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0] == 0
+    assert conn.execute(
+        "SELECT language FROM files WHERE path = 'lib.rs'"
+    ).fetchone()[0] == "rust"

@@ -54,6 +54,33 @@ class ProjectConfig:
     high_fan_out_count: int = 15
     high_temporal_coupling_count: int = 5
     max_file_bytes: int = 1024 * 1024
+    plugins_enabled: list[str] | None = None
+    plugins_disabled: list[str] = field(default_factory=list)
+
+
+def _plugin_selection(project_root: Path) -> dict:
+    """`[plugins] enabled / disabled` from the project's mcpctl.toml.
+
+    No `enabled` list means every installed plugin is enabled.
+    """
+    mcpctl_path = project_root / "mcpctl.toml"
+    if not mcpctl_path.exists():
+        return {}
+    try:
+        plugins = tomllib.loads(mcpctl_path.read_text()).get("plugins", {})
+    except tomllib.TOMLDecodeError as exc:
+        raise ConfigError(f"invalid config toml at {mcpctl_path}: {exc}") from exc
+    selection = {}
+    for key in ("enabled", "disabled"):
+        if key not in plugins:
+            continue
+        names = plugins[key]
+        if not isinstance(names, list) or not all(isinstance(n, str) for n in names):
+            raise ConfigError(
+                f"invalid config: plugins.{key} must be a list of plugin names, got {names!r}"
+            )
+        selection[f"plugins_{key}"] = names
+    return selection
 
 
 def load_config(project_root: Path) -> ProjectConfig:
@@ -63,9 +90,10 @@ def load_config(project_root: Path) -> ProjectConfig:
 
     (project_root / ".project-mcp").mkdir(exist_ok=True)
 
+    plugins = _plugin_selection(project_root)
     config_toml_path = project_root / ".project-mcp" / "config.toml"
     if not config_toml_path.exists():
-        return ProjectConfig(project_root=project_root)
+        return ProjectConfig(project_root=project_root, **plugins)
 
     try:
         raw = tomllib.loads(config_toml_path.read_text())
@@ -89,4 +117,5 @@ def load_config(project_root: Path) -> ProjectConfig:
         high_fan_out_count=raw.get("high_fan_out_count", 15),
         high_temporal_coupling_count=raw.get("high_temporal_coupling_count", 5),
         max_file_bytes=raw.get("max_file_bytes", 1024 * 1024),
+        **plugins,
     )

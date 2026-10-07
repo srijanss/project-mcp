@@ -13,7 +13,9 @@ class PluginRegistry:
         self._descriptor_by_language: dict[str, PluginDescriptor] = {}
         self._framework_descriptors: list[PluginDescriptor] = []
         self._analyzers: dict[str, object] = {}
+        self._plugin_names: list[str] = []
         self.failed_plugins: dict[str, str] = {}
+        self.disabled_plugins: set[str] = set()
         for descriptor in FORMAT_DESCRIPTORS:
             self.register(descriptor)
 
@@ -24,6 +26,8 @@ class PluginRegistry:
             self.failed_plugins[descriptor.name] = (
                 f"unsupported api_version {descriptor.api_version} (supported: {supported})"
             )
+        if descriptor.analyzer is not None and descriptor.name not in self._plugin_names:
+            self._plugin_names.append(descriptor.name)
         if descriptor.kind == "framework":
             self._framework_descriptors.append(descriptor)
         for extension, language in descriptor.extensions.items():
@@ -47,21 +51,36 @@ class PluginRegistry:
     def analyzer_for(self, language: str | None):
         """The analyzer of the plugin owning `language`, loaded on first use."""
         descriptor = self._descriptor_by_language.get(language)
-        if (
-            descriptor is None
-            or descriptor.analyzer is None
-            or descriptor.name in self.failed_plugins
-        ):
+        if descriptor is None or not self._active(descriptor):
             return None
         return self._load(descriptor)
+
+    def analyzed(self, language: str | None) -> bool:
+        """Whether an enabled, loadable plugin analyzes `language` files."""
+        descriptor = self._descriptor_by_language.get(language)
+        return descriptor is not None and self._active(descriptor)
+
+    def disable(self, name: str) -> None:
+        """Keep plugin `name` labelling its files, but never load its analyzer."""
+        self.disabled_plugins.add(name)
+
+    def plugin_names(self) -> list[str]:
+        """Every registered plugin with an analyzer, in registration order."""
+        return list(self._plugin_names)
+
+    def _active(self, descriptor: PluginDescriptor) -> bool:
+        return (
+            descriptor.analyzer is not None
+            and descriptor.name not in self.failed_plugins
+            and descriptor.name not in self.disabled_plugins
+        )
 
     def frameworks(self) -> list:
         """The analyzers of every registered framework plugin, loaded on first use."""
         return [
             self._load(descriptor)
             for descriptor in self._framework_descriptors
-            if descriptor.analyzer is not None
-            and descriptor.name not in self.failed_plugins
+            if self._active(descriptor)
         ]
 
     def _load(self, descriptor: PluginDescriptor):
@@ -82,4 +101,18 @@ def builtin_registry() -> PluginRegistry:
     registry = PluginRegistry()
     for descriptor in (python, javascript, rust, django):
         registry.register(descriptor)
+    return registry
+
+
+def configured_registry(config) -> PluginRegistry:
+    """The built-in plugins, with those the project's config leaves out disabled.
+
+    Without `plugins_enabled` every plugin is enabled; `plugins_disabled`
+    then disables plugins by name.
+    """
+    registry = builtin_registry()
+    for name in registry.plugin_names():
+        left_out = config.plugins_enabled is not None and name not in config.plugins_enabled
+        if left_out or name in config.plugins_disabled:
+            registry.disable(name)
     return registry

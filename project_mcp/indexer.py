@@ -13,7 +13,7 @@ from project_mcp.language_index import (
     write_file_analysis,
 )
 from project_mcp.plugins.analysis import ChangedFile, FrameworkContext, LinkContext
-from project_mcp.plugins.registry import PluginRegistry, builtin_registry
+from project_mcp.plugins.registry import PluginRegistry, configured_registry
 from project_mcp.analyzers.generic.git import collect_git_file_stats
 from project_mcp.analyzers.generic.legacy import (
     detect_churn_signals,
@@ -453,7 +453,7 @@ def run_scan(
     registry: PluginRegistry | None = None,
 ) -> int:
     if registry is None:
-        registry = builtin_registry()
+        registry = configured_registry(config)
     project_id = begin_index(conn, project_root)
 
     existing_rows = {
@@ -615,7 +615,7 @@ def refresh_index(
         return
 
     if registry is None:
-        registry = builtin_registry()
+        registry = configured_registry(config)
     project_id = project_row[0]
     begin_index(conn, project_root)
 
