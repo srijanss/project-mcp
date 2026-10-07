@@ -4,16 +4,25 @@ from pathlib import Path
 from project_mcp.plugins.descriptor import PluginDescriptor
 from project_mcp.plugins.formats import FORMAT_DESCRIPTORS
 
+SUPPORTED_API_VERSIONS = (1,)
+
 
 class PluginRegistry:
     def __init__(self) -> None:
         self._descriptor_by_extension: dict[str, PluginDescriptor] = {}
         self._descriptor_by_language: dict[str, PluginDescriptor] = {}
         self._analyzers: dict[str, object] = {}
+        self.failed_plugins: dict[str, str] = {}
         for descriptor in FORMAT_DESCRIPTORS:
             self.register(descriptor)
 
     def register(self, descriptor: PluginDescriptor) -> None:
+        """Label files by `descriptor`; fail its analyzer if its api_version is unsupported."""
+        if descriptor.api_version not in SUPPORTED_API_VERSIONS:
+            supported = ", ".join(str(v) for v in SUPPORTED_API_VERSIONS)
+            self.failed_plugins[descriptor.name] = (
+                f"unsupported api_version {descriptor.api_version} (supported: {supported})"
+            )
         for extension, language in descriptor.extensions.items():
             self._descriptor_by_extension[extension] = descriptor
             self._descriptor_by_language[language] = descriptor
@@ -30,7 +39,11 @@ class PluginRegistry:
     def analyzer_for(self, language: str | None):
         """The analyzer of the plugin owning `language`, loaded on first use."""
         descriptor = self._descriptor_by_language.get(language)
-        if descriptor is None or descriptor.analyzer is None:
+        if (
+            descriptor is None
+            or descriptor.analyzer is None
+            or descriptor.name in self.failed_plugins
+        ):
             return None
         if descriptor.name not in self._analyzers:
             module_name, _, attribute = descriptor.analyzer.partition(":")

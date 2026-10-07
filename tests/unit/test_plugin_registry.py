@@ -107,3 +107,24 @@ def test_registry_loads_a_language_analyzer_from_its_descriptor_once():
     assert _RecordingAnalyzer.loaded == 1
     assert registry.analyzer_for("toml") is None
     assert registry.analyzer_for(None) is None
+
+
+def test_registry_fails_a_plugin_with_an_unsupported_api_version():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=2,
+            extensions={".toy": "toy"},
+            analyzer=f"{__name__}:_RecordingAnalyzer",
+        )
+    )
+    _RecordingAnalyzer.loaded = 0
+
+    assert registry.language_for(Path("a.toy")) == "toy"
+    assert registry.analyzer_for("toy") is None
+    assert _RecordingAnalyzer.loaded == 0
+    assert registry.failed_plugins == {
+        "toy": "unsupported api_version 2 (supported: 1)"
+    }
