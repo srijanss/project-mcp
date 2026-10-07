@@ -261,3 +261,53 @@ def test_a_plugin_whose_analyzer_fails_to_load_is_failed_not_raised():
         "failed to load: No module named 'project_mcp.plugins.no_such_module'"
     )
     assert registry.analyzed("ghost") is False
+
+
+class _EntryPoint:
+    def __init__(self, name, load):
+        self.name = name
+        self._load = load
+
+    def load(self):
+        return self._load()
+
+
+def test_builtin_registry_registers_plugins_from_the_entry_point_group(monkeypatch):
+    from project_mcp.plugins import registry as registry_module
+
+    toy = PluginDescriptor(
+        name="toy",
+        version="0.1.0",
+        api_version=1,
+        extensions={".toy": "toy"},
+        analyzer="toy_plugin:ToyAnalyzer",
+    )
+    groups = []
+
+    def entry_points(group):
+        groups.append(group)
+        return [_EntryPoint("toy", lambda: toy)]
+
+    monkeypatch.setattr(registry_module, "entry_points", entry_points)
+
+    registry = builtin_registry()
+
+    assert groups == ["project_mcp.plugins"]
+    assert registry.language_for(Path("main.toy")) == "toy"
+    assert registry.plugin_names()[-1] == "toy"
+
+
+def test_an_entry_point_that_fails_to_load_is_failed_not_raised(monkeypatch):
+    from project_mcp.plugins import registry as registry_module
+
+    def broken():
+        raise ImportError("no module named toy_plugin")
+
+    monkeypatch.setattr(
+        registry_module, "entry_points", lambda group: [_EntryPoint("toy", broken)]
+    )
+
+    registry = builtin_registry()
+
+    assert registry.failed_plugins == {"toy": "failed to load: no module named toy_plugin"}
+    assert registry.analyzed("python")

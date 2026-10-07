@@ -1,4 +1,5 @@
 import importlib
+from importlib.metadata import entry_points
 from pathlib import Path
 
 from project_mcp.config import ConfigError
@@ -6,6 +7,7 @@ from project_mcp.plugins.descriptor import PluginDescriptor
 from project_mcp.plugins.formats import FORMAT_DESCRIPTORS
 
 SUPPORTED_API_VERSIONS = (1,)
+ENTRY_POINT_GROUP = "project_mcp.plugins"
 
 
 class PluginRegistry:
@@ -136,7 +138,11 @@ class PluginRegistry:
 
 
 def builtin_registry() -> PluginRegistry:
-    """A registry holding every built-in plugin's descriptor."""
+    """A registry holding every built-in and installed plugin's descriptor.
+
+    Installed plugins publish their descriptor in the `project_mcp.plugins`
+    entry-point group.
+    """
     from project_mcp.plugins.django.descriptor import DESCRIPTOR as django
     from project_mcp.plugins.javascript.descriptor import DESCRIPTOR as javascript
     from project_mcp.plugins.python.descriptor import DESCRIPTOR as python
@@ -144,6 +150,13 @@ def builtin_registry() -> PluginRegistry:
 
     registry = PluginRegistry()
     for descriptor in (python, javascript, rust, django):
+        registry.register(descriptor)
+    for entry_point in entry_points(group=ENTRY_POINT_GROUP):
+        try:
+            descriptor = entry_point.load()
+        except Exception as exc:
+            registry.failed_plugins[entry_point.name] = f"failed to load: {exc}"
+            continue
         registry.register(descriptor)
     return registry
 
