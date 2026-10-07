@@ -1,4 +1,8 @@
 {
+  "worktree": { "bgIsolation": "none" },
+  "permissions": {
+    "allow": ["mcp__outside-in-tdd", "mcp__project-mcp"]
+  },
   "hooks": {
     "PreToolUse": [
       {
