@@ -47,3 +47,19 @@ class LinkContext:
     changed: dict[str, ChangedFile]
     added: set[str]
     plugin_paths: list[str]
+
+
+@dataclass
+class FrameworkContext:
+    """What a framework plugin's detect and enrich hooks get after indexing.
+
+    `changed_languages` are the languages of the analyzed files that
+    changed in this run.
+    """
+
+    conn: object
+    project_id: int
+    project_root: object
+    source_roots: list[str]
+    path_to_file_id: dict[str, int]
+    changed_languages: set[str]

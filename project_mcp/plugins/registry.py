@@ -11,6 +11,7 @@ class PluginRegistry:
     def __init__(self) -> None:
         self._descriptor_by_extension: dict[str, PluginDescriptor] = {}
         self._descriptor_by_language: dict[str, PluginDescriptor] = {}
+        self._framework_descriptors: list[PluginDescriptor] = []
         self._analyzers: dict[str, object] = {}
         self.failed_plugins: dict[str, str] = {}
         for descriptor in FORMAT_DESCRIPTORS:
@@ -23,6 +24,8 @@ class PluginRegistry:
             self.failed_plugins[descriptor.name] = (
                 f"unsupported api_version {descriptor.api_version} (supported: {supported})"
             )
+        if descriptor.kind == "framework":
+            self._framework_descriptors.append(descriptor)
         for extension, language in descriptor.extensions.items():
             self._descriptor_by_extension[extension] = descriptor
             self._descriptor_by_language[language] = descriptor
@@ -50,6 +53,18 @@ class PluginRegistry:
             or descriptor.name in self.failed_plugins
         ):
             return None
+        return self._load(descriptor)
+
+    def frameworks(self) -> list:
+        """The analyzers of every registered framework plugin, loaded on first use."""
+        return [
+            self._load(descriptor)
+            for descriptor in self._framework_descriptors
+            if descriptor.analyzer is not None
+            and descriptor.name not in self.failed_plugins
+        ]
+
+    def _load(self, descriptor: PluginDescriptor):
         if descriptor.name not in self._analyzers:
             module_name, _, attribute = descriptor.analyzer.partition(":")
             analyzer_class = getattr(importlib.import_module(module_name), attribute)
@@ -59,11 +74,12 @@ class PluginRegistry:
 
 def builtin_registry() -> PluginRegistry:
     """A registry holding every built-in plugin's descriptor."""
+    from project_mcp.plugins.django.descriptor import DESCRIPTOR as django
     from project_mcp.plugins.javascript.descriptor import DESCRIPTOR as javascript
     from project_mcp.plugins.python.descriptor import DESCRIPTOR as python
     from project_mcp.plugins.rust.descriptor import DESCRIPTOR as rust
 
     registry = PluginRegistry()
-    for descriptor in (python, javascript, rust):
+    for descriptor in (python, javascript, rust, django):
         registry.register(descriptor)
     return registry

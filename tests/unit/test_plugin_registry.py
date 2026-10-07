@@ -144,3 +144,33 @@ def test_builtin_language_plugins_declare_their_manifests_and_ecosystem():
         "javascript": ("npm", {"package.json"}),
         "rust": ("rust", {"Cargo.toml"}),
     }
+
+
+class _ToyFramework:
+    pass
+
+
+def test_registry_loads_registered_framework_plugins():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toyframe",
+            version="0.1.0",
+            api_version=1,
+            extensions={},
+            kind="framework",
+            requires=("python",),
+            analyzer=f"{__name__}:_ToyFramework",
+        )
+    )
+
+    (framework,) = registry.frameworks()
+    assert isinstance(framework, _ToyFramework)
+    assert registry.frameworks() == [framework]
+    assert registry.language_descriptors() == []
+
+
+def test_builtin_registry_serves_the_django_framework_plugin():
+    from project_mcp.plugins.django.framework import DjangoFramework
+
+    assert [type(f) for f in builtin_registry().frameworks()] == [DjangoFramework]

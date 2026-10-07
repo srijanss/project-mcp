@@ -12,6 +12,8 @@ class PluginDescriptor:
     as "module:attribute", imported only when the plugin is used.
     `manifests` are the file names that declare a project's dependencies in
     the plugin's `ecosystem` (e.g. "pyproject.toml" for "python").
+    A `kind="framework"` plugin claims no files; its analyzer enriches the
+    files of the language plugins named in `requires`.
     """
 
     name: str
@@ -22,3 +24,5 @@ class PluginDescriptor:
     analyzer: str | None = None
     manifests: tuple[str, ...] = ()
     ecosystem: str | None = None
+    kind: str = "language"
+    requires: tuple[str, ...] = ()
