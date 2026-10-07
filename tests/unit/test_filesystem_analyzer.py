@@ -290,3 +290,16 @@ def test_discover_files_skips_a_file_it_cannot_read(tmp_path):
     records = discover_files(tmp_path, load_config(tmp_path))
 
     assert [record["path"] for record in records] == ["app.py"]
+
+
+def test_discover_files_skips_file_symlinks_resolving_outside_the_root(tmp_path):
+    project = tmp_path / "project"
+    (project / "pkg").mkdir(parents=True)
+    (tmp_path / "elsewhere.py").write_text("A = 1\n")
+    (project / "pkg" / "real.py").write_text("B = 2\n")
+    os.symlink(tmp_path / "elsewhere.py", project / "outside.py")
+    os.symlink(project / "pkg" / "real.py", project / "inside.py")
+
+    records = discover_files(project, load_config(project))
+
+    assert [record["path"] for record in records] == ["inside.py", "pkg/real.py"]

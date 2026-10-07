@@ -41,6 +41,7 @@ def discover_files(
     project_root = Path(project_root)
     if registry is None:
         registry = builtin_registry()
+    resolved_root = project_root.resolve()
     records = []
 
     for dirpath, dirnames, filenames in os.walk(project_root):
@@ -55,6 +56,8 @@ def discover_files(
             path = current_dir / filename
             if not path.is_file():
                 continue
+            if path.is_symlink() and not path.resolve().is_relative_to(resolved_root):
+                continue  # never index a file outside the project through a link
 
             relative_path = path.relative_to(project_root)
             if should_exclude(relative_path, config):
