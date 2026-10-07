@@ -183,7 +183,7 @@ def builtin_registry() -> PluginRegistry:
     """A registry holding every built-in and installed plugin's descriptor.
 
     Installed plugins publish their descriptor in the `project_mcp.plugins`
-    entry-point group.
+    entry-point group; one reusing a registered plugin's name is failed.
     """
     registry = PluginRegistry()
     for spec in BUILTIN_PLUGINS:
@@ -193,6 +193,12 @@ def builtin_registry() -> PluginRegistry:
             descriptor = entry_point.load()
         except Exception as exc:
             registry.failed_plugins[entry_point.name] = f"failed to load: {exc}"
+            continue
+        if descriptor.name in registry.plugin_names():
+            # Keyed by the entry point, so the plugin already holding the name stays active.
+            registry.failed_plugins[entry_point.value] = (
+                f"not registered: plugin name {descriptor.name} is already registered"
+            )
             continue
         registry.register(descriptor)
     return registry

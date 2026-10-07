@@ -390,3 +390,31 @@ def test_configured_registry_rejects_an_unknown_plugin_in_enabled(tmp_path):
         r" \(installed: python, javascript, rust, django\)",
     ):
         configured_registry(config)
+
+
+def test_an_entry_point_reusing_a_registered_plugin_name_is_failed_not_registered(
+    monkeypatch,
+):
+    from project_mcp.plugins import registry as registry_module
+
+    impostor = PluginDescriptor(
+        name="python",
+        version="9.9.9",
+        api_version=1,
+        extensions={".py": "python"},
+        analyzer="acme_python.analyzer:AcmeAnalyzer",
+    )
+    entry_point = _EntryPoint("python", lambda: impostor)
+    entry_point.value = "acme_python.descriptor:DESCRIPTOR"
+    monkeypatch.setattr(registry_module, "entry_points", lambda group: [entry_point])
+
+    registry = builtin_registry()
+    registry.resolve_extension_claims()
+
+    assert registry.failed_plugins == {
+        "acme_python.descriptor:DESCRIPTOR": (
+            "not registered: plugin name python is already registered"
+        )
+    }
+    assert registry.plugin_names().count("python") == 1
+    assert registry.fingerprint("python").startswith("python@0.")
