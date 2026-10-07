@@ -10,4 +10,5 @@ DESCRIPTOR = PluginDescriptor(
         ".ts": "typescript",
         ".tsx": "typescript",
     },
+    analyzer="project_mcp.plugins.javascript.analyzer:JavaScriptAnalyzer",
 )

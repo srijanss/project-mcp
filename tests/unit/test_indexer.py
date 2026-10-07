@@ -3515,3 +3515,44 @@ def test_refresh_index_links_a_plugin_import_once_its_target_file_is_added(tmp_p
         WHERE r.relationship_type = 'imports' AND r.source_entity_type = 'file'
         """
     ).fetchall() == [("square.toy", "shapes.toy")]
+
+
+class _TwoDialectAnalyzer(_UppercaseAnalyzer):
+    """`use NAME` imports NAME in either dialect: NAME.toy or NAME.toyx."""
+
+    def resolve_import(self, importer, module):
+        return [f"{module}.toy", f"{module}.toyx"]
+
+
+def test_refresh_index_relinks_every_language_of_a_plugin_when_a_file_is_added(
+    tmp_path,
+):
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import builtin_registry
+
+    registry = builtin_registry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.1.0",
+            api_version=1,
+            extensions={".toy": "toy", ".toyx": "toyx"},
+            analyzer=f"{__name__}:_TwoDialectAnalyzer",
+        )
+    )
+    (tmp_path / "square.toy").write_text("SQUARE use shapes\n")
+    config = load_config(tmp_path)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, config, registry=registry)
+
+    (tmp_path / "shapes.toyx").write_text("SHAPE\n")
+    refresh_index(conn, tmp_path, config, registry=registry)
+
+    assert conn.execute(
+        """
+        SELECT source.path, target.path FROM relationships r
+        JOIN files source ON source.id = r.source_entity_id
+        JOIN files target ON target.id = r.target_entity_id
+        WHERE r.relationship_type = 'imports' AND r.source_entity_type = 'file'
+        """
+    ).fetchall() == [("square.toy", "shapes.toyx")]

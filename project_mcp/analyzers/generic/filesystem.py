@@ -7,21 +7,12 @@ from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 
 ALWAYS_EXCLUDED_DIRS = {".project-mcp"}
 
-JS_LANGUAGES = {"javascript", "typescript"}
-
 
 def _is_test_path(path: Path) -> bool:
     if "tests" in path.parts[:-1] or "test" in path.parts[:-1]:
         return True
     stem = path.stem
     return stem.startswith("test_") or stem.endswith("_test")
-
-
-def _is_js_test_path(path: Path) -> bool:
-    if "tests" in path.parts[:-1] or "__tests__" in path.parts[:-1]:
-        return True
-    stem = path.stem
-    return stem.endswith(".test") or stem.endswith(".spec")
 
 
 def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
@@ -34,8 +25,6 @@ def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
     if analyzer is not None:
         file_kind = "test" if analyzer.is_test_file(path) else registry.file_kind_for(path)
     elif language == "python" and _is_test_path(path):
-        file_kind = "test"
-    elif language in JS_LANGUAGES and _is_js_test_path(path):
         file_kind = "test"
     else:
         file_kind = registry.file_kind_for(path)

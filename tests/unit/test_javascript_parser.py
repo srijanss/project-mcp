@@ -1,4 +1,4 @@
-from project_mcp.analyzers.javascript.parser import (
+from project_mcp.plugins.javascript.parser import (
     extract_js_exports,
     extract_js_imports,
     parse_js_source,

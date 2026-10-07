@@ -29,7 +29,6 @@ from project_mcp.analyzers.generic.legacy import (
     detect_temporal_coupling_signals,
     detect_test_signals,
 )
-from project_mcp.analyzers.javascript.parser import extract_js_imports, parse_js_source
 from project_mcp.analyzers.python.parser import (
     analyze_python_source,
     parse_python_source,
@@ -193,87 +192,6 @@ def index_python_symbols(
             ),
         )
     return symbols
-
-
-def index_js_symbols(
-    conn: sqlite3.Connection, file_id: int, path: str, source: str, language: str
-) -> list[dict]:
-    symbols = parse_js_source(path, source)
-    conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
-
-    for symbol in symbols:
-        conn.execute(
-            """
-            INSERT INTO symbols (
-                file_id, name, qualified_name, kind, language,
-                start_line, end_line, visibility
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                file_id,
-                symbol["name"],
-                symbol["qualified_name"],
-                symbol["kind"],
-                language,
-                symbol["start_line"],
-                symbol["end_line"],
-                symbol["visibility"],
-            ),
-        )
-    return symbols
-
-
-_JS_EXTENSIONS = (".js", ".jsx", ".ts", ".tsx")
-
-
-def _resolve_js_module_candidates(importer_path: str, module: str) -> list[str]:
-    if not module.startswith("."):
-        return []
-    base = posixpath.normpath(posixpath.join(posixpath.dirname(importer_path), module))
-    candidates = [base + ext for ext in _JS_EXTENSIONS]
-    candidates.extend(f"{base}/index{ext}" for ext in _JS_EXTENSIONS)
-    return candidates
-
-
-def index_js_import_relationships(
-    conn: sqlite3.Connection,
-    file_id: int,
-    path: str,
-    imports: list[dict],
-    path_to_file_id: dict,
-) -> None:
-    conn.execute(
-        """
-        DELETE FROM relationships
-        WHERE source_entity_type = 'file' AND source_entity_id = ?
-          AND relationship_type = 'imports'
-        """,
-        (file_id,),
-    )
-
-    for imp in imports:
-        if imp.get("dynamic") or not imp.get("module"):
-            continue
-        target_file_id = next(
-            (
-                path_to_file_id.get(candidate)
-                for candidate in _resolve_js_module_candidates(path, imp["module"])
-                if path_to_file_id.get(candidate) is not None
-            ),
-            None,
-        )
-        if target_file_id is None or target_file_id == file_id:
-            continue
-        conn.execute(
-            """
-            INSERT INTO relationships (
-                source_entity_type, source_entity_id,
-                target_entity_type, target_entity_id,
-                relationship_type, confidence
-            ) VALUES ('file', ?, 'file', ?, 'imports', 'high')
-            """,
-            (file_id, target_file_id),
-        )
 
 
 def index_python_inheritance_relationships(
@@ -1987,21 +1905,20 @@ def _link_plugin_imports(
     """Link the imports of plugin-analyzed files that changed.
 
     A newly added file can resolve another file's earlier unresolved
-    import, so a new file re-links every file of its language.
+    import, so a new file re-links every file its plugin analyzes, across
+    all of that plugin's languages (a .js file may import a .ts module).
     """
-    changed_by_language: dict[str, dict[str, list[str]]] = {}
-    for path, imports in changed_plugin_files.items():
-        language = registry.language_for(Path(path))
-        changed_by_language.setdefault(language, {})[path] = imports
 
-    for language, changed in changed_by_language.items():
-        analyzer = registry.analyzer_for(language)
+    def analyzer_of(path: str):
+        return registry.analyzer_for(registry.language_for(Path(path)))
+
+    changed_by_analyzer: dict[object, dict[str, list[str]]] = {}
+    for path, imports in changed_plugin_files.items():
+        changed_by_analyzer.setdefault(analyzer_of(path), {})[path] = imports
+
+    for analyzer, changed in changed_by_analyzer.items():
         if any(path not in existing_rows for path in changed):
-            paths = [
-                path
-                for path in path_to_file_id
-                if registry.language_for(Path(path)) == language
-            ]
+            paths = [path for path in path_to_file_id if analyzer_of(path) is analyzer]
         else:
             paths = list(changed)
         for path in paths:
@@ -2034,7 +1951,6 @@ def run_scan(
     discovered = discover_files(project_root, config, registry)
     discovered_paths = set()
     changed_python_files = {}
-    changed_js_files = {}
     changed_plugin_files = {}
     for record in discovered:
         discovered_paths.add(record["path"])
@@ -2094,10 +2010,6 @@ def run_scan(
                 conn, file_id, analysis["foreign_accesses"], symbols
             )
             index_python_tests(conn, file_id, record["path"], source)
-        elif record["language"] in ("javascript", "typescript"):
-            source = _read_source(Path(project_root) / record["path"])
-            index_js_symbols(conn, file_id, record["path"], source, record["language"])
-            changed_js_files[record["path"]] = extract_js_imports(record["path"], source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -2146,24 +2058,6 @@ def run_scan(
         index_mock_patch_relationships(
             conn, project_id, project_root, path_to_file_id, config.source_roots
         )
-
-    js_new_file_added = any(path not in existing_rows for path in changed_js_files)
-    if js_new_file_added:
-        js_paths_to_refresh = [
-            path for path in path_to_file_id
-            if Path(path).suffix in (".js", ".jsx", ".ts", ".tsx")
-        ]
-    else:
-        js_paths_to_refresh = list(changed_js_files)
-
-    for path in js_paths_to_refresh:
-        file_id = path_to_file_id[path]
-        if path in changed_js_files:
-            imports = changed_js_files[path]
-        else:
-            source = _read_source(Path(project_root) / path)
-            imports = extract_js_imports(path, source)
-        index_js_import_relationships(conn, file_id, path, imports, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
     index_rust_dependencies(conn, project_id, project_root)
@@ -2337,7 +2231,6 @@ def refresh_index(
     discovered = discover_files(project_root, config, registry)
     discovered_paths = set()
     changed_python_files = {}
-    changed_js_files = {}
     changed_plugin_files = {}
     changed_paths = set()
     for record in discovered:
@@ -2399,10 +2292,6 @@ def refresh_index(
                 conn, file_id, analysis["foreign_accesses"], symbols
             )
             index_python_tests(conn, file_id, record["path"], source)
-        elif record["language"] in ("javascript", "typescript"):
-            source = _read_source(Path(project_root) / record["path"])
-            index_js_symbols(conn, file_id, record["path"], source, record["language"])
-            changed_js_files[record["path"]] = extract_js_imports(record["path"], source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -2452,24 +2341,6 @@ def refresh_index(
         index_mock_patch_relationships(
             conn, project_id, project_root, path_to_file_id, config.source_roots
         )
-
-    js_new_file_added = any(path not in existing_rows for path in changed_js_files)
-    if js_new_file_added:
-        js_paths_to_refresh = [
-            path for path in path_to_file_id
-            if Path(path).suffix in (".js", ".jsx", ".ts", ".tsx")
-        ]
-    else:
-        js_paths_to_refresh = list(changed_js_files)
-
-    for path in js_paths_to_refresh:
-        file_id = path_to_file_id[path]
-        if path in changed_js_files:
-            imports = changed_js_files[path]
-        else:
-            source = _read_source(Path(project_root) / path)
-            imports = extract_js_imports(path, source)
-        index_js_import_relationships(conn, file_id, path, imports, path_to_file_id)
 
     index_python_dependencies(conn, project_id, project_root)
     index_rust_dependencies(conn, project_id, project_root)
