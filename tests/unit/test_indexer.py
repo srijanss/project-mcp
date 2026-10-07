@@ -12,8 +12,6 @@ from project_mcp.indexer import (
     ensure_fresh_index,
     get_index_status,
     index_legacy_signals,
-    index_python_attribute_relationships,
-    index_python_call_relationships,
     mark_index_complete,
     refresh_index,
     remove_file,
@@ -1184,83 +1182,6 @@ def test_run_scan_persists_one_references_relationship_for_repeated_self_accesse
     ).fetchone()[0]
 
     assert count == 1
-
-
-def test_index_python_attribute_relationships_looks_up_symbols_once_per_file(tmp_path):
-    project_root = _copy_fixture(tmp_path)
-    config = load_config(project_root)
-    conn = get_connection(project_root)
-    fields = [f"field_{i}" for i in range(30)]
-    source = (
-        "class Payment:\n"
-        + "".join(f"    {name} = {i}\n" for i, name in enumerate(fields))
-        + "\n"
-        + "    def run(self):\n"
-        + "".join(f"        self.{name}\n" for name in fields)
-    )
-    (project_root / "app" / "payment.py").write_text(source)
-    run_scan(conn, project_root, config)
-    file_id = conn.execute(
-        "SELECT id FROM files WHERE path = 'app/payment.py'"
-    ).fetchone()[0]
-    references = [
-        {
-            "referrer": "app.payment.Payment.run",
-            "class": "app.payment.Payment",
-            "attribute": name,
-            "line": 1,
-        }
-        for name in fields
-    ]
-
-    statements = []
-    conn.set_trace_callback(statements.append)
-    index_python_attribute_relationships(conn, file_id, references)
-    conn.set_trace_callback(None)
-
-    symbol_lookups = [s for s in statements if "FROM symbols" in s]
-    assert len(symbol_lookups) <= 1
-
-
-def test_index_python_call_relationships_looks_up_symbols_once_per_file(tmp_path):
-    project_root = _copy_fixture(tmp_path)
-    config = load_config(project_root)
-    conn = get_connection(project_root)
-    helpers = [f"helper_{i}" for i in range(30)]
-    source = (
-        "".join(f"def {name}():\n    return {i}\n\n" for i, name in enumerate(helpers))
-        + "def run():\n"
-        + "".join(f"    {name}()\n" for name in helpers)
-    )
-    (project_root / "app" / "jobs.py").write_text(source)
-    run_scan(conn, project_root, config)
-    file_id = conn.execute("SELECT id FROM files WHERE path = 'app/jobs.py'").fetchone()[0]
-    calls = [
-        {"caller": "app.jobs.run", "callee": name, "line": 1} for name in helpers
-    ] + [{"caller": "app.jobs.run", "callee": "not_defined", "line": 1}]
-    conn.execute(
-        "DELETE FROM relationships WHERE relationship_type = 'calls'"
-    )
-
-    statements = []
-    conn.set_trace_callback(statements.append)
-    index_python_call_relationships(conn, file_id, calls)
-    conn.set_trace_callback(None)
-
-    symbol_lookups = [s for s in statements if "FROM symbols" in s]
-    assert len(symbol_lookups) <= 1
-    callees = {
-        row[0]
-        for row in conn.execute(
-            """
-            SELECT t.qualified_name FROM relationships r
-            JOIN symbols s ON s.id = r.source_entity_id
-            JOIN symbols t ON t.id = r.target_entity_id
-            WHERE r.relationship_type = 'calls' AND s.qualified_name = 'app.jobs.run'
-            """
-        )
-    }
-    assert callees == {f"app.jobs.{name}" for name in helpers}
 
 
 def test_run_scan_persists_call_relationship_across_modules_via_from_import(tmp_path):

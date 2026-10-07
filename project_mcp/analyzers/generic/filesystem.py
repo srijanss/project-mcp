@@ -8,13 +8,6 @@ from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 ALWAYS_EXCLUDED_DIRS = {".project-mcp"}
 
 
-def _is_test_path(path: Path) -> bool:
-    if "tests" in path.parts[:-1] or "test" in path.parts[:-1]:
-        return True
-    stem = path.stem
-    return stem.startswith("test_") or stem.endswith("_test")
-
-
 def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
     path = Path(path)
     if registry is None:
@@ -22,9 +15,7 @@ def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
     language = registry.language_for(path)
     analyzer = registry.analyzer_for(language)
 
-    if analyzer is not None:
-        file_kind = "test" if analyzer.is_test_file(path) else registry.file_kind_for(path)
-    elif language == "python" and _is_test_path(path):
+    if analyzer is not None and analyzer.is_test_file(path):
         file_kind = "test"
     else:
         file_kind = registry.file_kind_for(path)

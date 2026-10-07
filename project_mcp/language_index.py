@@ -1,5 +1,7 @@
 """Writes language plugins' analyses into the index, whatever the language."""
 
+import json
+import posixpath
 import sqlite3
 
 from project_mcp.plugins.analysis import FileAnalysis
@@ -31,8 +33,8 @@ def write_file_analysis(
             """
             INSERT INTO symbols (
                 file_id, name, qualified_name, kind, language,
-                start_line, end_line, visibility
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                start_line, end_line, visibility, metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 file_id,
@@ -43,6 +45,7 @@ def write_file_analysis(
                 symbol["start_line"],
                 symbol["end_line"],
                 symbol["visibility"],
+                json.dumps(symbol["metadata"]) if symbol.get("metadata") else None,
             ),
         )
         symbol_ids.setdefault(symbol["qualified_name"], cursor.lastrowid)
@@ -65,15 +68,23 @@ def write_file_analysis(
 def link_imports(
     conn: sqlite3.Connection,
     path: str,
-    imports: list[str],
+    imports: list,
     analyzer,
     path_to_file_id: dict[str, int],
+    source_roots: list[str] = (),
 ) -> None:
     """Replace `path`'s file import edges, resolving each import via `analyzer`.
 
     An import links to the first candidate path that is an indexed file;
-    imports that resolve to nothing, or to the importing file, are dropped.
+    an import none of whose candidates is indexed is retried under each
+    source root in turn. Imports that resolve to nothing, or to the
+    importing file, are dropped, and each target file is linked once.
     """
+    prefixes = [""] + [
+        f"{root}/"
+        for root in (posixpath.normpath(root) for root in source_roots)
+        if root != "."
+    ]
     file_id = path_to_file_id[path]
     conn.execute(
         """
@@ -83,17 +94,21 @@ def link_imports(
         """,
         (file_id,),
     )
+    linked: set[int] = set()
     for module in imports:
+        candidates = analyzer.resolve_import(path, module)
         target_file_id = next(
             (
-                path_to_file_id[candidate]
-                for candidate in analyzer.resolve_import(path, module)
-                if candidate in path_to_file_id
+                path_to_file_id[prefix + candidate]
+                for prefix in prefixes
+                for candidate in candidates
+                if prefix + candidate in path_to_file_id
             ),
             None,
         )
-        if target_file_id is None or target_file_id == file_id:
+        if target_file_id is None or target_file_id in linked | {file_id}:
             continue
+        linked.add(target_file_id)
         conn.execute(
             """
             INSERT INTO relationships (

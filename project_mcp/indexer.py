@@ -19,6 +19,7 @@ from project_mcp.language_index import (
     link_imports,
     write_file_analysis,
 )
+from project_mcp.plugins.python.analyzer import resolve_relative_imports
 from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 from project_mcp.analyzers.generic.git import collect_git_file_stats
 from project_mcp.analyzers.generic.legacy import (
@@ -29,10 +30,7 @@ from project_mcp.analyzers.generic.legacy import (
     detect_temporal_coupling_signals,
     detect_test_signals,
 )
-from project_mcp.analyzers.python.parser import (
-    analyze_python_source,
-    parse_python_source,
-)
+from project_mcp.analyzers.python.parser import analyze_python_source
 from project_mcp.analyzers.python.mock_patches import (
     extract_fixture_patches,
     extract_mock_patches,
@@ -153,334 +151,6 @@ def remove_file(conn: sqlite3.Connection, project_id: int, path: str) -> None:
         )
 
     conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
-
-
-def index_python_symbols(
-    conn: sqlite3.Connection,
-    file_id: int,
-    path: str,
-    source: str,
-    symbols: list[dict] | None = None,
-) -> list[dict]:
-    if symbols is None:
-        symbols = parse_python_source(path, source)
-    clear_file_symbols(conn, file_id)
-
-    if len(symbols) == 1 and symbols[0].get("kind") == "parse_error":
-        return symbols
-
-    for symbol in symbols:
-        metadata = (
-            json.dumps({"bases": symbol["bases"]}) if symbol["kind"] == "class" else None
-        )
-        conn.execute(
-            """
-            INSERT INTO symbols (
-                file_id, name, qualified_name, kind, language,
-                start_line, end_line, visibility, metadata_json
-            ) VALUES (?, ?, ?, ?, 'python', ?, ?, ?, ?)
-            """,
-            (
-                file_id,
-                symbol["name"],
-                symbol["qualified_name"],
-                symbol["kind"],
-                symbol["start_line"],
-                symbol["end_line"],
-                symbol["visibility"],
-                metadata,
-            ),
-        )
-    return symbols
-
-
-def index_python_inheritance_relationships(
-    conn: sqlite3.Connection, file_id: int, module_name: str, classes: list[dict]
-) -> None:
-    conn.execute(
-        """
-        DELETE FROM relationships
-        WHERE source_entity_type = 'symbol' AND relationship_type = 'inherits'
-          AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
-        """,
-        (file_id,),
-    )
-
-    for class_symbol in classes:
-        class_row = conn.execute(
-            "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
-            (file_id, class_symbol["qualified_name"]),
-        ).fetchone()
-        if class_row is None:
-            continue
-        class_symbol_id = class_row[0]
-
-        for base in class_symbol["bases"]:
-            if not isinstance(base, str) or "." in base:
-                continue
-            base_row = conn.execute(
-                "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
-                (file_id, f"{module_name}.{base}"),
-            ).fetchone()
-            if base_row is None:
-                continue
-            conn.execute(
-                """
-                INSERT INTO relationships (
-                    source_entity_type, source_entity_id,
-                    target_entity_type, target_entity_id,
-                    relationship_type, confidence
-                ) VALUES ('symbol', ?, 'symbol', ?, 'inherits', 'high')
-                """,
-                (class_symbol_id, base_row[0]),
-            )
-
-
-def index_python_call_relationships(
-    conn: sqlite3.Connection, file_id: int, calls: list[dict]
-) -> None:
-    symbol_ids: dict[str, int] = {}
-    module_name = None
-    for symbol_id, qualified_name, kind in conn.execute(
-        "SELECT id, qualified_name, kind FROM symbols WHERE file_id = ? ORDER BY id",
-        (file_id,),
-    ):
-        symbol_ids.setdefault(qualified_name, symbol_id)
-        if kind == "module" and module_name is None:
-            module_name = qualified_name
-    if module_name is None:
-        return
-
-    seen = set()
-    for call in calls:
-        caller_id = symbol_ids.get(call["caller"])
-        callee_id = symbol_ids.get(f"{module_name}.{call['callee']}")
-        if caller_id is None or callee_id is None:
-            continue
-        if (caller_id, callee_id) in seen:
-            continue
-        seen.add((caller_id, callee_id))
-        conn.execute(
-            """
-            INSERT INTO relationships (
-                source_entity_type, source_entity_id,
-                target_entity_type, target_entity_id,
-                relationship_type, confidence
-            ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
-            """,
-            (caller_id, callee_id),
-        )
-
-
-def _same_file_member_resolver(symbols: list[dict], kind: str):
-    """A `(class, name) -> qualified name` lookup for members of one kind.
-
-    A member the class doesn't define is looked up on its base classes in the
-    same file, depth-first and left to right.
-    """
-    module_name = next(
-        (s["qualified_name"] for s in symbols if s.get("kind") == "module"), None
-    )
-    members = {s["qualified_name"] for s in symbols if s.get("kind") == kind}
-    class_bases = {
-        s["qualified_name"]: [
-            f"{module_name}.{base}"
-            for base in s["bases"]
-            if isinstance(base, str) and "." not in base
-        ]
-        for s in symbols
-        if s.get("kind") == "class"
-    }
-
-    def find(class_name: str, name: str, visited: set[str]) -> str | None:
-        if class_name in visited or class_name not in class_bases:
-            return None
-        visited.add(class_name)
-        if f"{class_name}.{name}" in members:
-            return f"{class_name}.{name}"
-        for base in class_bases[class_name]:
-            found = find(base, name, visited)
-            if found is not None:
-                return found
-        return None
-
-    return lambda class_name, name: find(class_name, name, set())
-
-
-def index_python_self_call_relationships(
-    conn: sqlite3.Connection, file_id: int, self_calls: list[dict], symbols: list[dict]
-) -> None:
-    """Link `self.method()` calls to the method on the caller's class.
-
-    A method the class doesn't define is looked up on its base classes in the
-    same file, depth-first and left to right.
-    """
-    symbol_ids: dict[str, int] = {}
-    for symbol_id, qualified_name in conn.execute(
-        "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id",
-        (file_id,),
-    ):
-        symbol_ids.setdefault(qualified_name, symbol_id)
-    resolve = _same_file_member_resolver(symbols, "method")
-
-    seen = set()
-    for call in self_calls:
-        caller_id = symbol_ids.get(call["caller"])
-        target = resolve(call["class"], call["method"])
-        callee_id = symbol_ids.get(target) if target is not None else None
-        if caller_id is None or callee_id is None:
-            continue
-        if (caller_id, callee_id) in seen:
-            continue
-        seen.add((caller_id, callee_id))
-        conn.execute(
-            """
-            INSERT INTO relationships (
-                source_entity_type, source_entity_id,
-                target_entity_type, target_entity_id,
-                relationship_type, confidence
-            ) VALUES ('symbol', ?, 'symbol', ?, 'calls', 'high')
-            """,
-            (caller_id, callee_id),
-        )
-
-
-def index_python_attribute_relationships(
-    conn: sqlite3.Connection, file_id: int, references: list[dict]
-) -> None:
-    symbol_ids: dict[str, int] = {}
-    for symbol_id, qualified_name in conn.execute(
-        "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id",
-        (file_id,),
-    ):
-        symbol_ids.setdefault(qualified_name, symbol_id)
-
-    seen = set()
-    for reference in references:
-        referrer_id = symbol_ids.get(reference["referrer"])
-        attribute_id = symbol_ids.get(f"{reference['class']}.{reference['attribute']}")
-        if referrer_id is None or attribute_id is None:
-            continue
-        if (referrer_id, attribute_id) in seen:
-            continue
-        seen.add((referrer_id, attribute_id))
-        conn.execute(
-            """
-            INSERT INTO relationships (
-                source_entity_type, source_entity_id,
-                target_entity_type, target_entity_id,
-                relationship_type, confidence
-            ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'high')
-            """,
-            (referrer_id, attribute_id),
-        )
-
-
-def index_python_class_attribute_relationships(
-    conn: sqlite3.Connection, file_id: int, accesses: list[dict], symbols: list[dict]
-) -> None:
-    """Link `Cls.<name>` to the field of a class defined in the same file.
-
-    A field the class doesn't declare is looked up on its base classes in the
-    same file, depth-first and left to right.
-    """
-    symbol_ids: dict[str, int] = {}
-    for symbol_id, qualified_name in conn.execute(
-        "SELECT id, qualified_name FROM symbols WHERE file_id = ? ORDER BY id",
-        (file_id,),
-    ):
-        symbol_ids.setdefault(qualified_name, symbol_id)
-    module_name = next(
-        (s["qualified_name"] for s in symbols if s.get("kind") == "module"), None
-    )
-    resolve = _same_file_member_resolver(symbols, "field")
-
-    seen = set()
-    for access in accesses:
-        if not access["object"]:
-            continue
-        target = resolve(f"{module_name}.{access['object']}", access["attribute"])
-        referrer_id = symbol_ids.get(access["referrer"])
-        field_id = symbol_ids.get(target) if target is not None else None
-        if referrer_id is None or field_id is None:
-            continue
-        if (referrer_id, field_id) in seen:
-            continue
-        seen.add((referrer_id, field_id))
-        conn.execute(
-            """
-            INSERT INTO relationships (
-                source_entity_type, source_entity_id,
-                target_entity_type, target_entity_id,
-                relationship_type, confidence
-            ) VALUES ('symbol', ?, 'symbol', ?, 'references', 'high')
-            """,
-            (referrer_id, field_id),
-        )
-
-
-def index_python_import_relationships(
-    conn: sqlite3.Connection,
-    file_id: int,
-    imports: list[dict],
-    path_to_file_id: dict,
-) -> None:
-    conn.execute(
-        """
-        DELETE FROM relationships
-        WHERE source_entity_type = 'file' AND source_entity_id = ?
-          AND relationship_type = 'imports'
-        """,
-        (file_id,),
-    )
-
-    seen = set()
-    for imp in imports:
-        if imp.get("dynamic") or imp["level"] != 0 or not imp["module"]:
-            continue
-        module_path = imp["module"].replace(".", "/")
-        candidate_paths = [module_path + ".py"]
-        candidate_paths.extend(
-            f"{module_path}/{name}.py" for name in imp.get("names", [])
-        )
-        target_file_id = next(
-            (path_to_file_id.get(path) for path in candidate_paths
-             if path_to_file_id.get(path) is not None),
-            None,
-        )
-        if target_file_id is None or target_file_id in seen:
-            continue
-        seen.add(target_file_id)
-        conn.execute(
-            """
-            INSERT INTO relationships (
-                source_entity_type, source_entity_id,
-                target_entity_type, target_entity_id,
-                relationship_type, confidence
-            ) VALUES ('file', ?, 'file', ?, 'imports', 'high')
-            """,
-            (file_id, target_file_id),
-        )
-
-
-def resolve_relative_imports(path: str, imports: list[dict]) -> list[dict]:
-    """Rewrite `from .x import y` imports of the file at `path` as absolute ones.
-
-    Imports that climb above the project root are left relative, so the
-    resolvers that only accept level-0 imports skip them.
-    """
-    package = list(Path(path).parent.parts)
-    resolved = []
-    for imp in imports:
-        level = imp["level"]
-        if level == 0 or level > len(package):
-            resolved.append(imp)
-            continue
-        base = package[: len(package) - level + 1]
-        if imp["module"]:
-            base = base + [imp["module"]]
-        resolved.append({**imp, "module": ".".join(base), "level": 0})
-    return resolved
 
 
 def resolve_source_root_imports(
@@ -835,7 +505,7 @@ def index_python_cross_module_call_relationships(
         edges.append((caller_row[0], callee_row[0]))
 
     # `self.method()` resolved to a base class in another file; same-file
-    # targets are linked by index_python_self_call_relationships instead.
+    # targets are linked by the Python plugin's same-file edges instead.
     file_symbol_ids = {
         qualified_name: symbol_id
         for symbol_id, qualified_name in conn.execute(
@@ -1099,7 +769,7 @@ def index_python_cross_file_inheritance_relationships(
             base_id = _resolve_class_reference(
                 conn, file_id, base, imports, path_to_file_id
             )
-            # Same-file bases are linked by index_python_inheritance_relationships.
+            # Same-file bases are linked by the Python plugin's same-file edges.
             if base_id is None or base_id in local_ids:
                 continue
             conn.execute(
@@ -1894,6 +1564,26 @@ def index_legacy_signals(
     )
 
 
+def _index_python_file_links(
+    conn: sqlite3.Connection,
+    file_id: int,
+    path: str,
+    source: str,
+    analysis: dict,
+    path_to_file_id: dict[str, int],
+) -> None:
+    """Typed-receiver calls and test rows of a Python file, from its full parse."""
+    index_python_typed_call_relationships(
+        conn,
+        file_id,
+        analysis["typed_calls"],
+        analysis["imports"],
+        path_to_file_id,
+        analysis["attribute_calls"],
+    )
+    index_python_tests(conn, file_id, path, source)
+
+
 def _link_plugin_imports(
     conn: sqlite3.Connection,
     project_root: Path,
@@ -1901,6 +1591,7 @@ def _link_plugin_imports(
     changed_plugin_files: dict[str, list[str]],
     existing_rows: dict,
     path_to_file_id: dict[str, int],
+    source_roots: list[str],
 ) -> None:
     """Link the imports of plugin-analyzed files that changed.
 
@@ -1926,7 +1617,7 @@ def _link_plugin_imports(
             if imports is None:
                 source = _read_source(Path(project_root) / path)
                 imports = analyzer.analyze(path, source).imports
-            link_imports(conn, path, imports, analyzer, path_to_file_id)
+            link_imports(conn, path, imports, analyzer, path_to_file_id, source_roots)
 
 
 def run_scan(
@@ -1977,39 +1668,11 @@ def run_scan(
             analysis = analyzer.analyze(record["path"], source)
             write_file_analysis(conn, file_id, record["language"], analysis)
             changed_plugin_files[record["path"]] = analysis.imports
-        elif record["language"] == "python":
-            source = _read_source(Path(project_root) / record["path"])
-            analysis = _analyze_python_file(record["path"], source)
-            changed_python_files[record["path"]] = (source, analysis)
-            symbols = index_python_symbols(
-                conn, file_id, record["path"], source, analysis["symbols"]
-            )
-
-            classes = [s for s in symbols if s.get("kind") == "class"]
-            if classes:
-                module_symbol = next(s for s in symbols if s["kind"] == "module")
-                index_python_inheritance_relationships(
-                    conn, file_id, module_symbol["qualified_name"], classes
+            if record["language"] == "python":
+                changed_python_files[record["path"]] = (source, analysis.extra)
+                _index_python_file_links(
+                    conn, file_id, record["path"], source, analysis.extra, path_to_file_id
                 )
-            index_python_call_relationships(conn, file_id, analysis["calls"])
-            index_python_self_call_relationships(
-                conn, file_id, analysis["self_calls"], symbols
-            )
-            index_python_typed_call_relationships(
-                conn,
-                file_id,
-                analysis["typed_calls"],
-                analysis["imports"],
-                path_to_file_id,
-                analysis["attribute_calls"],
-            )
-            index_python_attribute_relationships(
-                conn, file_id, analysis["self_references"]
-            )
-            index_python_class_attribute_relationships(
-                conn, file_id, analysis["foreign_accesses"], symbols
-            )
-            index_python_tests(conn, file_id, record["path"], source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -2017,7 +1680,13 @@ def run_scan(
         path_to_file_id.pop(stale_path, None)
 
     _link_plugin_imports(
-        conn, project_root, registry, changed_plugin_files, existing_rows, path_to_file_id
+        conn,
+        project_root,
+        registry,
+        changed_plugin_files,
+        existing_rows,
+        path_to_file_id,
+        config.source_roots,
     )
 
     # A newly-added file can resolve another file's previously-unresolvable
@@ -2042,9 +1711,6 @@ def run_scan(
             analysis = _analyze_python_file(path, source)
         analysis["imports"] = resolve_source_root_imports(
             analysis["imports"], config.source_roots, path_to_file_id
-        )
-        index_python_import_relationships(
-            conn, file_id, analysis["imports"], path_to_file_id
         )
         cross_file_analyses.append((file_id, analysis))
         index_python_test_relationships(
@@ -2259,39 +1925,11 @@ def refresh_index(
             analysis = analyzer.analyze(record["path"], source)
             write_file_analysis(conn, file_id, record["language"], analysis)
             changed_plugin_files[record["path"]] = analysis.imports
-        elif record["language"] == "python":
-            source = _read_source(Path(project_root) / record["path"])
-            analysis = _analyze_python_file(record["path"], source)
-            changed_python_files[record["path"]] = (source, analysis)
-            symbols = index_python_symbols(
-                conn, file_id, record["path"], source, analysis["symbols"]
-            )
-
-            classes = [s for s in symbols if s.get("kind") == "class"]
-            if classes:
-                module_symbol = next(s for s in symbols if s["kind"] == "module")
-                index_python_inheritance_relationships(
-                    conn, file_id, module_symbol["qualified_name"], classes
+            if record["language"] == "python":
+                changed_python_files[record["path"]] = (source, analysis.extra)
+                _index_python_file_links(
+                    conn, file_id, record["path"], source, analysis.extra, path_to_file_id
                 )
-            index_python_call_relationships(conn, file_id, analysis["calls"])
-            index_python_self_call_relationships(
-                conn, file_id, analysis["self_calls"], symbols
-            )
-            index_python_typed_call_relationships(
-                conn,
-                file_id,
-                analysis["typed_calls"],
-                analysis["imports"],
-                path_to_file_id,
-                analysis["attribute_calls"],
-            )
-            index_python_attribute_relationships(
-                conn, file_id, analysis["self_references"]
-            )
-            index_python_class_attribute_relationships(
-                conn, file_id, analysis["foreign_accesses"], symbols
-            )
-            index_python_tests(conn, file_id, record["path"], source)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -2299,7 +1937,13 @@ def refresh_index(
         path_to_file_id.pop(stale_path, None)
 
     _link_plugin_imports(
-        conn, project_root, registry, changed_plugin_files, existing_rows, path_to_file_id
+        conn,
+        project_root,
+        registry,
+        changed_plugin_files,
+        existing_rows,
+        path_to_file_id,
+        config.source_roots,
     )
 
     new_file_added = any(path not in existing_rows for path in changed_python_files)
@@ -2320,9 +1964,6 @@ def refresh_index(
             analysis = _analyze_python_file(path, source)
         analysis["imports"] = resolve_source_root_imports(
             analysis["imports"], config.source_roots, path_to_file_id
-        )
-        index_python_import_relationships(
-            conn, file_id, analysis["imports"], path_to_file_id
         )
         cross_file_analyses.append((file_id, analysis))
         index_python_test_relationships(
