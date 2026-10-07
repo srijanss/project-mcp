@@ -53,6 +53,7 @@ class ProjectConfig:
     high_fan_in_count: int = 15
     high_fan_out_count: int = 15
     high_temporal_coupling_count: int = 5
+    max_file_bytes: int = 1024 * 1024
 
 
 def load_config(project_root: Path) -> ProjectConfig:
@@ -87,4 +88,5 @@ def load_config(project_root: Path) -> ProjectConfig:
         high_fan_in_count=raw.get("high_fan_in_count", 15),
         high_fan_out_count=raw.get("high_fan_out_count", 15),
         high_temporal_coupling_count=raw.get("high_temporal_coupling_count", 5),
+        max_file_bytes=raw.get("max_file_bytes", 1024 * 1024),
     )

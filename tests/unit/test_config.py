@@ -122,3 +122,11 @@ def test_load_config_raises_clear_error_for_non_integer_legacy_threshold(tmp_pat
 
     with pytest.raises(ConfigError, match="high_churn_count"):
         load_config(tmp_path)
+
+
+def test_load_config_reads_max_file_bytes_and_defaults_it_to_one_mebibyte(tmp_path):
+    assert load_config(tmp_path).max_file_bytes == 1024 * 1024
+
+    (tmp_path / ".project-mcp" / "config.toml").write_text("max_file_bytes = 200\n")
+
+    assert load_config(tmp_path).max_file_bytes == 200

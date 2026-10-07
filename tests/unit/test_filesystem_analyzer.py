@@ -215,3 +215,44 @@ def test_discover_files_labels_languages_from_the_given_registry(tmp_path):
         "app.py": None,
         "main.go": "go",
     }
+
+
+def test_discover_files_skips_binary_files(tmp_path):
+    (tmp_path / "app.py").write_text("VALUE = 1\n")
+    (tmp_path / "logo.png").write_bytes(b"\x89PNG\r\n\x1a\n\x00\x00\x00")
+
+    records = discover_files(tmp_path, load_config(tmp_path))
+
+    assert [record["path"] for record in records] == ["app.py"]
+
+
+def test_discover_files_skips_files_over_max_file_bytes(tmp_path):
+    (tmp_path / ".project-mcp").mkdir()
+    (tmp_path / ".project-mcp" / "config.toml").write_text("max_file_bytes = 10\n")
+    (tmp_path / "small.py").write_text("A = 1\n")
+    (tmp_path / "large.py").write_text("VALUE = 12345\n")
+
+    records = discover_files(tmp_path, load_config(tmp_path))
+
+    assert [record["path"] for record in records] == ["small.py"]
+
+
+def test_classify_file_takes_the_file_kind_from_the_registry():
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="hcl",
+            version="0.1.0",
+            api_version=1,
+            extensions={".hcl": "hcl"},
+            file_kind="config",
+        )
+    )
+
+    assert classify_file(Path("infra/main.hcl"), registry) == {
+        "language": "hcl",
+        "file_kind": "config",
+    }

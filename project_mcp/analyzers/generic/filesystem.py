@@ -7,22 +7,7 @@ from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 
 ALWAYS_EXCLUDED_DIRS = {".project-mcp"}
 
-# Config and docs formats. Programming languages come from plugin descriptors.
-LANGUAGE_BY_EXTENSION = {
-    ".toml": "toml",
-    ".cfg": "ini",
-    ".ini": "ini",
-    ".yaml": "yaml",
-    ".yml": "yaml",
-    ".json": "json",
-    ".md": "markdown",
-    ".rst": "restructuredtext",
-}
-
 JS_LANGUAGES = {"javascript", "typescript"}
-
-DOCS_LANGUAGES = {"markdown", "restructuredtext"}
-CONFIG_LANGUAGES = {"toml", "ini", "yaml", "json"}
 
 
 def _is_test_path(path: Path) -> bool:
@@ -43,7 +28,7 @@ def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
     path = Path(path)
     if registry is None:
         registry = builtin_registry()
-    language = registry.language_for(path) or LANGUAGE_BY_EXTENSION.get(path.suffix)
+    language = registry.language_for(path)
 
     if language == "python" and _is_test_path(path):
         file_kind = "test"
@@ -51,14 +36,15 @@ def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
         file_kind = "test"
     elif language == "rust" and ("tests" in path.parts[:-1] or _is_test_path(path)):
         file_kind = "test"
-    elif language in CONFIG_LANGUAGES:
-        file_kind = "config"
-    elif language in DOCS_LANGUAGES:
-        file_kind = "docs"
     else:
-        file_kind = "source"
+        file_kind = registry.file_kind_for(path)
 
     return {"language": language, "file_kind": file_kind}
+
+
+def _is_binary(path: Path) -> bool:
+    with open(path, "rb") as handle:
+        return b"\0" in handle.read(8192)
 
 
 def _is_excluded_dir(dir_path: Path, project_root: Path, config: ProjectConfig) -> bool:
@@ -92,9 +78,11 @@ def discover_files(
             relative_path = path.relative_to(project_root)
             if should_exclude(relative_path, config):
                 continue
+            stat = path.stat()
+            if stat.st_size > config.max_file_bytes or _is_binary(path):
+                continue
 
             classification = classify_file(relative_path, registry)
-            stat = path.stat()
             records.append(
                 {
                     "path": relative_path.as_posix(),

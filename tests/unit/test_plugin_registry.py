@@ -32,3 +32,48 @@ def test_builtin_registry_labels_python_javascript_typescript_and_rust():
         ".tsx": "typescript",
         ".rs": "rust",
     }
+
+
+def test_registry_gives_the_file_kind_a_descriptor_declares():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="hcl",
+            version="0.1.0",
+            api_version=1,
+            extensions={".hcl": "hcl"},
+            file_kind="config",
+        )
+    )
+    registry.register(_descriptor("go", {".go": "go"}))
+
+    assert registry.file_kind_for(Path("main.hcl")) == "config"
+    assert registry.file_kind_for(Path("main.go")) == "source"
+    assert registry.file_kind_for(Path("notes.xyz")) == "source"
+
+
+def test_every_registry_labels_config_and_docs_formats():
+    registry = PluginRegistry()
+
+    assert {
+        name: (registry.language_for(Path(name)), registry.file_kind_for(Path(name)))
+        for name in (
+            "pyproject.toml",
+            "setup.cfg",
+            "tox.ini",
+            "ci.yaml",
+            "ci.yml",
+            "package.json",
+            "README.md",
+            "index.rst",
+        )
+    } == {
+        "pyproject.toml": ("toml", "config"),
+        "setup.cfg": ("ini", "config"),
+        "tox.ini": ("ini", "config"),
+        "ci.yaml": ("yaml", "config"),
+        "ci.yml": ("yaml", "config"),
+        "package.json": ("json", "config"),
+        "README.md": ("markdown", "docs"),
+        "index.rst": ("restructuredtext", "docs"),
+    }
