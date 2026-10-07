@@ -27,12 +27,17 @@ _LEGACY_THRESHOLD_KEYS = (
 )
 
 
+def _is_integer(value) -> bool:
+    """Whether a TOML value is an integer (TOML booleans are not)."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _validate_legacy_thresholds(raw: dict) -> None:
     for key in _LEGACY_THRESHOLD_KEYS:
         if key not in raw:
             continue
         value = raw[key]
-        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        if not _is_integer(value) or value < 0:
             raise ConfigError(
                 f"invalid config: {key} must be a non-negative integer, got {value!r}"
             )
@@ -72,6 +77,8 @@ def _plugin_selection(project_root: Path) -> dict:
         plugins = tomllib.loads(mcpctl_path.read_text()).get("plugins", {})
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"invalid config toml at {mcpctl_path}: {exc}") from exc
+    if not isinstance(plugins, dict):
+        raise ConfigError(f"invalid config: [plugins] must be a table, got {plugins!r}")
     selection = {}
     for key in ("enabled", "disabled"):
         if key not in plugins:
@@ -106,6 +113,11 @@ def load_config(project_root: Path) -> ProjectConfig:
         raise ConfigError(f"invalid config toml at {config_toml_path}: {exc}") from exc
 
     _validate_legacy_thresholds(raw)
+    max_file_bytes = raw.get("max_file_bytes", 1024 * 1024)
+    if not _is_integer(max_file_bytes) or max_file_bytes < 1:
+        raise ConfigError(
+            f"invalid config: max_file_bytes must be a positive integer, got {max_file_bytes!r}"
+        )
 
     return ProjectConfig(
         project_root=project_root,
@@ -121,6 +133,6 @@ def load_config(project_root: Path) -> ProjectConfig:
         high_fan_in_count=raw.get("high_fan_in_count", 15),
         high_fan_out_count=raw.get("high_fan_out_count", 15),
         high_temporal_coupling_count=raw.get("high_temporal_coupling_count", 5),
-        max_file_bytes=raw.get("max_file_bytes", 1024 * 1024),
+        max_file_bytes=max_file_bytes,
         **plugins,
     )

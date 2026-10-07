@@ -158,3 +158,22 @@ def test_load_config_reads_each_plugins_settings_table_from_mcpctl_toml(tmp_path
     config = load_config(tmp_path)
 
     assert config.plugin_settings == {"python": {"strict": True}}
+
+
+@pytest.mark.parametrize("value", ["5", '"python"', '["python"]'])
+def test_load_config_rejects_a_plugins_value_that_is_not_a_table(tmp_path, value):
+    (tmp_path / "mcpctl.toml").write_text(f"plugins = {value}\n")
+
+    with pytest.raises(ConfigError, match=r"\[plugins\] must be a table"):
+        load_config(tmp_path)
+
+
+@pytest.mark.parametrize("value", ['"1M"', "0", "-1", "true", "1.5"])
+def test_load_config_rejects_a_max_file_bytes_that_is_not_a_positive_integer(
+    tmp_path, value
+):
+    (tmp_path / ".project-mcp").mkdir()
+    (tmp_path / ".project-mcp" / "config.toml").write_text(f"max_file_bytes = {value}\n")
+
+    with pytest.raises(ConfigError, match="max_file_bytes must be a positive integer"):
+        load_config(tmp_path)
