@@ -280,3 +280,13 @@ def test_classify_file_asks_the_language_analyzer_whether_a_file_is_a_test():
 
     assert classify_file(Path("src/shape_spec.toy"), registry)["file_kind"] == "test"
     assert classify_file(Path("tests/shape.toy"), registry)["file_kind"] == "source"
+
+
+def test_discover_files_skips_a_file_it_cannot_read(tmp_path):
+    (tmp_path / "app.py").write_text("A = 1\n")
+    (tmp_path / "locked.py").write_text("B = 2\n")
+    (tmp_path / "locked.py").chmod(0)
+
+    records = discover_files(tmp_path, load_config(tmp_path))
+
+    assert [record["path"] for record in records] == ["app.py"]

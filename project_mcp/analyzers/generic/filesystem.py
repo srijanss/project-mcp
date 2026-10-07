@@ -59,9 +59,12 @@ def discover_files(
             relative_path = path.relative_to(project_root)
             if should_exclude(relative_path, config):
                 continue
-            stat = path.stat()
-            if stat.st_size > config.max_file_bytes or _is_binary(path):
-                continue
+            try:
+                stat = path.stat()
+                if stat.st_size > config.max_file_bytes or _is_binary(path):
+                    continue
+            except OSError:
+                continue  # unreadable, or removed since the directory was listed
 
             classification = classify_file(relative_path, registry)
             records.append(
