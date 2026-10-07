@@ -3509,3 +3509,18 @@ def test_scans_warn_while_no_language_plugin_is_active(tmp_path):
 
     assert warned == ["no language plugins active; indexed 2 files at file level only"]
     assert "warnings" not in get_index_status(conn)
+
+
+def test_scans_warn_about_frameworks_skipped_for_an_inactive_language(tmp_path):
+    from project_mcp.plugins.registry import builtin_registry
+
+    (tmp_path / "lib.rs").write_text("pub fn run() {}\n")
+    registry = builtin_registry()
+    registry.disable("python")
+    conn = get_connection(tmp_path)
+
+    run_scan(conn, tmp_path, load_config(tmp_path), registry=registry)
+
+    assert get_index_status(conn)["warnings"] == [
+        "django plugin skipped: it requires the python plugin, which is not active"
+    ]

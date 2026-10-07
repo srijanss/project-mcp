@@ -13,7 +13,7 @@ class PluginRegistry:
         self._descriptor_by_language: dict[str, PluginDescriptor] = {}
         self._framework_descriptors: list[PluginDescriptor] = []
         self._analyzers: dict[str, object] = {}
-        self._plugin_names: list[str] = []
+        self._descriptor_by_name: dict[str, PluginDescriptor] = {}
         self.failed_plugins: dict[str, str] = {}
         self.disabled_plugins: set[str] = set()
         for descriptor in FORMAT_DESCRIPTORS:
@@ -26,8 +26,8 @@ class PluginRegistry:
             self.failed_plugins[descriptor.name] = (
                 f"unsupported api_version {descriptor.api_version} (supported: {supported})"
             )
-        if descriptor.analyzer is not None and descriptor.name not in self._plugin_names:
-            self._plugin_names.append(descriptor.name)
+        if descriptor.analyzer is not None:
+            self._descriptor_by_name[descriptor.name] = descriptor
         if descriptor.kind == "framework":
             self._framework_descriptors.append(descriptor)
         for extension, language in descriptor.extensions.items():
@@ -66,7 +66,7 @@ class PluginRegistry:
 
     def plugin_names(self) -> list[str]:
         """Every registered plugin with an analyzer, in registration order."""
-        return list(self._plugin_names)
+        return list(self._descriptor_by_name)
 
     def _active(self, descriptor: PluginDescriptor) -> bool:
         return (
@@ -80,7 +80,24 @@ class PluginRegistry:
         return [
             self._load(descriptor)
             for descriptor in self._framework_descriptors
+            if self._active(descriptor) and not self._inactive_requirements(descriptor)
+        ]
+
+    def skipped_frameworks(self) -> dict[str, list[str]]:
+        """Enabled framework plugins skipped, with the inactive plugins they require."""
+        return {
+            descriptor.name: missing
+            for descriptor in self._framework_descriptors
             if self._active(descriptor)
+            and (missing := self._inactive_requirements(descriptor))
+        }
+
+    def _inactive_requirements(self, descriptor: PluginDescriptor) -> list[str]:
+        return [
+            name
+            for name in descriptor.requires
+            if name not in self._descriptor_by_name
+            or not self._active(self._descriptor_by_name[name])
         ]
 
     def _load(self, descriptor: PluginDescriptor):

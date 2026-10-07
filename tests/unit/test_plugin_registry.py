@@ -151,7 +151,10 @@ class _ToyFramework:
 
 
 def test_registry_loads_registered_framework_plugins():
+    from project_mcp.plugins.python.descriptor import DESCRIPTOR as python
+
     registry = PluginRegistry()
+    registry.register(python)
     registry.register(
         PluginDescriptor(
             name="toyframe",
@@ -167,7 +170,7 @@ def test_registry_loads_registered_framework_plugins():
     (framework,) = registry.frameworks()
     assert isinstance(framework, _ToyFramework)
     assert registry.frameworks() == [framework]
-    assert registry.language_descriptors() == []
+    assert registry.language_descriptors() == [python]
 
 
 def test_builtin_registry_serves_the_django_framework_plugin():
@@ -197,3 +200,11 @@ def test_configured_registry_disables_plugins_left_out_of_the_selection(tmp_path
     ]
     assert registry.analyzer_for("rust") is None
     assert registry.disabled_plugins == {"javascript", "rust"}
+
+
+def test_registry_skips_frameworks_whose_required_language_plugin_is_inactive():
+    registry = builtin_registry()
+    registry.disable("python")
+
+    assert registry.frameworks() == []
+    assert registry.skipped_frameworks() == {"django": ["python"]}
