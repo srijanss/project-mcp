@@ -354,14 +354,14 @@ def build_server(project_root: Path) -> MCPServer:
     def get_index_status_tool() -> dict:
         """Return whether the local index is fresh, stale, or never indexed."""
         conn = get_connection(project_root)
-        return get_index_status(conn, project_root, config)
+        return get_index_status(conn, project_root, config, registry)
 
     @server.tool(name="refresh_index")
     def refresh_index_tool() -> dict:
         """Force an incremental re-index of changed/new/deleted files."""
         conn = get_connection(project_root)
-        refresh_index(conn, project_root, config)
-        return get_index_status(conn, project_root, config)
+        refresh_index(conn, project_root, config, registry)
+        return get_index_status(conn, project_root, config, registry)
 
     @server.tool(name="get_change_history")
     def get_change_history_tool(path: str) -> dict:

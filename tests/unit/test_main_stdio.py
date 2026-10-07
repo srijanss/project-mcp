@@ -703,3 +703,14 @@ def test_empty_results_of_plugin_backed_tools_say_when_nothing_was_analyzed(tmp_
 
     assert json.loads(symbols.content[0].text)["reason"] == "not_analyzed"
     assert json.loads(hotspots.content[0].text)["reason"] == "none_found"
+
+
+@pytest.mark.parametrize("tool", ["get_index_status", "refresh_index"])
+def test_index_status_tools_report_the_servers_plugins(tmp_path, tool):
+    (tmp_path / "mcpctl.toml").write_text('[plugins]\ndisabled = ["rust"]\n')
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool(tool, {}))
+
+    plugins = json.loads(result.content[0].text)["plugins"]
+    assert plugins["active"] == ["python", "javascript", "django"]

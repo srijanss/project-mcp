@@ -3668,3 +3668,20 @@ def test_run_scan_marks_test_relationships_of_unanalyzed_files_unknown(tmp_path)
         )
     )
     assert (rows["app.py"], rows["lib.rs"]) == ("high", "unknown")
+
+
+def test_get_index_status_with_a_registry_reports_active_and_failed_plugins(tmp_path):
+    from project_mcp.plugins.registry import builtin_registry
+
+    registry = builtin_registry()
+    registry.disable("rust")
+    registry.failed_plugins["toy"] = "failed to load: missing toolchain"
+    conn = get_connection(tmp_path)
+
+    status = get_index_status(conn, registry=registry)
+
+    assert status["plugins"] == {
+        "active": ["python", "javascript", "django"],
+        "failed": {"toy": "failed to load: missing toolchain"},
+    }
+    assert "plugins" not in get_index_status(conn)

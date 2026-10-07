@@ -718,6 +718,11 @@ def get_index_status(
     ).fetchone()
     if warnings and json.loads(warnings[0]):
         result["warnings"] = json.loads(warnings[0])
+    if registry is not None:
+        result["plugins"] = {
+            "active": registry.active_plugins(),
+            "failed": dict(registry.failed_plugins),
+        }
     return result
 
 
