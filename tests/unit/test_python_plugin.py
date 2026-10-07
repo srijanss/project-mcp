@@ -136,3 +136,19 @@ def test_python_analyzer_keys_dependencies_by_normalized_name_and_reads_uv_lock(
     assert analyzer.undeclared_dependency(tmp_path, "missing") is None
     (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["flask"]\n')
     assert analyzer.undeclared_dependency(tmp_path, "requests") is None
+
+
+def test_declared_dependencies_skip_requirements_includes_resolving_outside_the_root(tmp_path):
+    from project_mcp.plugins.python.dependencies import declared_dependencies
+
+    project = tmp_path / "project"
+    (project / "reqs").mkdir(parents=True)
+    (tmp_path / "outside.txt").write_text("leaked==1\n")
+    (project / "reqs" / "base.txt").write_text("httpx>=0.27\n")
+    (project / "requirements.txt").write_text(
+        f"-r {tmp_path / 'outside.txt'}\n"
+        "--requirement ../outside.txt\n"
+        "-r reqs/../reqs/base.txt\n"
+    )
+
+    assert [d["name"] for d in declared_dependencies(project)] == ["httpx"]

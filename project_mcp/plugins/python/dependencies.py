@@ -52,10 +52,16 @@ def declared_dependencies(project_root: Path) -> list[dict]:
                 dependencies.append(parsed)
 
     seen_files = set()
+    root = project_root.resolve()
 
     def read_requirements(requirements_file: Path) -> None:
+        # An include never reads a file outside the project.
         resolved_file = requirements_file.resolve()
-        if resolved_file in seen_files or not requirements_file.is_file():
+        if (
+            not resolved_file.is_relative_to(root)
+            or resolved_file in seen_files
+            or not requirements_file.is_file()
+        ):
             return
         seen_files.add(resolved_file)
         for line in requirements_file.read_text().splitlines():
