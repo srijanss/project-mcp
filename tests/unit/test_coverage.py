@@ -14,6 +14,13 @@ def _scanned(tmp_path, registry):
     return conn
 
 
+def _without_notes(languages):
+    return {
+        language: {k: v for k, v in entry.items() if k != "note"}
+        for language, entry in languages.items()
+    }
+
+
 def test_coverage_of_files_every_active_plugin_analyzed_is_full(tmp_path):
     registry = builtin_registry()
     conn = _scanned(tmp_path, registry)
@@ -36,11 +43,14 @@ def test_coverage_names_a_disabled_plugins_language_as_unanalyzed(tmp_path):
     rust_only = coverage_block(conn, registry, {"lib.rs"})
 
     rust = {"analyzed": False, "reason": "plugin_disabled"}
-    assert (mixed["status"], mixed["languages"]) == (
+    assert (mixed["status"], _without_notes(mixed["languages"])) == (
         "partial",
         {"python": {"analyzed": True}, "rust": rust},
     )
-    assert (rust_only["status"], rust_only["languages"]) == ("none", {"rust": rust})
+    assert (rust_only["status"], _without_notes(rust_only["languages"])) == (
+        "none",
+        {"rust": rust},
+    )
 
 
 def test_coverage_reports_failed_plugins_and_failed_files_with_their_errors(tmp_path):
@@ -55,7 +65,7 @@ def test_coverage_reports_failed_plugins_and_failed_files_with_their_errors(tmp_
     block = coverage_block(conn, registry, {"app.py", "lib.rs"})
 
     assert block["status"] == "none"
-    assert block["languages"] == {
+    assert _without_notes(block["languages"]) == {
         "python": {
             "analyzed": False,
             "reason": "file_failed",
@@ -90,3 +100,47 @@ def test_referenced_paths_are_the_indexed_files_named_anywhere_in_a_value(tmp_pa
     }
 
     assert referenced_paths(conn, value) == {"app.py", "README.md"}
+
+
+def test_unanalyzed_language_entries_carry_a_relayable_note(tmp_path):
+    registry = builtin_registry()
+    registry.disable("rust")
+    conn = _scanned(tmp_path, registry)
+    conn.execute(
+        "UPDATE files SET analysis_status = 'file_failed',"
+        " analysis_error = 'SyntaxError: bad' WHERE path = 'app.py'"
+    )
+
+    languages = coverage_block(conn, registry, {"app.py", "lib.rs"})["languages"]
+
+    assert languages["rust"]["note"] == (
+        "The rust plugin is installed but disabled. Symbols and relationships are"
+        " unavailable for these files; results are file-level only. Enable it in"
+        " mcpctl.toml [plugins]: add it to `enabled`, or remove it from `disabled`."
+    )
+    assert languages["python"]["note"] == (
+        "The python plugin could not analyze 1 file (see `errors`); those files"
+        " are file-level only."
+    )
+
+
+def test_files_of_a_known_language_with_no_installed_plugin_name_the_plugin(tmp_path):
+    (tmp_path / "main.go").write_text("package main\n")
+    (tmp_path / "notes.xyz").write_text("?\n")
+    registry = builtin_registry()
+    conn = _scanned(tmp_path, registry)
+
+    block = coverage_block(conn, registry, {"main.go", "notes.xyz", "app.py"})
+
+    assert block["status"] == "partial"
+    assert sorted(block["languages"]) == ["go", "python"]
+    assert block["languages"]["go"] == {
+        "analyzed": False,
+        "reason": "plugin_not_installed",
+        "note": (
+            "No go plugin is installed. Symbols and relationships are unavailable"
+            " for these files; results are file-level only. To analyze them,"
+            " install a project-mcp plugin for go (an entry point in the"
+            " project_mcp.plugins group) and enable it in mcpctl.toml [plugins]."
+        ),
+    }

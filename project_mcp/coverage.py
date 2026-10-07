@@ -1,11 +1,33 @@
 """The `coverage` block: which plugins analyzed the files a query touched."""
 
 import sqlite3
+from pathlib import PurePosixPath
 
 from project_mcp.plugins.registry import PluginRegistry
 
+# Data only: which plugin to suggest for files no installed plugin claims.
+PLUGIN_FOR_EXTENSION = {
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".hpp": "cpp",
+    ".cs": "csharp",
+    ".go": "go",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".php": "php",
+    ".rb": "ruby",
+    ".scala": "scala",
+    ".swift": "swift",
+}
+
 _PATHS_PER_QUERY = 500
 _MAX_PATH_CHARS = 4096
+_FILE_LEVEL_ONLY = (
+    "Symbols and relationships are unavailable for these files; results are"
+    " file-level only."
+)
 
 
 def coverage_block(
@@ -22,15 +44,20 @@ def coverage_block(
         for language in descriptor.extensions.values()
     }
     failed_by_language: dict[str, dict[str, str]] = {}
+    not_installed: set[str] = set()
     for path, language, status, error in _files(conn, paths):
         if language in plugin_by_language:
             errors = failed_by_language.setdefault(language, {})
             if status == "file_failed":
                 errors[path] = error
+        elif language is None and PurePosixPath(path).suffix in PLUGIN_FOR_EXTENSION:
+            not_installed.add(PLUGIN_FOR_EXTENSION[PurePosixPath(path).suffix])
     languages = {
         language: _language_entry(registry, language, plugin_by_language[language], errors)
         for language, errors in failed_by_language.items()
     }
+    for plugin in sorted(not_installed):
+        languages[plugin] = _not_installed_entry(plugin)
     return {
         "status": _status([entry["analyzed"] for entry in languages.values()]),
         "active_plugins": registry.active_plugins(),
@@ -84,12 +111,43 @@ def _language_entry(
             "analyzed": False,
             "reason": "plugin_failed",
             "error": registry.failed_plugins[plugin],
+            "note": f"The {plugin} plugin failed to load (see `error`). {_FILE_LEVEL_ONLY}",
         }
     if not registry.analyzed(language):
-        return {"analyzed": False, "reason": "plugin_disabled"}
+        return {
+            "analyzed": False,
+            "reason": "plugin_disabled",
+            "note": (
+                f"The {plugin} plugin is installed but disabled. {_FILE_LEVEL_ONLY}"
+                " Enable it in mcpctl.toml [plugins]: add it to `enabled`, or remove"
+                " it from `disabled`."
+            ),
+        }
     if failed_files:
-        return {"analyzed": False, "reason": "file_failed", "errors": failed_files}
+        count = len(failed_files)
+        return {
+            "analyzed": False,
+            "reason": "file_failed",
+            "errors": failed_files,
+            "note": (
+                f"The {plugin} plugin could not analyze {count}"
+                f" file{'' if count == 1 else 's'} (see `errors`); those files are"
+                " file-level only."
+            ),
+        }
     return {"analyzed": True}
+
+
+def _not_installed_entry(plugin: str) -> dict:
+    return {
+        "analyzed": False,
+        "reason": "plugin_not_installed",
+        "note": (
+            f"No {plugin} plugin is installed. {_FILE_LEVEL_ONLY} To analyze them,"
+            f" install a project-mcp plugin for {plugin} (an entry point in the"
+            " project_mcp.plugins group) and enable it in mcpctl.toml [plugins]."
+        ),
+    }
 
 
 def _status(analyzed: list[bool]) -> str:

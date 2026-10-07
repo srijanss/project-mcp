@@ -15,6 +15,13 @@ def _call(server, tool, arguments):
     return json.loads(result.content[0].text)
 
 
+def _without_notes(languages):
+    return {
+        language: {k: v for k, v in entry.items() if k != "note"}
+        for language, entry in languages.items()
+    }
+
+
 def _project(tmp_path):
     (tmp_path / "app.py").write_text("def run():\n    pass\n")
     (tmp_path / "lib.rs").write_text("pub fn run() {}\n")
@@ -36,6 +43,9 @@ def test_every_tool_response_carries_coverage_scoped_to_the_files_it_touches(tmp
         "languages": PYTHON_ONLY,
     }
     assert history["coverage"]["status"] == "none"
-    assert history["coverage"]["languages"] == {"rust": RUST_DISABLED}
+    assert _without_notes(history["coverage"]["languages"]) == {"rust": RUST_DISABLED}
     assert overview["coverage"]["status"] == "partial"
-    assert overview["coverage"]["languages"] == {**PYTHON_ONLY, "rust": RUST_DISABLED}
+    assert _without_notes(overview["coverage"]["languages"]) == {
+        **PYTHON_ONLY,
+        "rust": RUST_DISABLED,
+    }
