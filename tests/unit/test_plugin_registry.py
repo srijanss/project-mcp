@@ -343,3 +343,14 @@ def test_a_language_fingerprint_changes_with_its_plugins_config(tmp_path):
 
     assert python_fingerprint("strict = true") == python_fingerprint("strict = true")
     assert python_fingerprint("strict = true") != python_fingerprint("strict = false")
+
+
+def test_active_plugins_leave_out_disabled_failed_and_skipped_plugins():
+    registry = builtin_registry()
+    registry.disable("rust")
+    registry.failed_plugins["javascript"] = "failed to load: boom"
+    without_python = builtin_registry()
+    without_python.disable("python")
+
+    assert registry.active_plugins() == ["python", "django"]
+    assert without_python.active_plugins() == ["javascript", "rust"]

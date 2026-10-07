@@ -540,7 +540,7 @@ def test_find_symbol_tool_pages_results_and_says_where_to_continue(tmp_path):
     assert first["truncated"] is True
     assert first["returned"] == len(first["items"]) == 2
     assert first["next_offset"] == 2
-    assert [row["name"] for row in last] == ["Widget4"]
+    assert [row["name"] for row in last["items"]] == ["Widget4"]
 
 
 @pytest.mark.parametrize(
@@ -571,7 +571,7 @@ def test_small_list_result_is_returned_unchanged(tmp_path, monkeypatch):
         server.call_tool("get_dependents", {"qualified_name": "app.models"})
     )
 
-    assert result.structured_content == {"result": rows}
+    assert result.structured_content["result"]["items"] == rows
 
 
 def test_find_symbol_tool_call_sees_edits_made_after_first_index(tmp_path):
@@ -652,7 +652,7 @@ def test_list_dependencies_filters_indexed_dependencies_by_any_ecosystem(tmp_pat
 
     result = asyncio.run(server.call_tool("list_dependencies", {"ecosystem": "rust"}))
 
-    assert result.structured_content["result"] == [
+    assert result.structured_content["result"]["items"] == [
         {"name": "serde", "ecosystem": "rust", "version": "1", "version_status": "declared"}
     ]
 
@@ -664,7 +664,7 @@ def test_get_dependency_version_matches_non_python_names_exactly(tmp_path):
     loose = asyncio.run(server.call_tool("get_dependency_version", {"name": "Lodash-Merge"}))
     exact = asyncio.run(server.call_tool("get_dependency_version", {"name": "lodash.merge"}))
 
-    assert json.loads(loose.content[0].text) == {"status": "not_found"}
+    assert json.loads(loose.content[0].text)["status"] == "not_found"
     assert json.loads(exact.content[0].text)["ecosystem"] == "npm"
 
 
@@ -678,3 +678,16 @@ def test_build_server_rejects_an_invalid_plugin_selection_at_startup(tmp_path, m
 
     with pytest.raises(ConfigError, match="both claim .py"):
         build_server(tmp_path)
+
+
+def test_tool_responses_carry_a_coverage_block_and_lists_move_under_items(tmp_path):
+    (tmp_path / "app.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+
+    found = asyncio.run(server.call_tool("find_symbol", {"query": "Widget"}))
+    overview = asyncio.run(server.call_tool("get_project_overview", {}))
+
+    symbols = found.structured_content["result"]
+    assert [s["qualified_name"] for s in symbols["items"]] == ["app.Widget"]
+    assert symbols["coverage"]["languages"] == {"python": {"analyzed": True}}
+    assert json.loads(overview.content[0].text)["coverage"]["status"] == "full"

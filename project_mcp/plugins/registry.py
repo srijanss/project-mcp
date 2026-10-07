@@ -109,6 +109,18 @@ class PluginRegistry:
         """Every registered plugin with an analyzer, in registration order."""
         return list(self._descriptor_by_name)
 
+    def active_plugins(self) -> list[str]:
+        """Plugins that run on a scan, in registration order.
+
+        Disabled and failed plugins are left out, as are frameworks whose
+        language plugin is inactive.
+        """
+        return [
+            name
+            for name, descriptor in self._descriptor_by_name.items()
+            if self._active(descriptor) and not self._inactive_requirements(descriptor)
+        ]
+
     def _active(self, descriptor: PluginDescriptor) -> bool:
         return (
             descriptor.analyzer is not None

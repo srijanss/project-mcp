@@ -11,8 +11,8 @@ def _call(server, tool, arguments):
     return json.loads(result.content[0].text)
 
 
-def _names(dependencies):
-    return sorted((d["name"], d["ecosystem"]) for d in dependencies)
+def _names(result):
+    return sorted((d["name"], d["ecosystem"]) for d in result["items"])
 
 
 def test_list_dependencies_covers_every_ecosystem(tmp_path):
@@ -29,7 +29,9 @@ def test_list_dependencies_covers_every_ecosystem(tmp_path):
     assert _names(_call(server, "list_dependencies", {"ecosystem": "rust"})) == [
         ("serde", "rust")
     ]
-    assert _call(server, "get_dependency_version", {"name": "react"}) == {
+    react = _call(server, "get_dependency_version", {"name": "react"})
+    react.pop("coverage")
+    assert react == {
         "name": "react",
         "ecosystem": "npm",
         "version": "^18.2.0",

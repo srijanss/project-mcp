@@ -167,13 +167,13 @@ class TestGitIntegration:
         assert history["change_count"] == 4
 
         assert hotspots_result.is_error is False
-        hotspots = hotspots_result.structured_content["result"]
+        hotspots = hotspots_result.structured_content["result"]["items"]
         assert isinstance(hotspots, list)
         for hotspot in hotspots:
             assert {"path", "change_count", "last_changed"} <= hotspot.keys()
 
         assert coupling_result.is_error is False
-        coupling = coupling_result.structured_content["result"]
+        coupling = coupling_result.structured_content["result"]["items"]
         assert isinstance(coupling, list)
 
 

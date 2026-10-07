@@ -11,6 +11,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 
 from project_mcp.config import ConfigError, load_config
+from project_mcp.coverage import coverage_block, referenced_paths
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
 from project_mcp.plugins import registry as registry_module
@@ -87,14 +88,14 @@ def _size(value) -> int:
     return len(json.dumps(value, default=str))
 
 
-def _cap_output(result):
+def _cap_output(result, budget: int = MAX_TOOL_OUTPUT_CHARS):
     """Trim oversized results so clients don't overflow into a saved file."""
-    if _size(result) <= MAX_TOOL_OUTPUT_CHARS:
+    if _size(result) <= budget:
         return result
     if isinstance(result, list):
-        return _cap_list(result)
+        return _cap_list(result, budget)
     if isinstance(result, dict):
-        return _cap_dict(result)
+        return _cap_dict(result, budget)
     return result
 
 
@@ -112,7 +113,7 @@ def _compact(result, wrapped: bool = False):
     )
 
 
-def _cap_list(result: list) -> dict:
+def _cap_list(result: list, budget: int) -> dict:
     def wrap(count: int) -> dict:
         return {
             "truncated": True,
@@ -124,17 +125,17 @@ def _cap_list(result: list) -> dict:
     low, high = 0, len(result)  # largest prefix that fits, by bisection
     while low < high:
         mid = (low + high + 1) // 2
-        if _size(wrap(mid)) <= MAX_TOOL_OUTPUT_CHARS:
+        if _size(wrap(mid)) <= budget:
             low = mid
         else:
             high = mid - 1
     return wrap(low)
 
 
-def _cap_dict(result: dict) -> dict:
+def _cap_dict(result: dict, budget: int) -> dict:
     trimmed: dict[str, dict] = {}
     capped = {**result, "truncated": True, "truncated_fields": trimmed}
-    while _size(capped) > MAX_TOOL_OUTPUT_CHARS:
+    while _size(capped) > budget:
         trimmable = [
             k for k, v in capped.items() if isinstance(v, (list, str)) and v
         ]
@@ -147,12 +148,21 @@ def _cap_dict(result: dict) -> dict:
     return capped if trimmed else result
 
 
-def _guard_tools(server: MCPServer) -> None:
+def _with_coverage(result, block: dict) -> dict:
+    """`result` carrying `block` under "coverage"; a list moves under "items"."""
+    if isinstance(result, list):
+        return {"items": result, "coverage": block}
+    return {**result, "coverage": block}
+
+
+def _guard_tools(server: MCPServer, coverage=None) -> None:
     """Make every tool registered on `server` well behaved.
 
     Failures surface their real message (the framework hides the text of
     unexpected exceptions behind a bare "Error executing tool"; a ToolError
     keeps it), and oversized list results are trimmed and flagged.
+    `coverage(result, arguments)`, when given, builds the coverage block
+    every result carries.
     """
     register = server.tool
 
@@ -166,7 +176,14 @@ def _guard_tools(server: MCPServer) -> None:
             @functools.wraps(fn)
             def guarded(*fn_args, **fn_kwargs):
                 try:
-                    result = _cap_output(fn(*fn_args, **fn_kwargs))
+                    result = fn(*fn_args, **fn_kwargs)
+                    block = None if coverage is None else coverage(result, fn_kwargs)
+                    if block is None:
+                        result = _cap_output(result)
+                    else:
+                        # Leave room for the block and the key it sits under.
+                        budget = MAX_TOOL_OUTPUT_CHARS - _size({"items": [], "coverage": block})
+                        result = _with_coverage(_cap_output(result, budget), block)
                     return _compact(result, wrapped=returns_list)
                 except ToolError:
                     raise
@@ -187,9 +204,15 @@ def _guard_tools(server: MCPServer) -> None:
 
 def build_server(project_root: Path) -> MCPServer:
     config = load_config(project_root)
-    registry_module.configured_registry(config)  # reject invalid plugin selections now
+    # Built now so an invalid plugin selection fails startup.
+    registry = registry_module.configured_registry(config)
     server = MCPServer("project-mcp")
-    _guard_tools(server)
+
+    def coverage(result, arguments) -> dict:
+        conn = get_connection(project_root)
+        return coverage_block(conn, registry, referenced_paths(conn, [result, arguments]))
+
+    _guard_tools(server, coverage)
 
     @server.tool()
     def list_dependencies(ecosystem: str | None = None) -> list[dict]:
