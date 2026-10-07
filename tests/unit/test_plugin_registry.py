@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from project_mcp.plugins.descriptor import PluginDescriptor
 from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 
@@ -208,3 +210,35 @@ def test_registry_skips_frameworks_whose_required_language_plugin_is_inactive():
 
     assert registry.frameworks() == []
     assert registry.skipped_frameworks() == {"django": ["python"]}
+
+
+def _claiming_py(name: str) -> PluginDescriptor:
+    return PluginDescriptor(
+        name=name,
+        version="0.1.0",
+        api_version=1,
+        extensions={".py": name},
+        analyzer="project_mcp.plugins.python.analyzer:PythonAnalyzer",
+    )
+
+
+def test_resolving_extension_claims_rejects_two_active_claimants():
+    from project_mcp.config import ConfigError
+
+    registry = PluginRegistry()
+    registry.register(_claiming_py("python"))
+    registry.register(_claiming_py("snake"))
+
+    with pytest.raises(ConfigError, match="plugins python and snake both claim .py"):
+        registry.resolve_extension_claims()
+
+
+def test_resolving_extension_claims_gives_the_extension_to_its_active_claimant():
+    registry = PluginRegistry()
+    registry.register(_claiming_py("python"))
+    registry.register(_claiming_py("snake"))
+    registry.disable("snake")
+
+    registry.resolve_extension_claims()
+
+    assert registry.language_for(Path("app.py")) == "python"

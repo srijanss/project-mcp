@@ -1,6 +1,7 @@
 import importlib
 from pathlib import Path
 
+from project_mcp.config import ConfigError
 from project_mcp.plugins.descriptor import PluginDescriptor
 from project_mcp.plugins.formats import FORMAT_DESCRIPTORS
 
@@ -14,6 +15,7 @@ class PluginRegistry:
         self._framework_descriptors: list[PluginDescriptor] = []
         self._analyzers: dict[str, object] = {}
         self._descriptor_by_name: dict[str, PluginDescriptor] = {}
+        self._claimants: dict[str, list[PluginDescriptor]] = {}
         self.failed_plugins: dict[str, str] = {}
         self.disabled_plugins: set[str] = set()
         for descriptor in FORMAT_DESCRIPTORS:
@@ -28,6 +30,8 @@ class PluginRegistry:
             )
         if descriptor.analyzer is not None:
             self._descriptor_by_name[descriptor.name] = descriptor
+            for extension in descriptor.extensions:
+                self._claimants.setdefault(extension, []).append(descriptor)
         if descriptor.kind == "framework":
             self._framework_descriptors.append(descriptor)
         for extension, language in descriptor.extensions.items():
@@ -59,6 +63,24 @@ class PluginRegistry:
         """Whether an enabled, loadable plugin analyzes `language` files."""
         descriptor = self._descriptor_by_language.get(language)
         return descriptor is not None and self._active(descriptor)
+
+    def resolve_extension_claims(self) -> None:
+        """Give each extension to the one active plugin claiming it.
+
+        Two active plugins claiming one extension is a config error.
+        """
+        for extension, claimants in self._claimants.items():
+            active = [d for d in claimants if self._active(d)]
+            if len(active) > 1:
+                names = " and ".join(sorted(d.name for d in active))
+                raise ConfigError(
+                    f"plugins {names} {'both' if len(active) == 2 else 'all'} claim"
+                    f" {extension}; disable all but one in mcpctl.toml [plugins]"
+                )
+            if active:
+                (owner,) = active
+                self._descriptor_by_extension[extension] = owner
+                self._descriptor_by_language[owner.extensions[extension]] = owner
 
     def disable(self, name: str) -> None:
         """Keep plugin `name` labelling its files, but never load its analyzer."""
@@ -132,4 +154,5 @@ def configured_registry(config) -> PluginRegistry:
         left_out = config.plugins_enabled is not None and name not in config.plugins_enabled
         if left_out or name in config.plugins_disabled:
             registry.disable(name)
+    registry.resolve_extension_claims()
     return registry

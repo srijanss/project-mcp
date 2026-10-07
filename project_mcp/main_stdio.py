@@ -13,6 +13,7 @@ from mcp.types import CallToolResult, TextContent
 from project_mcp.config import ConfigError, load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index, get_index_status, refresh_index
+from project_mcp.plugins import registry as registry_module
 from project_mcp.tools.dependencies import normalize_dependency_name
 from project_mcp.tools.architecture import get_architecture_context, get_architecture_facts
 from project_mcp.tools.legacy import get_legacy_hotspots, get_legacy_signals
@@ -186,6 +187,7 @@ def _guard_tools(server: MCPServer) -> None:
 
 def build_server(project_root: Path) -> MCPServer:
     config = load_config(project_root)
+    registry_module.configured_registry(config)  # reject invalid plugin selections now
     server = MCPServer("project-mcp")
     _guard_tools(server)
 

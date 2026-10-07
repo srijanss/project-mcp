@@ -666,3 +666,15 @@ def test_get_dependency_version_matches_non_python_names_exactly(tmp_path):
 
     assert json.loads(loose.content[0].text) == {"status": "not_found"}
     assert json.loads(exact.content[0].text)["ecosystem"] == "npm"
+
+
+def test_build_server_rejects_an_invalid_plugin_selection_at_startup(tmp_path, monkeypatch):
+    from project_mcp.plugins import registry as registry_module
+
+    def conflicting(config):
+        raise ConfigError("plugins python and snake both claim .py")
+
+    monkeypatch.setattr(registry_module, "configured_registry", conflicting)
+
+    with pytest.raises(ConfigError, match="both claim .py"):
+        build_server(tmp_path)
