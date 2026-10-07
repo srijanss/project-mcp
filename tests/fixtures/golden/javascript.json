@@ -1,0 +1,69 @@
+{
+  "dependencies": [],
+  "files": [
+    {
+      "file_kind": "source",
+      "language": "javascript",
+      "path": "app/widget.js"
+    }
+  ],
+  "relationships": [],
+  "symbols": [
+    {
+      "end_line": 15,
+      "kind": "module",
+      "language": "javascript",
+      "metadata": null,
+      "name": "app.widget",
+      "path": "app/widget.js",
+      "qualified_name": "app.widget",
+      "start_line": 1,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "class",
+      "language": "javascript",
+      "metadata": null,
+      "name": "Widget",
+      "path": "app/widget.js",
+      "qualified_name": "app.widget.Widget",
+      "start_line": 5,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "function",
+      "language": "javascript",
+      "metadata": null,
+      "name": "formatLabel",
+      "path": "app/widget.js",
+      "qualified_name": "app.widget.formatLabel",
+      "start_line": 1,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "method",
+      "language": "javascript",
+      "metadata": null,
+      "name": "constructor",
+      "path": "app/widget.js",
+      "qualified_name": "app.widget.Widget.constructor",
+      "start_line": 6,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "method",
+      "language": "javascript",
+      "metadata": null,
+      "name": "render",
+      "path": "app/widget.js",
+      "qualified_name": "app.widget.Widget.render",
+      "start_line": 10,
+      "visibility": "public"
+    }
+  ],
+  "tests": []
+}

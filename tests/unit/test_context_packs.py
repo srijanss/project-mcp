@@ -50,17 +50,28 @@ class TestSymbolContext:
         test_files = [t["test_file"] for t in context["related_tests"]]
         assert "tests/test_models.py" in test_files
 
-    def test_symbol_context_is_compact(self):
+    def test_symbol_context_is_compact(self, tmp_path):
         """Return only essential info, not entire files."""
-        project_root = Path(__file__).parent.parent.parent
+        body = "".join(f"    step_{i} = len('payload {i}')\n" for i in range(300))
+        source = f"def scan():\n{body}    return step_0\n"
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "core.py").write_text(source)
+        (tmp_path / "app" / "cli.py").write_text(
+            "from app.core import scan\n\n\ndef main():\n    return scan()\n"
+        )
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_core.py").write_text(
+            "from app.core import scan\n\n\ndef test_scan():\n    assert scan() == 9\n"
+        )
 
-        context = get_context_for_symbol(project_root, "project_mcp.indexer.run_scan")
+        context = get_context_for_symbol(tmp_path, "app.core.scan")
 
         # Should be a dict, not full source code
         assert isinstance(context, dict)
-        # Should not include raw source
+        assert context["symbol"]["qualified_name"] == "app.core.scan"
         context_str = str(context)
-        assert len(context_str) < 5000  # Much smaller than actual source files
+        assert "payload 150" not in context_str
+        assert len(context_str) < len(source)
 
     def test_symbol_context_handles_nonexistent_symbol(self):
         """Return not_found status for symbols that don't exist."""

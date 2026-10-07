@@ -658,3 +658,41 @@ def test_refresh_index_commits_once_for_multiple_changed_files(tmp_path):
         f"refresh_index committed {counting_conn.commit_count} times for 2 changed "
         "files, expected a single batched commit"
     )
+
+
+def test_refresh_index_replaces_tests_of_a_re_indexed_test_file(tmp_path):
+    project_root = _copy_fixture(tmp_path)
+    config = load_config(project_root)
+    conn = get_connection(project_root)
+    run_scan(conn, project_root, config)
+    tests_before = conn.execute("SELECT COUNT(*) FROM tests").fetchone()[0]
+
+    time.sleep(0.01)
+    test_file = project_root / "tests" / "test_models.py"
+    test_file.write_text(test_file.read_text() + "\n")
+    refresh_index(conn, project_root, config)
+
+    assert conn.execute("SELECT COUNT(*) FROM tests").fetchone()[0] == tests_before
+
+
+def test_refresh_index_drops_implements_edges_of_replaced_rust_symbols(tmp_path):
+    (tmp_path / "src").mkdir()
+    lib = tmp_path / "src" / "lib.rs"
+    lib.write_text(
+        "pub trait Describe {}\npub struct Widget;\nimpl Describe for Widget {}\n"
+    )
+    config = load_config(tmp_path)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, config)
+
+    time.sleep(0.01)
+    lib.write_text(lib.read_text() + "\n")
+    refresh_index(conn, tmp_path, config)
+
+    assert conn.execute(
+        """
+        SELECT COUNT(*) FROM relationships
+        WHERE relationship_type = 'implements'
+          AND source_entity_id NOT IN (SELECT id FROM symbols)
+        """
+    ).fetchone()[0] == 0

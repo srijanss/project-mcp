@@ -1,0 +1,178 @@
+{
+  "dependencies": [],
+  "files": [
+    {
+      "file_kind": "config",
+      "language": "ini",
+      "path": "setup.cfg"
+    },
+    {
+      "file_kind": "config",
+      "language": "toml",
+      "path": "pyproject.toml"
+    },
+    {
+      "file_kind": "docs",
+      "language": "markdown",
+      "path": "README.md"
+    },
+    {
+      "file_kind": "source",
+      "language": "python",
+      "path": "app/__init__.py"
+    },
+    {
+      "file_kind": "source",
+      "language": "python",
+      "path": "app/models.py"
+    },
+    {
+      "file_kind": "test",
+      "language": "python",
+      "path": "tests/test_models.py"
+    }
+  ],
+  "relationships": [
+    {
+      "confidence": "high",
+      "evidence": [
+        "direct_import"
+      ],
+      "relationship_type": "tests",
+      "source": {
+        "file": "tests/test_models.py"
+      },
+      "target": {
+        "file": "app/models.py"
+      }
+    },
+    {
+      "confidence": "high",
+      "evidence": null,
+      "relationship_type": "calls",
+      "source": {
+        "path": "tests/test_models.py",
+        "symbol": "tests.test_models.test_widget_has_name"
+      },
+      "target": {
+        "path": "app/models.py",
+        "symbol": "app.models.Widget"
+      }
+    },
+    {
+      "confidence": "high",
+      "evidence": null,
+      "relationship_type": "imports",
+      "source": {
+        "file": "tests/test_models.py"
+      },
+      "target": {
+        "file": "app/models.py"
+      }
+    },
+    {
+      "confidence": "high",
+      "evidence": null,
+      "relationship_type": "imports",
+      "source": {
+        "file": "tests/test_models.py"
+      },
+      "target": {
+        "path": "app/models.py",
+        "symbol": "app.models.Widget"
+      }
+    },
+    {
+      "confidence": "high",
+      "evidence": null,
+      "relationship_type": "references",
+      "source": {
+        "path": "tests/test_models.py",
+        "symbol": "tests.test_models.test_widget_has_name"
+      },
+      "target": {
+        "path": "app/models.py",
+        "symbol": "app.models.Widget"
+      }
+    }
+  ],
+  "symbols": [
+    {
+      "end_line": 3,
+      "kind": "class",
+      "language": "python",
+      "metadata": {
+        "bases": []
+      },
+      "name": "Widget",
+      "path": "app/models.py",
+      "qualified_name": "app.models.Widget",
+      "start_line": 1,
+      "visibility": "public"
+    },
+    {
+      "end_line": 3,
+      "kind": "method",
+      "language": "python",
+      "metadata": null,
+      "name": "__init__",
+      "path": "app/models.py",
+      "qualified_name": "app.models.Widget.__init__",
+      "start_line": 2,
+      "visibility": "private"
+    },
+    {
+      "end_line": 5,
+      "kind": "function",
+      "language": "python",
+      "metadata": null,
+      "name": "test_widget_has_name",
+      "path": "tests/test_models.py",
+      "qualified_name": "tests.test_models.test_widget_has_name",
+      "start_line": 4,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "module",
+      "language": "python",
+      "metadata": null,
+      "name": "app.__init__",
+      "path": "app/__init__.py",
+      "qualified_name": "app.__init__",
+      "start_line": 1,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "module",
+      "language": "python",
+      "metadata": null,
+      "name": "app.models",
+      "path": "app/models.py",
+      "qualified_name": "app.models",
+      "start_line": 1,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "module",
+      "language": "python",
+      "metadata": null,
+      "name": "tests.test_models",
+      "path": "tests/test_models.py",
+      "qualified_name": "tests.test_models",
+      "start_line": 1,
+      "visibility": "public"
+    }
+  ],
+  "tests": [
+    {
+      "framework": "pytest",
+      "metadata": null,
+      "path": "tests/test_models.py",
+      "symbol": null,
+      "test_kind": "test_function"
+    }
+  ]
+}

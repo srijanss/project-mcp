@@ -1,0 +1,114 @@
+{
+  "dependencies": [
+    {
+      "declared_version": null,
+      "ecosystem": "rust",
+      "metadata": null,
+      "name": "serde",
+      "resolved_version": "1.0.197",
+      "scope": null,
+      "source_file": null
+    }
+  ],
+  "files": [
+    {
+      "file_kind": "config",
+      "language": "toml",
+      "path": "Cargo.toml"
+    },
+    {
+      "file_kind": "source",
+      "language": "rust",
+      "path": "src/lib.rs"
+    },
+    {
+      "file_kind": "source",
+      "language": null,
+      "path": "Cargo.lock"
+    }
+  ],
+  "relationships": [
+    {
+      "confidence": "high",
+      "evidence": null,
+      "relationship_type": "implements",
+      "source": {
+        "path": "src/lib.rs",
+        "symbol": "src.lib.Widget"
+      },
+      "target": {
+        "path": "src/lib.rs",
+        "symbol": "src.lib.Describe"
+      }
+    }
+  ],
+  "symbols": [
+    {
+      "end_line": 21,
+      "kind": "module",
+      "language": "rust",
+      "metadata": null,
+      "name": "src.lib",
+      "path": "src/lib.rs",
+      "qualified_name": "src.lib",
+      "start_line": 1,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "function",
+      "language": "rust",
+      "metadata": null,
+      "name": "describe",
+      "path": "src/lib.rs",
+      "qualified_name": "src.lib.describe",
+      "start_line": 12,
+      "visibility": "private"
+    },
+    {
+      "end_line": null,
+      "kind": "function",
+      "language": "rust",
+      "metadata": null,
+      "name": "describe",
+      "path": "src/lib.rs",
+      "qualified_name": "src.lib.describe",
+      "start_line": 8,
+      "visibility": "private"
+    },
+    {
+      "end_line": null,
+      "kind": "function",
+      "language": "rust",
+      "metadata": null,
+      "name": "fmt",
+      "path": "src/lib.rs",
+      "qualified_name": "src.lib.fmt",
+      "start_line": 18,
+      "visibility": "private"
+    },
+    {
+      "end_line": null,
+      "kind": "struct",
+      "language": "rust",
+      "metadata": null,
+      "name": "Widget",
+      "path": "src/lib.rs",
+      "qualified_name": "src.lib.Widget",
+      "start_line": 3,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "trait",
+      "language": "rust",
+      "metadata": null,
+      "name": "Describe",
+      "path": "src/lib.rs",
+      "qualified_name": "src.lib.Describe",
+      "start_line": 7,
+      "visibility": "public"
+    }
+  ],
+  "tests": []
+}

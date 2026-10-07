@@ -155,15 +155,8 @@ def remove_file(conn: sqlite3.Connection, project_id: int, path: str) -> None:
     conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
 
 
-def index_python_symbols(
-    conn: sqlite3.Connection,
-    file_id: int,
-    path: str,
-    source: str,
-    symbols: list[dict] | None = None,
-) -> list[dict]:
-    if symbols is None:
-        symbols = parse_python_source(path, source)
+def _clear_file_symbols(conn: sqlite3.Connection, file_id: int) -> None:
+    """Delete a file's symbols and every symbol edge touching them."""
     conn.execute(
         """
         DELETE FROM relationships
@@ -175,6 +168,18 @@ def index_python_symbols(
         (file_id, file_id),
     )
     conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
+
+
+def index_python_symbols(
+    conn: sqlite3.Connection,
+    file_id: int,
+    path: str,
+    source: str,
+    symbols: list[dict] | None = None,
+) -> list[dict]:
+    if symbols is None:
+        symbols = parse_python_source(path, source)
+    _clear_file_symbols(conn, file_id)
 
     if len(symbols) == 1 and symbols[0].get("kind") == "parse_error":
         return symbols
@@ -289,7 +294,7 @@ def index_rust_symbols(
     conn: sqlite3.Connection, file_id: int, path: str, source: str
 ) -> list[dict]:
     symbols = parse_rust_source(path, source)
-    conn.execute("DELETE FROM symbols WHERE file_id = ?", (file_id,))
+    _clear_file_symbols(conn, file_id)
 
     for symbol in symbols:
         conn.execute(
@@ -1842,6 +1847,7 @@ def index_python_tests(
     conn: sqlite3.Connection, file_id: int, path: str, source: str
 ) -> None:
     """Index pytest tests found in a Python file."""
+    conn.execute("DELETE FROM tests WHERE file_id = ?", (file_id,))
     tests = discover_tests(path, source)
     for test in tests:
         conn.execute(

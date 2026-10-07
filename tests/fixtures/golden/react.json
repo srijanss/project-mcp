@@ -1,0 +1,36 @@
+{
+  "dependencies": [],
+  "files": [
+    {
+      "file_kind": "source",
+      "language": "typescript",
+      "path": "src/Widget.tsx"
+    }
+  ],
+  "relationships": [],
+  "symbols": [
+    {
+      "end_line": 7,
+      "kind": "module",
+      "language": "typescript",
+      "metadata": null,
+      "name": "src.Widget",
+      "path": "src/Widget.tsx",
+      "qualified_name": "src.Widget",
+      "start_line": 1,
+      "visibility": "public"
+    },
+    {
+      "end_line": null,
+      "kind": "component",
+      "language": "typescript",
+      "metadata": null,
+      "name": "Widget",
+      "path": "src/Widget.tsx",
+      "qualified_name": "src.Widget.Widget",
+      "start_line": 3,
+      "visibility": "public"
+    }
+  ],
+  "tests": []
+}
