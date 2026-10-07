@@ -1,4 +1,6 @@
+import hashlib
 import importlib
+import json
 from importlib.metadata import entry_points
 from pathlib import Path
 
@@ -20,6 +22,7 @@ class PluginRegistry:
         self._claimants: dict[str, list[PluginDescriptor]] = {}
         self.failed_plugins: dict[str, str] = {}
         self.disabled_plugins: set[str] = set()
+        self.plugin_settings: dict[str, dict] = {}
         for descriptor in FORMAT_DESCRIPTORS:
             self.register(descriptor)
 
@@ -60,6 +63,21 @@ class PluginRegistry:
         if descriptor is None or not self._active(descriptor):
             return None
         return self._load(descriptor)
+
+    def fingerprint(self, language: str | None) -> str | None:
+        """`name@version#confighash` of the active plugin analyzing `language`,
+        else None.
+
+        A file indexed under a different fingerprint needs re-indexing.
+        """
+        descriptor = self._descriptor_by_language.get(language)
+        if descriptor is None or not self._active(descriptor):
+            return None
+        settings = json.dumps(
+            self.plugin_settings.get(descriptor.name, {}), sort_keys=True, default=str
+        )
+        config_hash = hashlib.sha256(settings.encode()).hexdigest()[:12]
+        return f"{descriptor.name}@{descriptor.version}#{config_hash}"
 
     def analyzed(self, language: str | None) -> bool:
         """Whether an enabled, loadable plugin analyzes `language` files."""
@@ -165,9 +183,11 @@ def configured_registry(config) -> PluginRegistry:
     """The built-in plugins, with those the project's config leaves out disabled.
 
     Without `plugins_enabled` every plugin is enabled; `plugins_disabled`
-    then disables plugins by name.
+    then disables plugins by name. Each plugin's `[plugins.<name>]` settings
+    feed its fingerprint.
     """
     registry = builtin_registry()
+    registry.plugin_settings = dict(config.plugin_settings)
     for name in registry.plugin_names():
         left_out = config.plugins_enabled is not None and name not in config.plugins_enabled
         if left_out or name in config.plugins_disabled:

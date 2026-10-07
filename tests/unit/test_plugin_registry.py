@@ -311,3 +311,35 @@ def test_an_entry_point_that_fails_to_load_is_failed_not_raised(monkeypatch):
 
     assert registry.failed_plugins == {"toy": "failed to load: no module named toy_plugin"}
     assert registry.analyzed("python")
+
+
+def test_a_language_fingerprint_names_its_active_plugin_and_version():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="toy",
+            version="0.2.0",
+            api_version=1,
+            extensions={".toy": "toy"},
+            analyzer="project_mcp.plugins.python.analyzer:PythonAnalyzer",
+        )
+    )
+
+    fingerprint = registry.fingerprint("toy")
+    registry.disable("toy")
+
+    assert fingerprint.startswith("toy@0.2.0")
+    assert registry.fingerprint("toy") is None
+    assert registry.fingerprint(None) is None
+
+
+def test_a_language_fingerprint_changes_with_its_plugins_config(tmp_path):
+    from project_mcp.config import load_config
+    from project_mcp.plugins.registry import configured_registry
+
+    def python_fingerprint(settings):
+        (tmp_path / "mcpctl.toml").write_text(f"[plugins.python]\n{settings}\n")
+        return configured_registry(load_config(tmp_path)).fingerprint("python")
+
+    assert python_fingerprint("strict = true") == python_fingerprint("strict = true")
+    assert python_fingerprint("strict = true") != python_fingerprint("strict = false")

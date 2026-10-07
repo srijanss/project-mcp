@@ -148,3 +148,13 @@ def test_load_config_enables_every_plugin_without_a_plugins_section(tmp_path):
     config = load_config(tmp_path)
 
     assert (config.plugins_enabled, config.plugins_disabled) == (None, [])
+
+
+def test_load_config_reads_each_plugins_settings_table_from_mcpctl_toml(tmp_path):
+    (tmp_path / "mcpctl.toml").write_text(
+        '[plugins]\ndisabled = ["django"]\n\n[plugins.python]\nstrict = true\n'
+    )
+
+    config = load_config(tmp_path)
+
+    assert config.plugin_settings == {"python": {"strict": True}}

@@ -529,9 +529,10 @@ def run_scan(
     project_id = begin_index(conn, project_root)
 
     existing_rows = {
-        row[0]: (row[1], row[2], row[3])
+        row[0]: (row[1], row[2], row[3], row[4])
         for row in conn.execute(
-            "SELECT path, id, size, mtime_ns FROM files WHERE project_id = ?",
+            "SELECT path, id, size, mtime_ns, parser_version FROM files"
+            " WHERE project_id = ?",
             (project_id,),
         ).fetchall()
     }
@@ -544,9 +545,11 @@ def run_scan(
     for record in discovered:
         discovered_paths.add(record["path"])
         previous = existing_rows.get(record["path"])
+        fingerprint = registry.fingerprint(record["language"])
         if previous is not None and previous[1:] == (
             record["size"],
             record["mtime_ns"],
+            fingerprint,
         ):
             continue
         file_id = upsert_file(
@@ -557,6 +560,7 @@ def run_scan(
             file_kind=record["file_kind"],
             size=record["size"],
             mtime_ns=record["mtime_ns"],
+            parser_version=fingerprint,
         )
         path_to_file_id[record["path"]] = file_id
 
@@ -568,6 +572,8 @@ def run_scan(
             if changed_file is not None:
                 changed_plugin_files[record["path"]] = changed_file
                 changed_languages.add(record["language"])
+        else:
+            clear_file_symbols(conn, file_id)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -619,18 +625,26 @@ def run_scan(
 
 
 def _detect_stale_index(
-    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+    conn: sqlite3.Connection,
+    project_root: Path,
+    config: ProjectConfig,
+    registry: PluginRegistry | None = None,
 ) -> bool:
-    """Check if any indexed files have changed or been deleted on disk."""
+    """Check if any indexed files changed on disk, were deleted, or now
+    fall to a plugin with a different fingerprint."""
     indexed_files = {
-        row[0]: (row[1], row[2])
-        for row in conn.execute("SELECT path, size, mtime_ns FROM files").fetchall()
+        row[0]: (row[1], row[2], row[3])
+        for row in conn.execute(
+            "SELECT path, size, mtime_ns, parser_version FROM files"
+        ).fetchall()
     }
 
     if not indexed_files:
         return False
 
-    discovered = discover_files(project_root, config)
+    if registry is None:
+        registry = configured_registry(config)
+    discovered = discover_files(project_root, config, registry)
     discovered_by_path = {record["path"]: record for record in discovered}
     discovered_paths = set(discovered_by_path.keys())
 
@@ -639,11 +653,15 @@ def _detect_stale_index(
         return True
 
     # Check for modified files
-    for path, (size, mtime_ns) in indexed_files.items():
+    for path, indexed in indexed_files.items():
         if path not in discovered_by_path:
             return True
         record = discovered_by_path[path]
-        if (size, mtime_ns) != (record["size"], record["mtime_ns"]):
+        if indexed != (
+            record["size"],
+            record["mtime_ns"],
+            registry.fingerprint(record["language"]),
+        ):
             return True
 
     return False
@@ -653,6 +671,7 @@ def get_index_status(
     conn: sqlite3.Connection,
     project_root: Path | None = None,
     config: ProjectConfig | None = None,
+    registry: PluginRegistry | None = None,
 ) -> dict:
     row = conn.execute(
         "SELECT value FROM index_metadata WHERE key = 'index_status'"
@@ -660,7 +679,7 @@ def get_index_status(
     status = row[0] if row else "never_indexed"
 
     if project_root and config and status in ("fresh", "indexing"):
-        if _detect_stale_index(conn, project_root, config):
+        if _detect_stale_index(conn, project_root, config, registry):
             status = "stale"
 
     last_refresh = conn.execute(
@@ -700,9 +719,10 @@ def refresh_index(
     begin_index(conn, project_root)
 
     existing_rows = {
-        row[0]: (row[1], row[2], row[3])
+        row[0]: (row[1], row[2], row[3], row[4])
         for row in conn.execute(
-            "SELECT path, id, size, mtime_ns FROM files WHERE project_id = ?",
+            "SELECT path, id, size, mtime_ns, parser_version FROM files"
+            " WHERE project_id = ?",
             (project_id,),
         ).fetchall()
     }
@@ -716,9 +736,11 @@ def refresh_index(
     for record in discovered:
         discovered_paths.add(record["path"])
         previous = existing_rows.get(record["path"])
+        fingerprint = registry.fingerprint(record["language"])
         if previous is not None and previous[1:] == (
             record["size"],
             record["mtime_ns"],
+            fingerprint,
         ):
             continue
         changed_paths.add(record["path"])
@@ -730,6 +752,7 @@ def refresh_index(
             file_kind=record["file_kind"],
             size=record["size"],
             mtime_ns=record["mtime_ns"],
+            parser_version=fingerprint,
         )
         path_to_file_id[record["path"]] = file_id
 
@@ -741,6 +764,8 @@ def refresh_index(
             if changed_file is not None:
                 changed_plugin_files[record["path"]] = changed_file
                 changed_languages.add(record["language"])
+        else:
+            clear_file_symbols(conn, file_id)
 
     existing_paths = set(existing_rows.keys())
     for stale_path in existing_paths - discovered_paths:
@@ -806,7 +831,7 @@ def ensure_fresh_index(
     Never indexed -> full scan. Stale (files changed/added/removed on disk
     since the last index) -> incremental refresh. Already fresh -> no-op.
     """
-    status = get_index_status(conn, project_root, config)["status"]
+    status = get_index_status(conn, project_root, config, registry)["status"]
     if status == "never_indexed":
         run_scan(conn, project_root, config, registry)
     elif status == "stale":

@@ -56,10 +56,12 @@ class ProjectConfig:
     max_file_bytes: int = 1024 * 1024
     plugins_enabled: list[str] | None = None
     plugins_disabled: list[str] = field(default_factory=list)
+    plugin_settings: dict[str, dict] = field(default_factory=dict)
 
 
 def _plugin_selection(project_root: Path) -> dict:
-    """`[plugins] enabled / disabled` from the project's mcpctl.toml.
+    """`[plugins] enabled / disabled` and each plugin's `[plugins.<name>]`
+    settings table from the project's mcpctl.toml.
 
     No `enabled` list means every installed plugin is enabled.
     """
@@ -80,6 +82,9 @@ def _plugin_selection(project_root: Path) -> dict:
                 f"invalid config: plugins.{key} must be a list of plugin names, got {names!r}"
             )
         selection[f"plugins_{key}"] = names
+    settings = {name: table for name, table in plugins.items() if isinstance(table, dict)}
+    if settings:
+        selection["plugin_settings"] = settings
     return selection
 
 

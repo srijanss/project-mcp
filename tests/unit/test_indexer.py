@@ -3602,3 +3602,52 @@ def test_a_file_its_plugin_fails_on_keeps_no_symbols_from_an_earlier_analysis(tm
     assert conn.execute(
         "SELECT analysis_status, analysis_error FROM files WHERE path = 'a.toy'"
     ).fetchone() == ("file_failed", "RuntimeError: boom")
+
+
+def _python_registry(version):
+    from dataclasses import replace
+
+    from project_mcp.plugins.python.descriptor import DESCRIPTOR
+    from project_mcp.plugins.registry import PluginRegistry
+
+    registry = PluginRegistry()
+    registry.register(replace(DESCRIPTOR, version=version))
+    return registry
+
+
+def test_scan_reindexes_an_unchanged_file_whose_plugin_fingerprint_changed(tmp_path):
+    (tmp_path / "app.py").write_text("def run():\n    pass\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config, registry=_python_registry("1.0.0"))
+
+    run_scan(conn, tmp_path, config, registry=_python_registry("2.0.0"))
+
+    assert conn.execute(
+        "SELECT parser_version FROM files WHERE path = 'app.py'"
+    ).fetchone()[0].startswith("python@2.0.0#")
+
+
+def test_index_is_stale_when_a_plugin_fingerprint_changed(tmp_path):
+    (tmp_path / "app.py").write_text("def run():\n    pass\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config, registry=_python_registry("1.0.0"))
+
+    unchanged = get_index_status(conn, tmp_path, config, _python_registry("1.0.0"))
+    bumped = get_index_status(conn, tmp_path, config, _python_registry("2.0.0"))
+
+    assert (unchanged["status"], bumped["status"]) == ("fresh", "stale")
+
+
+def test_disabling_a_plugin_drops_the_symbols_it_indexed(tmp_path):
+    (tmp_path / "app.py").write_text("def run():\n    pass\n")
+    conn = get_connection(tmp_path)
+    config = load_config(tmp_path)
+    run_scan(conn, tmp_path, config, registry=_python_registry("1.0.0"))
+    registry = _python_registry("1.0.0")
+    registry.disable("python")
+
+    run_scan(conn, tmp_path, config, registry=registry)
+
+    assert conn.execute("SELECT COUNT(*) FROM symbols").fetchone()[0] == 0
