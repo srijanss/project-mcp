@@ -194,3 +194,24 @@ def test_discover_files_handles_symlink_cycle_without_hanging(tmp_path):
     records = discover_files(project_root, config)
 
     assert isinstance(records, list)
+
+
+def test_discover_files_labels_languages_from_the_given_registry(tmp_path):
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import PluginRegistry
+
+    (tmp_path / "main.go").write_text("package main\n")
+    (tmp_path / "app.py").write_text("VALUE = 1\n")
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="go", version="0.1.0", api_version=1, extensions={".go": "go"}
+        )
+    )
+
+    records = discover_files(tmp_path, load_config(tmp_path), registry=registry)
+
+    assert {record["path"]: record["language"] for record in records} == {
+        "app.py": None,
+        "main.go": "go",
+    }

@@ -14,6 +14,7 @@ from project_mcp.analyzers.generic.architecture import (
     extract_architecture_facts,
 )
 from project_mcp.analyzers.generic.filesystem import discover_files
+from project_mcp.plugins.registry import PluginRegistry
 from project_mcp.analyzers.generic.git import collect_git_file_stats
 from project_mcp.analyzers.generic.legacy import (
     detect_churn_signals,
@@ -2122,7 +2123,10 @@ def index_legacy_signals(
 
 
 def run_scan(
-    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+    conn: sqlite3.Connection,
+    project_root: Path,
+    config: ProjectConfig,
+    registry: PluginRegistry | None = None,
 ) -> int:
     project_id = begin_index(conn, project_root)
 
@@ -2135,7 +2139,7 @@ def run_scan(
     }
     path_to_file_id = {path: values[0] for path, values in existing_rows.items()}
 
-    discovered = discover_files(project_root, config)
+    discovered = discover_files(project_root, config, registry)
     discovered_paths = set()
     changed_python_files = {}
     changed_js_files = {}
@@ -2423,14 +2427,17 @@ def get_index_status(
 
 
 def refresh_index(
-    conn: sqlite3.Connection, project_root: Path, config: ProjectConfig
+    conn: sqlite3.Connection,
+    project_root: Path,
+    config: ProjectConfig,
+    registry: PluginRegistry | None = None,
 ) -> None:
     """Incrementally refresh index, only re-analyzing changed files."""
     project_row = conn.execute(
         "SELECT id FROM projects WHERE root_path = ?", (str(project_root),)
     ).fetchone()
     if not project_row:
-        run_scan(conn, project_root, config)
+        run_scan(conn, project_root, config, registry)
         return
 
     project_id = project_row[0]
@@ -2445,7 +2452,7 @@ def refresh_index(
     }
     path_to_file_id = {path: values[0] for path, values in existing_rows.items()}
 
-    discovered = discover_files(project_root, config)
+    discovered = discover_files(project_root, config, registry)
     discovered_paths = set()
     changed_python_files = {}
     changed_js_files = {}

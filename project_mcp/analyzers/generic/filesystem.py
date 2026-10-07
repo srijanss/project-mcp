@@ -3,15 +3,12 @@ from pathlib import Path
 
 from project_mcp.config import ProjectConfig
 from project_mcp.ignore import should_exclude
+from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 
 ALWAYS_EXCLUDED_DIRS = {".project-mcp"}
 
+# Config and docs formats. Programming languages come from plugin descriptors.
 LANGUAGE_BY_EXTENSION = {
-    ".py": "python",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".ts": "typescript",
-    ".tsx": "typescript",
     ".toml": "toml",
     ".cfg": "ini",
     ".ini": "ini",
@@ -20,7 +17,6 @@ LANGUAGE_BY_EXTENSION = {
     ".json": "json",
     ".md": "markdown",
     ".rst": "restructuredtext",
-    ".rs": "rust",
 }
 
 JS_LANGUAGES = {"javascript", "typescript"}
@@ -43,9 +39,11 @@ def _is_js_test_path(path: Path) -> bool:
     return stem.endswith(".test") or stem.endswith(".spec")
 
 
-def classify_file(path: Path) -> dict:
+def classify_file(path: Path, registry: PluginRegistry | None = None) -> dict:
     path = Path(path)
-    language = LANGUAGE_BY_EXTENSION.get(path.suffix)
+    if registry is None:
+        registry = builtin_registry()
+    language = registry.language_for(path) or LANGUAGE_BY_EXTENSION.get(path.suffix)
 
     if language == "python" and _is_test_path(path):
         file_kind = "test"
@@ -70,8 +68,12 @@ def _is_excluded_dir(dir_path: Path, project_root: Path, config: ProjectConfig) 
     return should_exclude(relative_dir, config)
 
 
-def discover_files(project_root: Path, config: ProjectConfig) -> list[dict]:
+def discover_files(
+    project_root: Path, config: ProjectConfig, registry: PluginRegistry | None = None
+) -> list[dict]:
     project_root = Path(project_root)
+    if registry is None:
+        registry = builtin_registry()
     records = []
 
     for dirpath, dirnames, filenames in os.walk(project_root):
@@ -91,7 +93,7 @@ def discover_files(project_root: Path, config: ProjectConfig) -> list[dict]:
             if should_exclude(relative_path, config):
                 continue
 
-            classification = classify_file(relative_path)
+            classification = classify_file(relative_path, registry)
             stat = path.stat()
             records.append(
                 {

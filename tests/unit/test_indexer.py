@@ -3404,3 +3404,27 @@ def test_an_index_written_before_fixture_mock_links_existed_is_rebuilt_with_them
     ensure_fresh_index(conn, tmp_path, config)
 
     assert "tests.test_quiet.test_quiet" in [edge[0] for edge in _mock_edges(conn)]
+
+
+def test_refresh_index_labels_new_files_with_the_given_registry(tmp_path):
+    from project_mcp.plugins.descriptor import PluginDescriptor
+    from project_mcp.plugins.registry import builtin_registry
+
+    (tmp_path / "app.py").write_text("VALUE = 1\n")
+    registry = builtin_registry()
+    registry.register(
+        PluginDescriptor(
+            name="go", version="0.1.0", api_version=1, extensions={".go": "go"}
+        )
+    )
+    config = load_config(tmp_path)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, config, registry=registry)
+
+    (tmp_path / "main.go").write_text("package main\n")
+    refresh_index(conn, tmp_path, config, registry=registry)
+
+    assert dict(conn.execute("SELECT path, language FROM files")) == {
+        "app.py": "python",
+        "main.go": "go",
+    }
