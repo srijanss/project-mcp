@@ -1,5 +1,5 @@
 name = "project-mcp"
-version = "0.2.14"
+version = "0.2.15"
 [runtime]
 type = "python"
 python = ">=3.12"
@@ -45,8 +45,10 @@ to = ".agents/hooks/project-mcp-reminder.sh"
 from = ".agents/hooks/project-mcp-mark-consulted.sh"
 to = ".agents/hooks/project-mcp-mark-consulted.sh"
 
-[[scaffold.hints]]
-message = "Optional: create .project-mcp/config.toml to set source_roots and test_roots for this project (defaults are used without it)."
+[[scaffold.files]]
+from = ".project-mcp/config.toml.example"
+to = ".project-mcp/config.toml"
+
 
 [[scaffold.hints]]
 message = "Add .project-mcp/index.db and .project-mcp/state.json to .gitignore (generated index state)."
