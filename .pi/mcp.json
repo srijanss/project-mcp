@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "outside-in-tdd": {
+      "command": "/usr/local/bin/mcpctl",
+      "args": ["run", "outside-in-tdd-mcp"]
+    },
+    "project-mcp": {
+      "command": "uv",
+      "args": ["run", "--quiet", "project-mcp"]
+    }
+  }
+}
