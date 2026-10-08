@@ -56,3 +56,27 @@ def test_commented_out_routes_are_ignored():
     )
 
     assert route_declarations(source) == [("/new", "New", 3)]
+
+
+def test_config_objects_may_have_other_keys_between_path_and_element():
+    source = (
+        "export const router = createBrowserRouter([\n"
+        "  { path: '/users', loader: loadUsers, element: <Users /> },\n"
+        "  { element: <Shell />, errorElement: <Oops />, path: '/shell' },\n"
+        "]);\n"
+    )
+
+    assert route_declarations(source) == [("/users", "Users", 2), ("/shell", "Shell", 3)]
+
+
+def test_a_route_object_without_a_path_does_not_borrow_its_children_paths():
+    source = (
+        "export const router = createBrowserRouter([\n"
+        "  {\n"
+        "    element: <Layout />,\n"
+        "    children: [{ path: 'a', element: <A /> }],\n"
+        "  },\n"
+        "]);\n"
+    )
+
+    assert route_declarations(source) == [("a", "A", 4)]

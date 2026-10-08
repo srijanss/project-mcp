@@ -11,11 +11,8 @@ _ELEMENT_ATTRIBUTE = re.compile(r"(?<![\w$])element\s*=\s*\{\s*<([A-Z][\w$]*)")
 _ROUTER_CALL = re.compile(
     r"\b(?:create(?:Browser|Hash|Memory)Router|useRoutes|createRoutesFromElements)\b"
 )
-_PATH_THEN_ELEMENT = re.compile(
-    r"""(?<![\w$])path\s*:\s*["']([^"']*)["']\s*,\s*element\s*:\s*<([A-Z][\w$]*)"""
-)
 _ELEMENT_KEY = re.compile(r"(?<![\w$])element\s*:\s*<([A-Z][\w$]*)")
-_THEN_PATH = re.compile(r"""\s*,\s*path\s*:\s*["']([^"']*)["']""")
+_PATH_KEY = re.compile(r"""(?<![\w$])path\s*:\s*["']([^"']*)["']""")
 
 
 def _skip_quoted(code: str, index: int) -> int:
@@ -66,14 +63,42 @@ def _jsx_routes(code: str) -> list[tuple[int, str, str]]:
     return routes
 
 
+def _braces(code: str) -> list[tuple[int, int]]:
+    """The (open, close) index of every `{...}` pair in `code`."""
+    pairs = []
+    opened = []
+    index = 0
+    while index < len(code):
+        char = code[index]
+        if char in "\"'`":
+            index = _skip_quoted(code, index)
+            continue
+        if char == "{":
+            opened.append(index)
+        elif char == "}" and opened:
+            pairs.append((opened.pop(), index))
+        index += 1
+    return pairs
+
+
+def _object_around(braces: list[tuple[int, int]], index: int) -> int | None:
+    """The opening index of the innermost `{...}` around `index`."""
+    return max((start for start, end in braces if start < index < end), default=None)
+
+
 def _config_routes(code: str) -> list[tuple[int, str, str]]:
     if not _ROUTER_CALL.search(code):
         return []
-    routes = [(m.start(), m[1], m[2]) for m in _PATH_THEN_ELEMENT.finditer(code)]
+    braces = _braces(code)
+    paths: dict[int | None, re.Match] = {}
+    for path in _PATH_KEY.finditer(code):
+        paths.setdefault(_object_around(braces, path.start()), path)
+    routes = []
     for element in _ELEMENT_KEY.finditer(code):
-        path = _THEN_PATH.match(code, _tag_end(code, element.end()) + 1)
-        if path is not None:
-            routes.append((element.start(), path[1], element[1]))
+        owner = _object_around(braces, element.start())
+        path = paths.get(owner)
+        if owner is not None and path is not None:
+            routes.append((min(path.start(), element.start()), path[1], element[1]))
     return routes
 
 
