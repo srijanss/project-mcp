@@ -158,3 +158,27 @@ class Job {
         ("jobs.run", "jobs.format", "calls"),
         ("jobs.Job.start", "jobs.Job.step", "calls"),
     ]
+
+
+@pytest.mark.parametrize(
+    "grammar, body",
+    [
+        ("javascript", "function run(helper) { helper(); }"),
+        ("javascript", "function run({ helper }) { helper(); }"),
+        ("javascript", "function run([first, ...helper]) { helper(); }"),
+        ("javascript", "function run(helper = 1) { helper(); }"),
+        ("javascript", "const run = helper => helper();"),
+        ("javascript", "function run() { let helper; helper(); }"),
+        ("javascript", "function run() { const { a: helper } = deps; helper(); }"),
+        ("javascript", "function run() { try {} catch (helper) { helper(); } }"),
+        ("javascript", "function run(helper) { [1].map(() => helper()); }"),
+        ("typescript", "function run(helper: () => void) { helper(); }"),
+        ("typescript", "function run(helper?: () => void) { helper(); }"),
+        ("typescript", "class Job { constructor(private helper: () => void) { helper(); } }"),
+    ],
+)
+def test_parse_js_calls_leaves_out_calls_through_local_bindings(grammar, body):
+    source = f"function helper() {{}}\n{body}\n"
+    symbols = parse_js_tree("jobs.js", source, grammar)
+
+    assert parse_js_calls("jobs.js", source, grammar, symbols) == []
