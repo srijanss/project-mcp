@@ -51,6 +51,13 @@ def _sorted(rows: list[dict]) -> list[dict]:
     return sorted(rows, key=lambda row: json.dumps(row, sort_keys=True))
 
 
+def golden_config(project_root: Path):
+    """The fixture's config with framework plugins off, so a snapshot is the generic model."""
+    config = load_config(project_root)
+    config.plugins_disabled = sorted({*config.plugins_disabled, "react"})
+    return config
+
+
 def copy_fixture(name: str, destination: Path) -> Path:
     project_root = destination / FIXTURES[name].name
     shutil.copytree(FIXTURES[name], project_root)
@@ -73,7 +80,7 @@ def write_snapshot(name: str) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         project_root = copy_fixture(name, Path(tmp))
         conn = get_connection(project_root)
-        run_scan(conn, project_root, load_config(project_root))
+        run_scan(conn, project_root, golden_config(project_root))
         snapshot = dump_snapshot(conn)
         conn.close()
     (_SNAPSHOTS_ROOT / f"{name}.json").write_text(

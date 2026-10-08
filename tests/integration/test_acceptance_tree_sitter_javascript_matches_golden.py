@@ -1,10 +1,15 @@
 import pytest
 
-from project_mcp.config import load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import refresh_index, run_scan
 from project_mcp.plugins.javascript import analyzer
-from tests.golden import copy_fixture, dump_snapshot, load_snapshot, touch_indexed_files
+from tests.golden import (
+    copy_fixture,
+    dump_snapshot,
+    golden_config,
+    load_snapshot,
+    touch_indexed_files,
+)
 
 
 @pytest.fixture
@@ -21,7 +26,7 @@ def without_regex_parser(monkeypatch):
 def test_tree_sitter_scan_and_refresh_match_golden_snapshots(name, tmp_path, without_regex_parser):
     project_root = copy_fixture(name, tmp_path)
     conn = get_connection(project_root)
-    config = load_config(project_root)
+    config = golden_config(project_root)
 
     run_scan(conn, project_root, config)
     assert dump_snapshot(conn) == load_snapshot(name)

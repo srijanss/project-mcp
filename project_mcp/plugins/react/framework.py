@@ -47,3 +47,21 @@ class ReactFramework:
         """True when package.json declares `react` or a JS/TS file imports it."""
         root = context.project_root
         return _declares_react(root) or _imports_react(root)
+
+    def enrich(self, context) -> None:
+        self._tag_components(context)
+
+    def _tag_components(self, context) -> None:
+        """Tag the components the javascript plugin found in .js/.ts files as react components."""
+        for path, file_id in context.path_to_file_id.items():
+            if not path.endswith(_EXTENSIONS):
+                continue
+            context.conn.execute(
+                """
+                UPDATE symbols SET metadata_json = json_set(
+                    COALESCE(metadata_json, '{}'), '$.framework_kind', 'react_component'
+                )
+                WHERE file_id = ? AND kind = 'component'
+                """,
+                (file_id,),
+            )
