@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from project_mcp.analyzers.frameworks.django import (
+from project_mcp.plugins.django.metadata import (
     detect_django_apps,
     detect_django_models,
     detect_django_services,

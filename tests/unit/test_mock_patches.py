@@ -1,4 +1,4 @@
-from project_mcp.analyzers.python.mock_patches import (
+from project_mcp.plugins.python.mock_patches import (
     extract_fixture_patches,
     extract_mock_patches,
 )

@@ -1,9 +1,5 @@
 from pathlib import Path
 
-from project_mcp.analyzers.python.parser import (
-    _module_qualified_name,
-    analyze_python_source,
-)
 from project_mcp.plugins.analysis import FileAnalysis
 from project_mcp.plugins.python.dependencies import (
     declared_dependencies,
@@ -11,6 +7,10 @@ from project_mcp.plugins.python.dependencies import (
     normalize_dependency_name,
     python_dependency,
     resolved_versions,
+)
+from project_mcp.plugins.python.parser import (
+    _module_qualified_name,
+    analyze_python_source,
 )
 
 

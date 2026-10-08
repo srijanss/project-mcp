@@ -160,6 +160,11 @@ Deleting `.project-mcp/index.db` and rebuilding must not alter project behavior.
 
 ## Server repo layout (fixed — don't restructure)
 
+Since MVP 17, language- and framework-specific code lives only under
+`project_mcp/plugins/<name>/`; nothing outside `plugins/` may import it
+(enforced by `tests/integration/test_acceptance_core_imports_no_plugins.py`
+and `test_acceptance_plugin_code_in_plugin_packages.py`).
+
 ```text
 project-mcp/
   main_stdio.py
@@ -185,32 +190,30 @@ project-mcp/
       architecture.py
       context.py
 
-    analyzers/
+    analyzers/                 language-neutral analysis only (core)
       __init__.py
-      base.py
-      registry.py
 
       generic/
         __init__.py
         filesystem.py
+        git.py
+        architecture.py
+        legacy.py
 
-      python/
-        __init__.py
-        analyzer.py
+    plugins/                   every language/framework lives here (MVP 17)
+      __init__.py
+      descriptor.py            PluginDescriptor (data only)
+      analysis.py              FileAnalysis and hook contexts
+      registry.py              loads descriptors; imports plugins by name
+      formats.py               file-level descriptors (json, toml, ...)
 
-      javascript/
-        __init__.py
-        analyzer.py
-
-      rust/
-        __init__.py
-        analyzer.py
-
-      frameworks/
-        __init__.py
-        django.py
-        react.py
-        astro.py
+      python/                  descriptor, analyzer, parser, linking,
+                               pytest/mock test evidence, dependencies
+      javascript/              descriptor, analyzer, parser, dependencies
+      rust/                    descriptor, analyzer, parser, dependencies
+      django/                  framework: descriptor, framework, metadata, urls
+      react/                   framework (planned)
+      astro/                   language + routes (planned)
 
     git/
       __init__.py

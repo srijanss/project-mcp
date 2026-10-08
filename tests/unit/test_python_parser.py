@@ -1,4 +1,4 @@
-from project_mcp.analyzers.python.parser import (
+from project_mcp.plugins.python.parser import (
     analyze_python_source,
     extract_attribute_calls,
     extract_foreign_attribute_accesses,

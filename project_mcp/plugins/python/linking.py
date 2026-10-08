@@ -8,16 +8,16 @@ import posixpath
 import sqlite3
 from pathlib import Path
 
-from project_mcp.analyzers.python.mock_patches import (
+from project_mcp.plugins.python.analyzer import resolve_relative_imports
+from project_mcp.plugins.python.mock_patches import (
     extract_fixture_patches,
     extract_mock_patches,
 )
-from project_mcp.analyzers.python.parser import analyze_python_source
-from project_mcp.analyzers.python.pytest_analyzer import (
+from project_mcp.plugins.python.parser import analyze_python_source
+from project_mcp.plugins.python.pytest_analyzer import (
     build_test_relationships,
     discover_tests,
 )
-from project_mcp.plugins.python.analyzer import resolve_relative_imports
 
 
 def _read_source(path: Path) -> str:

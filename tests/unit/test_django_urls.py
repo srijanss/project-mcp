@@ -1,4 +1,4 @@
-from project_mcp.analyzers.frameworks.django_urls import (
+from project_mcp.plugins.django.urls import (
     extract_url_patterns,
     extract_url_reverses,
 )

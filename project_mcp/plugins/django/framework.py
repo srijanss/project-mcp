@@ -7,8 +7,8 @@ import posixpath
 import sqlite3
 from pathlib import Path
 
-from project_mcp.analyzers.frameworks.django import enrich_django_metadata
-from project_mcp.analyzers.frameworks.django_urls import (
+from project_mcp.plugins.django.metadata import enrich_django_metadata
+from project_mcp.plugins.django.urls import (
     extract_url_patterns,
     extract_url_reverses,
 )

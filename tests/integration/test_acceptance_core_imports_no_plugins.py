@@ -5,16 +5,12 @@ from project_mcp.plugins.registry import builtin_registry
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[2] / "project_mcp"
 
-# Modules a plugin owns: its own package, and the analyzer packages only it uses.
+# Modules a plugin owns: everything in its own package.
 PLUGIN_PACKAGES = (
     "project_mcp.plugins.python",
     "project_mcp.plugins.javascript",
     "project_mcp.plugins.rust",
     "project_mcp.plugins.django",
-    "project_mcp.analyzers.python",
-    "project_mcp.analyzers.javascript",
-    "project_mcp.analyzers.rust",
-    "project_mcp.analyzers.frameworks",
 )
 
 

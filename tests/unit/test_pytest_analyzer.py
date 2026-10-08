@@ -2,7 +2,7 @@
 
 import pytest
 
-from project_mcp.analyzers.python.pytest_analyzer import (
+from project_mcp.plugins.python.pytest_analyzer import (
     classify_test_type,
     discover_tests,
     extract_test_imports,
@@ -85,7 +85,7 @@ class TestTestSourceAssociation:
 
     def test_direct_import_association(self):
         """Test imports source module directly: test knows its target."""
-        from project_mcp.analyzers.python.pytest_analyzer import extract_test_imports
+        from project_mcp.plugins.python.pytest_analyzer import extract_test_imports
 
         test_source = """\
 from mymodule import my_function
@@ -99,7 +99,7 @@ def test_my_function():
 
     def test_symbol_reference_association(self):
         """Test calls a function from source: infer association via call."""
-        from project_mcp.analyzers.python.pytest_analyzer import find_test_source_refs
+        from project_mcp.plugins.python.pytest_analyzer import find_test_source_refs
 
         test_source = """\
 from mymodule import my_function
@@ -115,7 +115,7 @@ def test_my_function():
 
     def test_naming_convention_association(self):
         """Test name matches source: test_foo.py tests foo.py by convention."""
-        from project_mcp.analyzers.python.pytest_analyzer import infer_tested_module
+        from project_mcp.plugins.python.pytest_analyzer import infer_tested_module
 
         # test_foo.py -> foo module by naming convention
         assert infer_tested_module("tests/test_foo.py") == "foo"
@@ -126,7 +126,7 @@ def test_my_function():
 
     def test_no_false_positive_association(self):
         """Avoid associating unrelated tests to source modules."""
-        from project_mcp.analyzers.python.pytest_analyzer import (
+        from project_mcp.plugins.python.pytest_analyzer import (
             build_test_relationships,
         )
 
@@ -151,7 +151,7 @@ def test_my_function():
 
     def test_naming_convention_fallback_when_no_imports(self):
         """Fall back to naming-convention evidence when no import exists."""
-        from project_mcp.analyzers.python.pytest_analyzer import (
+        from project_mcp.plugins.python.pytest_analyzer import (
             build_test_relationships,
         )
 
@@ -168,7 +168,7 @@ def test_widget_creation():
 
     def test_merges_multiple_imports_from_the_same_module(self):
         """Two import statements from the same module -> one relationship."""
-        from project_mcp.analyzers.python.pytest_analyzer import (
+        from project_mcp.plugins.python.pytest_analyzer import (
             build_test_relationships,
         )
 
@@ -189,7 +189,7 @@ def test_my_function():
 
     def test_reports_each_distinct_imported_module_once(self):
         """Imports from two distinct modules -> two separate relationships."""
-        from project_mcp.analyzers.python.pytest_analyzer import (
+        from project_mcp.plugins.python.pytest_analyzer import (
             build_test_relationships,
         )
 
@@ -210,7 +210,7 @@ def test_things():
         """A relative import (level > 0) can't be resolved without package
         context, so it must not be treated as high-confidence direct-import
         evidence — fall back to naming-convention evidence instead."""
-        from project_mcp.analyzers.python.pytest_analyzer import (
+        from project_mcp.plugins.python.pytest_analyzer import (
             build_test_relationships,
         )
 
@@ -229,7 +229,7 @@ def test_my_function():
 
     def test_ignores_non_test_files(self):
         """A regular (non-test) Python file yields no test relationships."""
-        from project_mcp.analyzers.python.pytest_analyzer import (
+        from project_mcp.plugins.python.pytest_analyzer import (
             build_test_relationships,
         )
 
