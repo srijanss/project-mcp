@@ -1,9 +1,8 @@
 import re
 
 _DEFAULT_IMPORT = re.compile(
-    r"""^\s*import\s+(?P<name>[A-Za-z_$][\w$]*)\s*(?:,\s*(?:\{[^}]*\}|\*\s+as\s+[\w$]+))?"""
-    r"""\s+from\s+["'](?P<specifier>[^"']+)["']""",
-    re.MULTILINE,
+    r"""(?<![\w$.])import\s+(?P<name>[A-Za-z_$][\w$]*)\s*(?:,\s*(?:\{[^}]*\}|\*\s+as\s+[\w$]+))?"""
+    r"""\s+from\s+["'](?P<specifier>[^"']+)["']"""
 )
 # A capitalised tag name, not a member (`<Foo.Bar>`) or namespaced one.
 _COMPONENT_TAG = re.compile(r"<([A-Z][\w$]*)(?=[\s/>])")

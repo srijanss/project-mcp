@@ -24,3 +24,16 @@ def test_rendered_tags_are_the_capitalised_component_tags_in_the_template():
 
 def test_rendered_tags_ignore_html_elements_and_namespaced_or_member_tags():
     assert rendered_tags("<div><span /><ui.Button /><Foo.Bar /></div>") == set()
+
+
+def test_default_imports_on_the_same_line_are_all_found():
+    script = "import A from './A.astro'; import B from './B.astro';\nimport C from './C.astro'"
+
+    assert default_imports(script) == {"A": "./A.astro", "B": "./B.astro", "C": "./C.astro"}
+
+
+def test_type_only_and_member_text_are_not_default_imports():
+    script = "import type Props from './types';\nconst x = obj.import Foo from 'x';"
+
+    assert default_imports(script) == {}
+
