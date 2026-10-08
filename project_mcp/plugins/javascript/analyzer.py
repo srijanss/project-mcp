@@ -53,6 +53,11 @@ class JavaScriptAnalyzer:
             ],
         )
 
+    def link_test_evidence(self, context) -> None:
+        from project_mcp.plugins.javascript import test_links
+
+        test_links.link_test_imports(context, self)
+
     def resolve_import(self, importer: str, module: str) -> list[str]:
         """Candidate files for a relative module specifier; bare packages resolve to none."""
         if not module.startswith("."):
