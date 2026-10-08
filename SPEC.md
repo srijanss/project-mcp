@@ -213,7 +213,7 @@ project-mcp/
       rust/                    descriptor, analyzer, parser, dependencies
       django/                  framework: descriptor, framework, metadata, urls
       react/                   framework (planned)
-      astro/                   language + routes (planned)
+      astro/                   framework: routes (planned)
 
     git/
       __init__.py
