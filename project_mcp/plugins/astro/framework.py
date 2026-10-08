@@ -8,6 +8,8 @@ from project_mcp.plugins.astro import tree_usages
 from project_mcp.plugins.astro.routes import route_for
 from project_mcp.plugins.astro.usages import default_imports, rendered_tags
 from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
+from project_mcp.plugins.react import tree_usages as react_tree_usages
+from project_mcp.plugins.react.exports import default_export_name
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 _FENCE = "---"
@@ -112,7 +114,8 @@ class AstroFramework:
         self._link_renders(context)
 
     def _link_renders(self, context) -> None:
-        """Link each .astro component to the .astro components its template renders."""
+        """Link each .astro component to the .astro components its template renders,
+        and to the components JS/TS files export as their default."""
         context.conn.execute(
             """
             DELETE FROM relationships
@@ -133,6 +136,17 @@ class AstroFramework:
                 (context.project_id,),
             )
         )
+        script_components: dict[str, list[tuple[int, str]]] = {}
+        for path, symbol_id, name in context.conn.execute(
+            """
+            SELECT f.path, s.id, s.name FROM symbols s JOIN files f ON f.id = s.file_id
+            WHERE f.project_id = ? AND f.path NOT LIKE '%.astro' AND s.kind = 'component'
+            ORDER BY s.start_line
+            """,
+            (context.project_id,),
+        ):
+            script_components.setdefault(path, []).append((symbol_id, name))
+        defaults: dict[str, int | None] = {}
         for path, source_id in component_ids.items():
             try:
                 source = (Path(context.project_root) / path).read_text(encoding="utf-8")
@@ -144,12 +158,18 @@ class AstroFramework:
                 if self.backend == "tree-sitter"
                 else default_imports(script)
             )
-            targets = {
-                component_ids[candidate]
-                for tag in rendered_tags(template) & imports.keys()
-                for candidate in self.resolve_import(path, imports[tag])
-                if candidate in component_ids
-            } - {source_id}
+            targets = set()
+            for tag in rendered_tags(template) & imports.keys():
+                for candidate in self.resolve_import(path, imports[tag]):
+                    if candidate in component_ids:
+                        targets.add(component_ids[candidate])
+                    elif candidate in script_components:
+                        if candidate not in defaults:
+                            defaults[candidate] = self._default_component(
+                                context, candidate, script_components[candidate]
+                            )
+                        targets.add(defaults[candidate])
+            targets -= {source_id, None}
             for target_id in sorted(targets):
                 context.conn.execute(
                     """
@@ -161,6 +181,21 @@ class AstroFramework:
                     """,
                     (source_id, target_id),
                 )
+
+    def _default_component(self, context, path: str, rows: list[tuple[int, str]]) -> int | None:
+        """The component a JS/TS file exports as its default; when that can't be
+        read, the file's only component."""
+        try:
+            source = (Path(context.project_root) / path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        if self.backend == "tree-sitter":
+            name = react_tree_usages.default_export_name(source, react_tree_usages.grammar_for(path))
+        else:
+            name = default_export_name(source)
+        if name is None:
+            return rows[0][0] if len(rows) == 1 else None
+        return next((symbol_id for symbol_id, component in rows if component == name), None)
 
     def _tag_endpoints(self, context) -> None:
         """Tag the module of each .ts/.js file under src/pages as an endpoint with its route."""
