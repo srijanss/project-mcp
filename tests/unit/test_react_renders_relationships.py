@@ -1,6 +1,9 @@
+import pytest
+
 from project_mcp.config import load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import refresh_index, run_scan
+from project_mcp.plugins import treesitter
 from project_mcp.plugins.registry import builtin_registry
 from tests.golden import touch_indexed_files
 
@@ -172,3 +175,46 @@ def test_a_default_import_follows_a_wrapper_export_written_over_several_lines(tm
     )
 
     assert _renders(conn) == [("src.App.App", "src.badge.Badge", "high")]
+
+
+@pytest.mark.skipif(treesitter.missing("tsx") is not None, reason="tree-sitter is not installed")
+def test_a_tag_naming_a_same_file_component_links_to_it_unless_a_local_binding_shadows_it(tmp_path):
+    conn = _scan(
+        tmp_path,
+        {
+            "src/other.tsx": "export function Badge() {\n  return <b />;\n}\n",
+            "src/list.tsx": (
+                "function Row() {\n  return <li />;\n}\n\n"
+                "export function List({ Row }) {\n  return <ul><Row /><Badge /></ul>;\n}\n\n"
+                "export function Table() {\n  return <table><Row /></table>;\n}\n\n"
+                "const preview = <Row />;\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == [("src.list.Table", "src.list.Row", "high")]
+
+
+def test_the_regex_backend_links_a_possibly_shadowed_tag_with_low_confidence_and_marks_its_user_partial(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(treesitter, "missing", lambda grammar: "forced off")
+    conn = _scan(
+        tmp_path,
+        {
+            "src/list.tsx": (
+                "function Row() {\n  return <li />;\n}\n\n"
+                "export function List({ Row }) {\n  return <ul><Row /></ul>;\n}\n\n"
+                "export function Table() {\n  return <table><Row /></table>;\n}\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == [
+        ("src.list.List", "src.list.Row", "low"),
+        ("src.list.Table", "src.list.Row", "high"),
+    ]
+    partial = conn.execute(
+        "SELECT name FROM symbols WHERE json_extract(metadata_json, '$.partial')"
+    ).fetchall()
+    assert partial == [("List",)]

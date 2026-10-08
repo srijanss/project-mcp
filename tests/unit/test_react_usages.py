@@ -1,4 +1,9 @@
-from project_mcp.plugins.react.usages import import_candidates, imported_names, jsx_tags
+from project_mcp.plugins.react.usages import (
+    import_candidates,
+    imported_names,
+    jsx_tags,
+    names_outside_tags,
+)
 
 
 def test_imported_names_map_each_local_name_to_its_module_and_imported_name():
@@ -59,3 +64,16 @@ def test_import_candidates_resolve_relative_specifiers_only():
         "src/Widget/index.jsx",
     ]
     assert import_candidates("src/a/App.tsx", "../Widget.tsx") == ["src/Widget.tsx"]
+
+
+def test_names_outside_tags_are_capitalised_identifiers_not_in_tag_position():
+    source = (
+        "function Row() {\n  return <li />;\n}\n\n"
+        "export function List({ Row }) {\n"
+        "  // Ghost is only mentioned in a comment\n"
+        "  return <ul><Row></Row><ui.Cell /></ul>;\n"
+        "}\n"
+    )
+
+    assert names_outside_tags(source, 5, 8) == {"List", "Row"}
+    assert names_outside_tags(source, 7, float("inf")) == set()

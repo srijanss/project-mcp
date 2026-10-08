@@ -228,3 +228,50 @@ export default memo(function Badge() {
         ("badge.Badge", "badge.helper", "calls"),
         ("badge.Badge", "badge.Badge.inner", "calls"),
     ]
+
+
+def test_parse_js_tree_finds_components_declared_through_a_wrapper_call():
+    source = """\
+const Card = memo(function Card() {
+  const title = () => 't';
+  return <div />;
+});
+
+const Field = forwardRef((props, ref) => <input ref={ref} />);
+
+const total = sum(1, 2);
+"""
+    symbols = {s["qualified_name"]: s for s in parse_js_tree("page.tsx", source, "tsx")}
+
+    assert {name: s["kind"] for name, s in symbols.items()} == {
+        "page": "module",
+        "page.Card": "component",
+        "page.Card.title": "function",
+        "page.Field": "component",
+    }
+    assert (symbols["page.Card"]["start_line"], symbols["page.Card"]["end_line"]) == (1, 4)
+
+
+def test_parse_js_calls_attributes_calls_to_a_wrapped_component():
+    source = """\
+function helper() {}
+
+const Card = memo(function Card() {
+  const title = () => 't';
+  helper();
+  title();
+  return <div />;
+});
+
+const Field = forwardRef((props, ref) => {
+  helper();
+  return <input ref={ref} />;
+});
+"""
+    symbols = parse_js_tree("page.tsx", source, "tsx")
+
+    assert parse_js_calls("page.tsx", source, "tsx", symbols) == [
+        ("page.Card", "page.helper", "calls"),
+        ("page.Card", "page.Card.title", "calls"),
+        ("page.Field", "page.helper", "calls"),
+    ]

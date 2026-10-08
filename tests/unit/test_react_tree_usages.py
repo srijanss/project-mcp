@@ -7,6 +7,7 @@ from project_mcp.plugins.react.tree_usages import (
     grammar_for,
     imported_names,
     jsx_tags,
+    shadowed_tags,
 )
 
 pytestmark = pytest.mark.skipif(
@@ -139,3 +140,22 @@ def test_default_export_name_skips_comments_before_a_wrapped_argument():
     assert default_export_name("export default memo(/* note */ Badge);\n", "tsx") == "Badge"
     source = "export default memo(\n  // the card\n  function Card() {\n    return <b />;\n  },\n);\n"
     assert default_export_name(source, "tsx") == "Card"
+
+
+def test_shadowed_tags_are_tags_named_by_an_enclosing_local_binding():
+    source = """\
+function Row() {
+  return <li />;
+}
+
+export function List({ Row, Cell = Row }) {
+  const Icon = pick();
+  return <ul><Row /><Icon /><Cell /></ul>;
+}
+
+export function Table({ rows }) {
+  return <table>{rows.map((Item) => <Item />)}<Row /></table>;
+}
+"""
+
+    assert shadowed_tags(source, "tsx") == {("Row", 7), ("Icon", 7), ("Cell", 7), ("Item", 11)}

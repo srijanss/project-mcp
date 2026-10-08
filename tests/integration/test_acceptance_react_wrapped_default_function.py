@@ -28,6 +28,6 @@ def test_a_default_import_links_to_a_named_function_wrapped_in_the_default_expor
 
     renders = {"source": "src.App.App", "relationship_type": "renders", "confidence": "high"}
     assert get_dependents(tmp_path, "src.badge.Badge") == [renders]
-    assert get_dependents(tmp_path, "src.badge.Pill") == []
+    assert get_dependents(tmp_path, "src.badge.Pill") == [{**renders, "source": "src.badge.Badge"}]
     kinds = dict(conn.execute("SELECT name, kind FROM symbols WHERE name IN ('Badge', 'Pill')"))
     assert kinds == {"Badge": "component", "Pill": "component"}

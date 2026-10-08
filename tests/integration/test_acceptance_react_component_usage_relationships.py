@@ -42,8 +42,10 @@ def test_a_jsx_usage_of_an_imported_component_is_a_renders_relationship(tmp_path
     ]
 
 
-def test_a_component_used_in_its_own_file_or_from_a_package_is_not_linked(tmp_path):
+def test_a_component_used_in_its_own_file_is_linked_but_one_from_a_package_is_not(tmp_path):
     _write(tmp_path)
 
-    assert get_dependents(tmp_path, "src.Solo.Inner") == []
+    assert get_dependents(tmp_path, "src.Solo.Inner") == [
+        {"source": "src.Solo.Solo", "relationship_type": "renders", "confidence": "high"}
+    ]
     assert get_dependents(tmp_path, "src.App.App") == []

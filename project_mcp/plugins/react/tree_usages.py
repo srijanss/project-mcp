@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 from project_mcp.plugins import treesitter
+from project_mcp.plugins.javascript.tree_parser import _SCOPE_TYPES, _local_names
 
 # file suffix -> the tree-sitter grammar that parses it
 _GRAMMARS = {
@@ -106,3 +107,21 @@ def jsx_tags(source: str, grammar: str) -> list[tuple[str, int]]:
 
     visit(treesitter.parse(source, grammar))
     return tags
+
+
+def shadowed_tags(source: str, grammar: str) -> set[tuple[str, int]]:
+    """The (name, line) of each JSX tag naming a parameter or variable of an enclosing function."""
+    shadowed: set[tuple[str, int]] = set()
+
+    def visit(node, bound: frozenset[str]) -> None:
+        if node.type in _SCOPE_TYPES:
+            bound = bound | set(_local_names(node))
+        if node.type in _JSX_TAGS:
+            name = node.field("name")
+            if name is not None and name.type == "identifier" and name.text in bound:
+                shadowed.add((name.text, node.start_line))
+        for child in node.children:
+            visit(child, bound)
+
+    visit(treesitter.parse(source, grammar), frozenset())
+    return shadowed

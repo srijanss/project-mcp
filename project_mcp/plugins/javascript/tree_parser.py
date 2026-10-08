@@ -52,13 +52,38 @@ def parse_js_tree(path: str, source: str, grammar: str) -> list[dict]:
 
 def _wrapped_function(node):
     """The named function expression at the core of wrapper calls such as `memo(function X() {})`."""
+    node = _unwrapped(node)
+    if node is not None and node.type == "function_expression" and node.field("name") is not None:
+        return node
+    return None
+
+
+def _unwrapped(node):
+    """The node at the core of nested wrapper calls, following their first arguments."""
     while node.type == "call_expression":
         arguments = [a for a in node.field("arguments").children if a.type != "comment"]
         if not arguments:
             return None
         node = arguments[0]
-    if node.type == "function_expression" and node.field("name") is not None:
-        return node
+    return node
+
+
+def _declared_function(declarator):
+    """The function a variable declarator holds, directly or as a component
+    wrapped in calls such as `memo(...)` or `forwardRef(...)`."""
+    value = declarator.field("value")
+    if value is None or declarator.field("name").type != "identifier":
+        return None
+    if value.type in _FUNCTION_TYPES:
+        return value
+    function = _unwrapped(value)
+    if (
+        function is not None
+        and function.type in _FUNCTION_TYPES
+        and _PASCAL_CASE_RE.match(declarator.field("name").text)
+        and _returns_jsx(function)
+    ):
+        return function
     return None
 
 
@@ -83,17 +108,16 @@ def _declared_symbols(parent: str, node) -> list[dict]:
         return [
             symbol
             for declarator in node.children
-            if declarator.type == "variable_declarator"
-            and declarator.field("value") is not None
-            and declarator.field("value").type in _FUNCTION_TYPES
-            and declarator.field("name").type == "identifier"
-            for symbol in _function_symbols(parent, declarator.field("name").text, declarator)
+            if declarator.type == "variable_declarator" and _declared_function(declarator) is not None
+            for symbol in _function_symbols(
+                parent, declarator.field("name").text, declarator, _declared_function(declarator)
+            )
         ]
     return []
 
 
-def _function_symbols(parent: str, name: str, node) -> list[dict]:
-    function = node.field("value") or node
+def _function_symbols(parent: str, name: str, node, function=None) -> list[dict]:
+    function = function or node.field("value") or node
     kind = "component" if _PASCAL_CASE_RE.match(name) and _returns_jsx(function) else "function"
     qualified_name = f"{parent}.{name}"
     return [
@@ -205,8 +229,7 @@ def _opens_named_scope(node, wrapped) -> bool:
     if node.type in ("function_declaration", "method_definition"):
         return True
     if node.type == "variable_declarator":
-        value = node.field("value")
-        return value is not None and value.type in _FUNCTION_TYPES
+        return _declared_function(node) is not None
     return wrapped is not None and node.type == "function_expression" and _identity(node) == wrapped
 
 
@@ -231,8 +254,7 @@ def _declared_names(node) -> list[str]:
     for child in node.children:
         if child.type in _SCOPE_TYPES:
             continue
-        value = child.field("value")
-        if child.type == "variable_declarator" and (value is None or value.type not in _FUNCTION_TYPES):
+        if child.type == "variable_declarator" and _declared_function(child) is None:
             names += _bound_names(child.field("name"))
         names += _declared_names(child)
     return names

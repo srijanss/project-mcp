@@ -130,6 +130,15 @@ def _declarer(context, file_id: int, rows, line: int) -> int | None:
     return row[0] if row else None
 
 
+def _mark_partial(context, symbol_ids) -> None:
+    for symbol_id in symbol_ids:
+        context.conn.execute(
+            "UPDATE symbols SET metadata_json = json_set(COALESCE(metadata_json, '{}'),"
+            " '$.partial', json('true')) WHERE id = ?",
+            (symbol_id,),
+        )
+
+
 class ReactFramework:
     def __init__(self) -> None:
         problem = (
@@ -149,6 +158,11 @@ class ReactFramework:
         if self.backend == "tree-sitter":
             return tree_usages.jsx_tags(source, tree_usages.grammar_for(path))
         return usages.jsx_tags(source)
+
+    def _shadowed_tags(self, path: str, source: str) -> set[tuple[str, int]]:
+        if self.backend == "tree-sitter":
+            return tree_usages.shadowed_tags(source, tree_usages.grammar_for(path))
+        return set()
 
     def _default_export_name(self, path: str, source: str) -> str | None:
         if self.backend == "tree-sitter":
@@ -181,11 +195,6 @@ class ReactFramework:
         """Record lazy and computed components with low confidence, marking their users partial."""
         components = _load_components(context)
         defaults = self._default_exports(context, components)
-        context.conn.executemany(
-            "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.partial')"
-            " WHERE id = ?",
-            [(row[0],) for rows in components.values() for row in rows],
-        )
         partial: set[int] = set()
         links: set[tuple[int, int]] = set()
         for path, file_id in context.path_to_file_id.items():
@@ -212,12 +221,7 @@ class ReactFramework:
                 declarer = _declarer(context, file_id, rows, line)
                 if declarer is not None:
                     partial.add(declarer)
-        for symbol_id in partial:
-            context.conn.execute(
-                "UPDATE symbols SET metadata_json = json_set(COALESCE(metadata_json, '{}'),"
-                " '$.partial', json('true')) WHERE id = ?",
-                (symbol_id,),
-            )
+        _mark_partial(context, partial)
         for user, target in sorted(links):
             _insert_relationship(context, "renders", user, target, confidence="low")
 
@@ -264,36 +268,51 @@ class ReactFramework:
             _insert_relationship(context, "routes_to", declarer, target)
 
     def _link_renders(self, context) -> None:
-        """Link each component to the imported project components its JSX renders."""
+        """Link each component to the imported and same-file project components its JSX renders."""
         components = _load_components(context)
         defaults = self._default_exports(context, components)
+        component_ids = [(row[0],) for rows in components.values() for row in rows]
         context.conn.executemany(
             "DELETE FROM relationships WHERE relationship_type = 'renders'"
             " AND source_entity_type = 'symbol' AND source_entity_id = ?",
-            [(row[0],) for rows in components.values() for row in rows],
+            component_ids,
         )
+        context.conn.executemany(
+            "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.partial')"
+            " WHERE id = ?",
+            component_ids,
+        )
+        partial: set[int] = set()
         for path, rows in components.items():
             try:
                 source = (Path(context.project_root) / path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
             imports = self._imported_names(path, source)
-            links = set()
+            local = {name: id_ for id_, name, _, _ in rows}
+            shadowed = self._shadowed_tags(path, source)
+            links: dict[tuple[int, int], str] = {}
             for tag, line in self._jsx_tags(path, source):
-                user = next((id_ for id_, _, start, end in rows if start <= line <= end), None)
-                if tag not in imports or user is None:
+                row = next((row for row in rows if row[2] <= line <= row[3]), None)
+                if row is None:
                     continue
-                specifier, imported = imports[tag]
-                target_path = next(
-                    (c for c in import_candidates(path, specifier) if c in components), None
-                )
-                target = target_path and _component_in(
-                    components[target_path], imported, defaults[target_path]
-                )
+                user, confidence = row[0], "high"
+                if tag in imports:
+                    target = _resolve_component(components, defaults, path, imports, tag)
+                elif tag in local and (tag, line) not in shadowed:
+                    target = local[tag]
+                    if self.backend == "regex" and tag in usages.names_outside_tags(source, row[2], row[3]):
+                        # Without scopes, a name used outside tags may be a local binding.
+                        confidence = "low"
+                else:
+                    continue
                 if target is not None and target != user:
-                    links.add((user, target))
-            for user, target in sorted(links):
-                _insert_relationship(context, "renders", user, target)
+                    links[(user, target)] = confidence
+                    if confidence == "low":
+                        partial.add(user)
+            for (user, target), confidence in sorted(links.items()):
+                _insert_relationship(context, "renders", user, target, confidence)
+        _mark_partial(context, partial)
 
     def _tag_components(self, context) -> None:
         """Tag the components the javascript plugin found in .js/.ts files, as pages in page locations."""
