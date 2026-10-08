@@ -76,7 +76,7 @@ class PluginRegistry:
     def analyzer_for(self, language: str | None):
         """The analyzer of the plugin owning `language`, loaded on first use."""
         descriptor = self._descriptor_by_language.get(language)
-        if descriptor is None or not self._active(descriptor):
+        if descriptor is None or not self._usable(descriptor):
             return None
         return self._load(descriptor)
 
@@ -89,7 +89,7 @@ class PluginRegistry:
         the parser `backend` it runs on.
         """
         descriptor = self._descriptor_by_language.get(language)
-        if descriptor is None or not self._active(descriptor):
+        if descriptor is None or not self._usable(descriptor):
             return None
         hashed = dict(self.plugin_settings.get(descriptor.name, {}))
         backend = getattr(self._load(descriptor), "backend", None)
@@ -138,7 +138,7 @@ class PluginRegistry:
         return [
             name
             for name, descriptor in self._descriptor_by_name.items()
-            if self._active(descriptor) and not self._inactive_requirements(descriptor)
+            if self._usable(descriptor)
         ]
 
     def plugin_warnings(self) -> dict[str, list[str]]:
@@ -158,12 +158,16 @@ class PluginRegistry:
             and descriptor.name not in self.disabled_plugins
         )
 
+    def _usable(self, descriptor: PluginDescriptor) -> bool:
+        """Whether `descriptor` is active and every plugin it requires is too."""
+        return self._active(descriptor) and not self._inactive_requirements(descriptor)
+
     def frameworks(self) -> list:
         """The analyzers of every registered framework plugin, loaded on first use."""
         loaded = [
             self._load(descriptor)
             for descriptor in self._framework_descriptors
-            if self._active(descriptor) and not self._inactive_requirements(descriptor)
+            if self._usable(descriptor)
         ]
         return [framework for framework in loaded if framework is not None]
 

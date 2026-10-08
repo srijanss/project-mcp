@@ -6,7 +6,7 @@ def test_astro_descriptor_is_a_framework_on_javascript():
     assert DESCRIPTOR.name == "astro"
     assert DESCRIPTOR.kind == "framework"
     assert DESCRIPTOR.requires == ("javascript",)
-    assert DESCRIPTOR.extensions == {}
+    assert DESCRIPTOR.extensions == {".astro": "astro"}
     assert DESCRIPTOR.analyzer == "project_mcp.plugins.astro.framework:AstroFramework"
 
 

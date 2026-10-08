@@ -145,6 +145,7 @@ def test_builtin_language_plugins_declare_their_manifests_and_ecosystem():
         ),
         "javascript": ("npm", {"package.json"}),
         "rust": ("rust", {"Cargo.toml"}),
+        "astro": (None, set()),
     }
 
 
