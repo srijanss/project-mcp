@@ -133,3 +133,9 @@ def test_default_export_name_reads_a_named_function_inside_a_wrapper():
 
     assert default_export_name(source, "tsx") == "Badge"
     assert default_export_name("export default memo(function () {});\n", "tsx") is None
+
+
+def test_default_export_name_skips_comments_before_a_wrapped_argument():
+    assert default_export_name("export default memo(/* note */ Badge);\n", "tsx") == "Badge"
+    source = "export default memo(\n  // the card\n  function Card() {\n    return <b />;\n  },\n);\n"
+    assert default_export_name(source, "tsx") == "Card"

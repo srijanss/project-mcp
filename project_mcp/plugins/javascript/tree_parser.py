@@ -53,7 +53,7 @@ def parse_js_tree(path: str, source: str, grammar: str) -> list[dict]:
 def _wrapped_function(node):
     """The named function expression at the core of wrapper calls such as `memo(function X() {})`."""
     while node.type == "call_expression":
-        arguments = node.field("arguments").children
+        arguments = [a for a in node.field("arguments").children if a.type != "comment"]
         if not arguments:
             return None
         node = arguments[0]
