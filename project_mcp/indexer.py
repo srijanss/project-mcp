@@ -172,6 +172,8 @@ def record_scan_warnings(
         )
     for name, reason in registry.failed_plugins.items():
         warnings.append(f"{name} plugin {reason}")
+    for name, plugin_warnings in registry.plugin_warnings().items():
+        warnings.extend(f"{name} plugin {warning}" for warning in plugin_warnings)
     for framework, missing in registry.skipped_frameworks().items():
         warnings.append(
             f"{framework} plugin skipped: it requires the {', '.join(missing)} plugin,"

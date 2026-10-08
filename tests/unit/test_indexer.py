@@ -3814,3 +3814,21 @@ def test_a_refresh_records_an_unreadable_file_error_relative_to_the_root(
     assert conn.execute(
         "SELECT analysis_error FROM files WHERE path = 'app.py'"
     ).fetchone() == ("FileNotFoundError: [Errno 2] No such file or directory: 'app.py'",)
+
+
+def test_record_scan_warnings_names_each_plugin_with_its_analyzer_warnings(tmp_path):
+    from project_mcp.indexer import get_index_status, record_scan_warnings
+    from project_mcp.plugins.registry import builtin_registry
+
+    class _Registry(type(builtin_registry())):
+        def plugin_warnings(self):
+            return {"toy": ["falls back to its regex parser: tree_sitter is not installed"]}
+
+    registry = _Registry()
+    conn = get_connection(tmp_path)
+
+    record_scan_warnings(conn, registry, 0)
+
+    assert "toy plugin falls back to its regex parser: tree_sitter is not installed" in (
+        get_index_status(conn).get("warnings", [])
+    )

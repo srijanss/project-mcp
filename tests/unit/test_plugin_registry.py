@@ -484,3 +484,61 @@ def test_a_descriptor_whose_extensions_are_not_a_string_mapping_is_failed(extens
 
     assert registry.failed_plugins["orm"].startswith("invalid descriptor: extensions")
     assert registry.language_for(Path("models.orm")) is None
+
+
+class _FallbackAnalyzer:
+    warnings = ["falls back to its regex parser: tree_sitter is not installed"]
+
+
+class _PlainAnalyzer:
+    pass
+
+
+def test_plugin_warnings_gather_each_active_analyzers_warnings():
+    registry = PluginRegistry()
+    for name, analyzer in (("toy", "_FallbackAnalyzer"), ("plain", "_PlainAnalyzer")):
+        registry.register(
+            PluginDescriptor(
+                name=name,
+                version="0.1.0",
+                api_version=1,
+                extensions={f".{name}": name},
+                analyzer=f"{__name__}:{analyzer}",
+            )
+        )
+    registry.resolve_extension_claims()
+
+    assert registry.plugin_warnings() == {
+        "toy": ["falls back to its regex parser: tree_sitter is not installed"]
+    }
+
+
+class _TreeSitterBackend:
+    backend = "tree-sitter"
+
+
+class _RegexBackend:
+    backend = "regex"
+
+
+def test_an_analyzers_backend_feeds_its_plugins_fingerprint():
+    def fingerprint(analyzer):
+        registry = PluginRegistry()
+        registry.register(
+            PluginDescriptor(
+                name="toy",
+                version="0.1.0",
+                api_version=1,
+                extensions={".toy": "toy"},
+                analyzer=f"{__name__}:{analyzer}",
+            )
+        )
+        registry.resolve_extension_claims()
+        return registry.fingerprint("toy")
+
+    tree_sitter, regex, plain = (
+        fingerprint(a) for a in ("_TreeSitterBackend", "_RegexBackend", "_PlainAnalyzer")
+    )
+
+    assert tree_sitter != regex
+    assert plain not in (tree_sitter, regex)

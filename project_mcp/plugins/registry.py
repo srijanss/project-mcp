@@ -83,14 +83,18 @@ class PluginRegistry:
         """`name@version#confighash` of the active plugin analyzing `language`,
         else None.
 
-        A file indexed under a different fingerprint needs re-indexing.
+        A file indexed under a different fingerprint needs re-indexing. The
+        hash covers the plugin's settings and, when its analyzer names one,
+        the parser `backend` it runs on.
         """
         descriptor = self._descriptor_by_language.get(language)
         if descriptor is None or not self._active(descriptor):
             return None
-        settings = json.dumps(
-            self.plugin_settings.get(descriptor.name, {}), sort_keys=True, default=str
-        )
+        hashed = dict(self.plugin_settings.get(descriptor.name, {}))
+        backend = getattr(self._load(descriptor), "backend", None)
+        if backend is not None:
+            hashed["backend"] = backend
+        settings = json.dumps(hashed, sort_keys=True, default=str)
         config_hash = hashlib.sha256(settings.encode()).hexdigest()[:12]
         return f"{descriptor.name}@{descriptor.version}#{config_hash}"
 
@@ -135,6 +139,16 @@ class PluginRegistry:
             for name, descriptor in self._descriptor_by_name.items()
             if self._active(descriptor) and not self._inactive_requirements(descriptor)
         ]
+
+    def plugin_warnings(self) -> dict[str, list[str]]:
+        """The `warnings` each active plugin's analyzer reports, such as a
+        parser it fell back to."""
+        warnings = {}
+        for name in self.active_plugins():
+            analyzer = self._load(self._descriptor_by_name[name])
+            if getattr(analyzer, "warnings", None):
+                warnings[name] = list(analyzer.warnings)
+        return warnings
 
     def _active(self, descriptor: PluginDescriptor) -> bool:
         return (

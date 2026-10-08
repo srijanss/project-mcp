@@ -1,11 +1,11 @@
 """Shared tree-sitter parsing for plugins (needs the optional 'treesitter' extra).
 
-Only plugin code imports this module; core never does.
+Only plugin code imports this module; core never does. tree-sitter itself is
+imported on use, so a plugin can import this module and ask `missing()`
+whether to fall back to its regex parser.
 """
 
 import importlib
-
-import tree_sitter
 
 # grammar name -> (module, function returning the language pointer)
 GRAMMARS = {
@@ -15,7 +15,7 @@ GRAMMARS = {
 
 
 class Node:
-    def __init__(self, node: tree_sitter.Node):
+    def __init__(self, node):
         self._node = node
 
     @property
@@ -47,10 +47,21 @@ class Node:
         return Node(child) if child is not None else None
 
 
+def missing(grammar: str) -> str | None:
+    """Why `grammar` cannot be parsed here (an uninstalled module), or None."""
+    for module in ("tree_sitter", GRAMMARS[grammar][0]):
+        try:
+            importlib.import_module(module)
+        except ImportError as exc:
+            return f"{module} is not installed ({exc})"
+    return None
+
+
 def parse(source: str, grammar: str) -> Node:
     if grammar not in GRAMMARS:
         raise ValueError(f"unknown tree-sitter grammar: {grammar}")
     module, function = GRAMMARS[grammar]
     language = getattr(importlib.import_module(module), function)()
+    tree_sitter = importlib.import_module("tree_sitter")
     parser = tree_sitter.Parser(tree_sitter.Language(language))
     return Node(parser.parse(source.encode()).root_node)
