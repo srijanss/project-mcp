@@ -80,9 +80,13 @@ def get_dependency_version(
     dependency = matching_dependency(dependencies, name, registry)
     if dependency is not None:
         return dependency
-    for analyzer in _ecosystem_analyzers(registry, ecosystem).values():
+    errors = [dependency for dependency in dependencies if "error" in dependency]
+    failed = {error["ecosystem"] for error in errors}
+    for ecosystem_name, analyzer in _ecosystem_analyzers(registry, ecosystem).items():
+        # An ecosystem whose manifests failed would fail its fallback too.
+        if ecosystem_name in failed:
+            continue
         undeclared = getattr(analyzer, "undeclared_dependency", None)
         if callable(undeclared) and (found := undeclared(Path(project_root), name)):
             return found
-    errors = [dependency for dependency in dependencies if "error" in dependency]
     return {"status": "not_found", **({"manifest_errors": errors} if errors else {})}

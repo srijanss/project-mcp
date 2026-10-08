@@ -561,3 +561,16 @@ def test_list_dependencies_reports_an_unreadable_manifest(tmp_path: Path, manife
 
     with pytest.raises(ValueError, match=f"unreadable {manifest}"):
         list_dependencies(tmp_path)
+
+
+def test_get_dependency_version_skips_the_fallback_of_an_ecosystem_whose_manifest_failed(
+    tmp_path: Path,
+):
+    (tmp_path / "pyproject.toml").write_text("[project\nbroken")
+    (tmp_path / "uv.lock").write_text('[[package]]\nname = "absent"\nversion = "1.0"\n')
+    (tmp_path / "Cargo.toml").write_text('[dependencies]\nserde = "1"\n')
+
+    assert get_dependency_version(tmp_path, "absent") == {
+        "status": "not_found",
+        "manifest_errors": [{"ecosystem": "python", "error": "invalid pyproject.toml"}],
+    }
