@@ -2,9 +2,16 @@ import json
 from pathlib import Path
 
 
+def _read_manifest(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError as exc:
+        raise ValueError(f"unreadable {path.name}") from exc
+
+
 def _load_json(path: Path) -> dict:
     try:
-        return json.loads(path.read_text())
+        return json.loads(_read_manifest(path))
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid {path.name}") from exc
 

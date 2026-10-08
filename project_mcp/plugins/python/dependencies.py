@@ -10,9 +10,16 @@ def normalize_dependency_name(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name).lower()
 
 
+def _read_manifest(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError as exc:
+        raise ValueError(f"unreadable {path.name}") from exc
+
+
 def _load_toml(path: Path) -> dict:
     try:
-        return tomllib.loads(path.read_text())
+        return tomllib.loads(_read_manifest(path))
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"invalid {path.name}") from exc
 
@@ -64,7 +71,7 @@ def declared_dependencies(project_root: Path) -> list[dict]:
         ):
             return
         seen_files.add(resolved_file)
-        for line in requirements_file.read_text().splitlines():
+        for line in _read_manifest(requirements_file).splitlines():
             stripped = line.strip()
             if stripped.startswith(("-r ", "--requirement ")):
                 read_requirements(requirements_file.parent / stripped.split(maxsplit=1)[1])

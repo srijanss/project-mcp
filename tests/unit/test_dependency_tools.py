@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -537,3 +538,26 @@ def test_get_dependency_version_not_found_names_the_manifests_it_could_not_read(
         "status": "not_found",
         "manifest_errors": [{"ecosystem": "rust", "error": "invalid Cargo.toml"}],
     }
+
+
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0, reason="root reads unreadable files"
+)
+@pytest.mark.parametrize(
+    "manifest, content",
+    [
+        ("pyproject.toml", '[project]\ndependencies = ["requests"]\n'),
+        ("uv.lock", ""),
+        ("requirements.txt", "requests==2.31.0\n"),
+        ("package.json", "{}"),
+        ("package-lock.json", "{}"),
+        ("Cargo.toml", "[dependencies]\n"),
+        ("Cargo.lock", ""),
+    ],
+)
+def test_list_dependencies_reports_an_unreadable_manifest(tmp_path: Path, manifest, content):
+    (tmp_path / manifest).write_text(content)
+    (tmp_path / manifest).chmod(0)
+
+    with pytest.raises(ValueError, match=f"unreadable {manifest}"):
+        list_dependencies(tmp_path)
