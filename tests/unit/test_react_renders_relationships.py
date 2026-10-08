@@ -153,3 +153,22 @@ def test_a_default_import_of_a_non_component_does_not_fall_back_to_another_compo
     )
 
     assert _renders(conn) == []
+
+
+def test_a_default_import_follows_a_wrapper_export_written_over_several_lines(tmp_path):
+    conn = _scan(
+        tmp_path,
+        {
+            "src/badge.tsx": (
+                "function Badge() {\n  return <b />;\n}\n\n"
+                "function Pill() {\n  return <i />;\n}\n\n"
+                "export default memo(\n  Badge,\n  areEqual,\n);\n"
+            ),
+            "src/App.tsx": (
+                "import Tag from './badge';\n\n"
+                "export function App() {\n  return <Tag />;\n}\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == [("src.App.App", "src.badge.Badge", "high")]

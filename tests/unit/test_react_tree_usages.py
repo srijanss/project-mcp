@@ -2,7 +2,12 @@ import pytest
 
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.react import usages
-from project_mcp.plugins.react.tree_usages import grammar_for, imported_names, jsx_tags
+from project_mcp.plugins.react.tree_usages import (
+    default_export_name,
+    grammar_for,
+    imported_names,
+    jsx_tags,
+)
 
 pytestmark = pytest.mark.skipif(
     treesitter.missing("tsx") is not None, reason="tree-sitter is not installed"
@@ -92,3 +97,32 @@ def test_imported_names_ignore_comments_inside_an_import_list():
     source = "import { /* row */ A, // note\n  B as C /* end */ } from './ab';\n"
 
     assert imported_names(source, "tsx") == {"A": ("./ab", "A"), "C": ("./ab", "B")}
+
+
+def test_default_export_name_follows_wrapper_calls_across_lines():
+    assert default_export_name("export default memo(\n  Badge,\n);\n", "tsx") == "Badge"
+    assert default_export_name(
+        "export default connect(\n  (state) => state.card,\n)(Card);\n", "tsx"
+    ) == "Card"
+    assert default_export_name("export default withRouter(memo(Nav));\n", "javascript") == "Nav"
+
+
+def test_default_export_name_reads_default_function_and_class_declarations():
+    source = (
+        "export function Helper() {}\n"
+        "export default async function Main() {\n  return <main />;\n}\n"
+    )
+
+    assert default_export_name(source, "tsx") == "Main"
+    assert default_export_name("export default class Page {}\n", "typescript") == "Page"
+    assert default_export_name("export default Plain;\n", "javascript") == "Plain"
+
+
+def test_default_export_name_reads_an_export_list_alias_and_ignores_comments():
+    source = (
+        "// export default Old;\n"
+        "export { Other, Inner as default };\n"
+    )
+
+    assert default_export_name(source, "tsx") == "Inner"
+    assert default_export_name("/* export default Gone; */\nexport { A };\n", "tsx") is None

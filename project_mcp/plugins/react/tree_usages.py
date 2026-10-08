@@ -1,4 +1,5 @@
 """What a react source file imports and renders, read from a tree-sitter syntax tree."""
+import re
 from pathlib import Path
 
 from project_mcp.plugins import treesitter
@@ -13,6 +14,7 @@ _GRAMMARS = {
     ".tsx": "tsx",
 }
 _JSX_TAGS = {"jsx_opening_element", "jsx_self_closing_element"}
+_DEFAULT_KEYWORD = re.compile(r"export\s+default\b")
 
 
 def grammar_for(path: str) -> str:
@@ -42,6 +44,49 @@ def imported_names(source: str, grammar: str) -> dict[str, tuple[str, str]]:
                     identifiers = [child.text for child in item.children]
                     names[identifiers[-1]] = (specifier, identifiers[0])
     return names
+
+
+def default_export_name(source: str, grammar: str) -> str | None:
+    """The local name a file exports as its default, if statically visible.
+
+    A wrapper call such as `memo(Badge)` or `connect(a)(Card)` exports what it wraps.
+    """
+    for statement in treesitter.parse(source, grammar).children:
+        if statement.type != "export_statement":
+            continue
+        value = statement.field("value")
+        if value is not None:
+            return _wrapped_name(value)
+        declaration = statement.field("declaration")
+        if declaration is not None and _DEFAULT_KEYWORD.match(statement.text):
+            name = declaration.field("name")
+            return name.text if name is not None else None
+        aliased = _aliased_default(statement)
+        if aliased is not None:
+            return aliased
+    return None
+
+
+def _aliased_default(statement) -> str | None:
+    """The local name in `export { Name as default }`; re-exports from another module don't count."""
+    clause = next((c for c in statement.children if c.type == "export_clause"), None)
+    if clause is None or statement.field("source") is not None:
+        return None
+    for specifier in clause.children:
+        alias = specifier.field("alias")
+        if alias is not None and alias.text == "default":
+            return specifier.field("name").text
+    return None
+
+
+def _wrapped_name(node) -> str | None:
+    """The identifier at the core of nested wrapper calls, by their first arguments."""
+    while node.type == "call_expression":
+        arguments = node.field("arguments").children
+        if not arguments:
+            return None
+        node = arguments[0]
+    return node.text if node.type == "identifier" else None
 
 
 def jsx_tags(source: str, grammar: str) -> list[tuple[str, int]]:

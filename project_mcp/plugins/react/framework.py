@@ -65,18 +65,6 @@ def _component_in(
     return next((id_ for id_, component, _, _ in rows if component == imported), None)
 
 
-def _default_exports(context, components) -> dict[str, str | None]:
-    """The default-exported name of each file that defines components."""
-    defaults: dict[str, str | None] = {}
-    for path in components:
-        try:
-            source = (Path(context.project_root) / path).read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            source = ""
-        defaults[path] = default_export_name(source)
-    return defaults
-
-
 def _load_components(context) -> dict[str, list[tuple[int, str, int, int]]]:
     """The (id, name, start line, end line) of each component, by the .js/.ts file defining it.
 
@@ -162,6 +150,22 @@ class ReactFramework:
             return tree_usages.jsx_tags(source, tree_usages.grammar_for(path))
         return usages.jsx_tags(source)
 
+    def _default_export_name(self, path: str, source: str) -> str | None:
+        if self.backend == "tree-sitter":
+            return tree_usages.default_export_name(source, tree_usages.grammar_for(path))
+        return default_export_name(source)
+
+    def _default_exports(self, context, components) -> dict[str, str | None]:
+        """The default-exported name of each file that defines components."""
+        defaults: dict[str, str | None] = {}
+        for path in components:
+            try:
+                source = (Path(context.project_root) / path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                source = ""
+            defaults[path] = self._default_export_name(path, source)
+        return defaults
+
     def detect(self, context) -> bool:
         """True when package.json declares `react` or a JS/TS file imports it."""
         root = context.project_root
@@ -176,7 +180,7 @@ class ReactFramework:
     def _link_dynamic(self, context) -> None:
         """Record lazy and computed components with low confidence, marking their users partial."""
         components = _load_components(context)
-        defaults = _default_exports(context, components)
+        defaults = self._default_exports(context, components)
         context.conn.executemany(
             "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.partial')"
             " WHERE id = ?",
@@ -220,7 +224,7 @@ class ReactFramework:
     def _declare_routes(self, context) -> None:
         """Mark components routed by react-router as pages, linked from the declaring code."""
         components = _load_components(context)
-        defaults = _default_exports(context, components)
+        defaults = self._default_exports(context, components)
         context.conn.executemany(
             "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.routes')"
             " WHERE id = ?",
@@ -262,7 +266,7 @@ class ReactFramework:
     def _link_renders(self, context) -> None:
         """Link each component to the imported project components its JSX renders."""
         components = _load_components(context)
-        defaults = _default_exports(context, components)
+        defaults = self._default_exports(context, components)
         context.conn.executemany(
             "DELETE FROM relationships WHERE relationship_type = 'renders'"
             " AND source_entity_type = 'symbol' AND source_entity_id = ?",
