@@ -32,6 +32,11 @@ class AstroFramework:
     def __init__(self) -> None:
         self._javascript = JavaScriptAnalyzer()
 
+    @property
+    def backend(self) -> str:
+        """The parser backend the frontmatter is analyzed with; it feeds the plugin fingerprint."""
+        return self._javascript.backend
+
     def detect(self, context) -> bool:
         """True when package.json declares `astro` or an astro.config.* file exists."""
         root = context.project_root
