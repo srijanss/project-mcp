@@ -10,6 +10,28 @@
   "relationships": [],
   "symbols": [
     {
+      "end_line": 12,
+      "kind": "method",
+      "language": "javascript",
+      "metadata": null,
+      "name": "render",
+      "path": "app/widget.js",
+      "qualified_name": "app.widget.Widget.render",
+      "start_line": 10,
+      "visibility": "public"
+    },
+    {
+      "end_line": 13,
+      "kind": "class",
+      "language": "javascript",
+      "metadata": null,
+      "name": "Widget",
+      "path": "app/widget.js",
+      "qualified_name": "app.widget.Widget",
+      "start_line": 5,
+      "visibility": "public"
+    },
+    {
       "end_line": 15,
       "kind": "module",
       "language": "javascript",
@@ -21,18 +43,7 @@
       "visibility": "public"
     },
     {
-      "end_line": null,
-      "kind": "class",
-      "language": "javascript",
-      "metadata": null,
-      "name": "Widget",
-      "path": "app/widget.js",
-      "qualified_name": "app.widget.Widget",
-      "start_line": 5,
-      "visibility": "public"
-    },
-    {
-      "end_line": null,
+      "end_line": 3,
       "kind": "function",
       "language": "javascript",
       "metadata": null,
@@ -43,7 +54,7 @@
       "visibility": "public"
     },
     {
-      "end_line": null,
+      "end_line": 8,
       "kind": "method",
       "language": "javascript",
       "metadata": null,
@@ -51,17 +62,6 @@
       "path": "app/widget.js",
       "qualified_name": "app.widget.Widget.constructor",
       "start_line": 6,
-      "visibility": "public"
-    },
-    {
-      "end_line": null,
-      "kind": "method",
-      "language": "javascript",
-      "metadata": null,
-      "name": "render",
-      "path": "app/widget.js",
-      "qualified_name": "app.widget.Widget.render",
-      "start_line": 10,
       "visibility": "public"
     }
   ],
