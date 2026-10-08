@@ -37,3 +37,23 @@ def test_astro_file_without_frontmatter_has_only_its_module_and_component_symbol
 
 def test_astro_module_name_drops_the_astro_suffix():
     assert AstroFramework().module_name(PAGE) == "src.pages.index"
+
+
+def test_crlf_line_endings_keep_frontmatter_symbols_and_line_numbers():
+    source = "---\r\nimport A from './A.astro';\r\nexport function f() {}\r\n---\r\n<A />\r\n"
+
+    analysis = AstroFramework().analyze("src/pages/index.astro", source)
+
+    assert analysis.imports == ["./A.astro"]
+    assert {s["name"]: s["start_line"] for s in analysis.symbols}["f"] == 3
+    (component,) = [s for s in analysis.symbols if s["kind"] == "component"]
+    assert component["end_line"] == 5
+
+
+def test_an_unterminated_fence_leaves_the_whole_file_as_template():
+    source = "---\nimport A from './A.astro';\n<A />\n"
+
+    analysis = AstroFramework().analyze("src/pages/index.astro", source)
+
+    assert analysis.imports == []
+    assert [s["kind"] for s in analysis.symbols] == ["module", "component"]
