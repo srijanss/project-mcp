@@ -4,6 +4,7 @@ import re
 from pathlib import Path, PurePosixPath
 
 from project_mcp.plugins.analysis import FileAnalysis
+from project_mcp.plugins.astro.routes import route_for
 from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
@@ -59,7 +60,13 @@ class AstroFramework:
         for symbol in analysis.symbols:
             if symbol["kind"] == "module":
                 symbol["end_line"] = end_line
-        is_layout = PurePosixPath(path).parts[:2] == ("src", "layouts") or _SLOT.search(template)
+        route = route_for(path)
+        if route:
+            metadata = {"framework_kind": "astro_page", **route}
+        elif PurePosixPath(path).parts[:2] == ("src", "layouts") or _SLOT.search(template):
+            metadata = {"framework_kind": "astro_layout"}
+        else:
+            metadata = {"framework_kind": "astro_component"}
         name = Path(path).stem
         analysis.symbols.append(
             {
@@ -69,7 +76,7 @@ class AstroFramework:
                 "start_line": 1,
                 "end_line": end_line,
                 "visibility": "public",
-                "metadata": {"framework_kind": "astro_layout" if is_layout else "astro_component"},
+                "metadata": metadata,
             }
         )
         return analysis
@@ -89,4 +96,18 @@ class AstroFramework:
         ]
 
     def enrich(self, context) -> None:
-        pass
+        """Tag the module of each .ts/.js file under src/pages as an endpoint with its route."""
+        for path, file_id in context.path_to_file_id.items():
+            route = route_for(path)
+            if route is None or path.endswith(".astro"):
+                continue
+            context.conn.execute(
+                """
+                UPDATE symbols SET metadata_json = json_set(
+                    COALESCE(metadata_json, '{}'), '$.framework_kind', 'astro_endpoint',
+                    '$.route', ?, '$.route_kind', ?
+                )
+                WHERE file_id = ? AND kind = 'module'
+                """,
+                (route["route"], route["route_kind"], file_id),
+            )

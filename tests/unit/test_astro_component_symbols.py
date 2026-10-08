@@ -33,5 +33,5 @@ def test_each_astro_file_yields_a_component_or_layout_symbol(tmp_path):
         "src/components/Card.astro": ("Card", "astro_component"),
         "src/layouts/Base.astro": ("Base", "astro_layout"),
         "src/components/Wrapper.astro": ("Wrapper", "astro_layout"),
-        "src/pages/index.astro": ("index", "astro_component"),
+        "src/pages/index.astro": ("index", "astro_page"),
     }
