@@ -126,3 +126,10 @@ def test_default_export_name_reads_an_export_list_alias_and_ignores_comments():
 
     assert default_export_name(source, "tsx") == "Inner"
     assert default_export_name("/* export default Gone; */\nexport { A };\n", "tsx") is None
+
+
+def test_default_export_name_reads_a_named_function_inside_a_wrapper():
+    source = "export default memo(function Badge() {\n  return <b />;\n});\n"
+
+    assert default_export_name(source, "tsx") == "Badge"
+    assert default_export_name("export default memo(function () {});\n", "tsx") is None

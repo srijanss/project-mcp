@@ -182,3 +182,17 @@ def test_parse_js_calls_leaves_out_calls_through_local_bindings(grammar, body):
     symbols = parse_js_tree("jobs.js", source, grammar)
 
     assert parse_js_calls("jobs.js", source, grammar, symbols) == []
+
+
+def test_parse_js_tree_finds_a_named_function_wrapped_in_a_default_export():
+    source = (
+        "export default memo(function Badge() {\n"
+        "  const label = () => 'b';\n"
+        "  return <b />;\n"
+        "});\n"
+    )
+    symbols = {s["qualified_name"]: s for s in parse_js_tree("badge.tsx", source, "tsx")}
+
+    assert symbols["badge.Badge"]["kind"] == "component"
+    assert (symbols["badge.Badge"]["start_line"], symbols["badge.Badge"]["end_line"]) == (1, 4)
+    assert "badge.Badge.label" in symbols

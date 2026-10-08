@@ -80,12 +80,15 @@ def _aliased_default(statement) -> str | None:
 
 
 def _wrapped_name(node) -> str | None:
-    """The identifier at the core of nested wrapper calls, by their first arguments."""
+    """The identifier or named function at the core of nested wrapper calls, by their first arguments."""
     while node.type == "call_expression":
         arguments = node.field("arguments").children
         if not arguments:
             return None
         node = arguments[0]
+    if node.type == "function_expression":
+        name = node.field("name")
+        return name.text if name is not None else None
     return node.text if node.type == "identifier" else None
 
 

@@ -43,7 +43,23 @@ def parse_js_tree(path: str, source: str, grammar: str) -> list[dict]:
         declaration = statement.field("declaration") if statement.type == "export_statement" else statement
         if declaration is not None:
             symbols.extend(_declared_symbols(module_name, declaration))
+        elif statement.field("value") is not None:
+            function = _wrapped_function(statement.field("value"))
+            if function is not None:
+                symbols.extend(_function_symbols(module_name, function.field("name").text, function))
     return symbols
+
+
+def _wrapped_function(node):
+    """The named function expression at the core of wrapper calls such as `memo(function X() {})`."""
+    while node.type == "call_expression":
+        arguments = node.field("arguments").children
+        if not arguments:
+            return None
+        node = arguments[0]
+    if node.type == "function_expression" and node.field("name") is not None:
+        return node
+    return None
 
 
 def _declared_symbols(parent: str, node) -> list[dict]:
