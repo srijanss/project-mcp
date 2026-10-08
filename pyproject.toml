@@ -11,8 +11,17 @@ dependencies = [
 [project.scripts]
 project-mcp = "project_mcp.main_stdio:main"
 
+[project.optional-dependencies]
+treesitter = [
+    "tree-sitter>=0.26.0",
+    "tree-sitter-javascript>=0.25.0",
+    "tree-sitter-rust>=0.24.2",
+    "tree-sitter-typescript>=0.23.2",
+]
+
 [dependency-groups]
 dev = [
+    "project-mcp[treesitter]",
     "pytest>=8.0.0",
     "pytest-json-report>=1.5.0",
 ]
