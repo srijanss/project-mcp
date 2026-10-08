@@ -203,3 +203,28 @@ def test_parse_js_tree_skips_comments_before_a_wrapped_default_function():
     symbols = {s["qualified_name"]: s for s in parse_js_tree("badge.tsx", source, "tsx")}
 
     assert symbols["badge.Badge"]["kind"] == "component"
+
+
+def test_parse_js_calls_attributes_calls_to_a_wrapped_default_function():
+    source = """\
+function helper() {}
+
+function each(items) {
+  items.map(function visit() {
+    helper();
+  });
+}
+
+export default memo(function Badge() {
+  const inner = () => 1;
+  helper();
+  inner();
+});
+"""
+    symbols = parse_js_tree("badge.js", source, "javascript")
+
+    assert parse_js_calls("badge.js", source, "javascript", symbols) == [
+        ("badge.each", "badge.helper", "calls"),
+        ("badge.Badge", "badge.helper", "calls"),
+        ("badge.Badge", "badge.Badge.inner", "calls"),
+    ]

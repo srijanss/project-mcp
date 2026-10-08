@@ -174,20 +174,20 @@ def parse_js_calls(path: str, source: str, grammar: str, symbols: list[dict]) ->
     return edges
 
 
-def _calls(node, scope: str, class_name: str | None, bound: dict[str, str]):
+def _calls(node, scope: str, class_name: str | None, bound: dict[str, str], wrapped=None):
     """(caller, enclosing class, local bindings, call node) for every call under `node`.
 
     `bound` maps each name a parameter, variable or catch clause binds
-    around the call to the scope it binds it in.
+    around the call to the scope it binds it in. `wrapped` identifies the
+    named function a default export wraps, which is a scope of its own.
     """
     for child in node.children:
-        child_scope, child_class, child_bound = scope, class_name, bound
+        child_scope, child_class, child_bound, child_wrapped = scope, class_name, bound, wrapped
         name = child.field("name")
-        if child.type in ("function_declaration", "method_definition") or (
-            child.type == "variable_declarator"
-            and child.field("value") is not None
-            and child.field("value").type in _FUNCTION_TYPES
-        ):
+        if child.type == "export_statement" and child.field("value") is not None:
+            function = _wrapped_function(child.field("value"))
+            child_wrapped = _identity(function) if function is not None else None
+        if _opens_named_scope(child, wrapped):
             child_scope = f"{scope}.{name.text}"
         elif child.type in _CLASS_TYPES:
             child_scope = child_class = f"{scope}.{name.text}"
@@ -197,7 +197,21 @@ def _calls(node, scope: str, class_name: str | None, bound: dict[str, str]):
             child_bound = bound | dict.fromkeys(_bound_names(child.field("parameter")), scope)
         if child.type == "call_expression":
             yield scope, class_name, bound, child
-        yield from _calls(child, child_scope, child_class, child_bound)
+        yield from _calls(child, child_scope, child_class, child_bound, child_wrapped)
+
+
+def _opens_named_scope(node, wrapped) -> bool:
+    """True for a node `parse_js_tree` records as a function or method symbol."""
+    if node.type in ("function_declaration", "method_definition"):
+        return True
+    if node.type == "variable_declarator":
+        value = node.field("value")
+        return value is not None and value.type in _FUNCTION_TYPES
+    return wrapped is not None and node.type == "function_expression" and _identity(node) == wrapped
+
+
+def _identity(node) -> tuple[int, int, str]:
+    return node.start_line, node.end_line, node.text
 
 
 def _local_names(function) -> list[str]:
