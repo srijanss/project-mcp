@@ -33,6 +33,11 @@ class AstroFramework:
         self._javascript = JavaScriptAnalyzer()
 
     @property
+    def warnings(self) -> list[str]:
+        """The javascript parser's warnings, such as its regex fallback."""
+        return self._javascript.warnings
+
+    @property
     def backend(self) -> str:
         """The parser backend the frontmatter is analyzed with; it feeds the plugin fingerprint."""
         return self._javascript.backend
