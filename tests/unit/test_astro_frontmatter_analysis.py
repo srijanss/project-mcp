@@ -28,10 +28,10 @@ def test_astro_module_symbol_spans_the_whole_file():
     assert (module["start_line"], module["end_line"]) == (1, 5)
 
 
-def test_astro_file_without_frontmatter_is_just_a_module_symbol():
+def test_astro_file_without_frontmatter_has_only_its_module_and_component_symbols():
     analysis = AstroFramework().analyze("src/components/Card.astro", "<div />\n")
 
-    assert [s["kind"] for s in analysis.symbols] == ["module"]
+    assert [s["kind"] for s in analysis.symbols] == ["module", "component"]
     assert analysis.imports == []
 
 

@@ -1,25 +1,29 @@
 import json
 import posixpath
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 
 from project_mcp.plugins.analysis import FileAnalysis
 from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 _FENCE = "---"
+_SLOT = re.compile(r"<slot[\s/>]")
 _EXTENSIONS = (".astro", ".ts", ".tsx", ".js", ".jsx")
 
 
-def _frontmatter(source: str) -> str:
-    """The script between the leading `---` fences, padded with blank lines
-    so its lines keep their numbers in the .astro file; empty without fences."""
+def _split(source: str) -> tuple[str, str]:
+    """The script between the leading `---` fences and the template after them.
+
+    The script is padded with a blank line so its lines keep their numbers in
+    the .astro file; without fences it is empty and the template is the file.
+    """
     lines = source.splitlines()
-    if not lines or lines[0].strip() != _FENCE:
-        return ""
-    for end, line in enumerate(lines[1:], start=1):
-        if line.strip() == _FENCE:
-            return "\n" + "\n".join(lines[1:end])
-    return ""
+    if lines and lines[0].strip() == _FENCE:
+        for end, line in enumerate(lines[1:], start=1):
+            if line.strip() == _FENCE:
+                return "\n" + "\n".join(lines[1:end]), "\n".join(lines[end + 1 :])
+    return "", source
 
 
 class AstroFramework:
@@ -47,11 +51,27 @@ class AstroFramework:
         return self._javascript.module_name(path)
 
     def analyze(self, path: str, source: str) -> FileAnalysis:
-        """Analyze the frontmatter as TypeScript; the whole file is the module."""
-        analysis = self._javascript.analyze(str(Path(path).with_suffix(".ts")), _frontmatter(source))
+        """Analyze the frontmatter as TypeScript; the whole file is the module
+        and the component (or layout) it defines."""
+        script, template = _split(source)
+        analysis = self._javascript.analyze(str(Path(path).with_suffix(".ts")), script)
+        end_line = len(source.splitlines()) or 1
         for symbol in analysis.symbols:
             if symbol["kind"] == "module":
-                symbol["end_line"] = len(source.splitlines()) or 1
+                symbol["end_line"] = end_line
+        is_layout = PurePosixPath(path).parts[:2] == ("src", "layouts") or _SLOT.search(template)
+        name = Path(path).stem
+        analysis.symbols.append(
+            {
+                "name": name,
+                "qualified_name": f"{self.module_name(path)}.{name}",
+                "kind": "component",
+                "start_line": 1,
+                "end_line": end_line,
+                "visibility": "public",
+                "metadata": {"framework_kind": "astro_layout" if is_layout else "astro_component"},
+            }
+        )
         return analysis
 
     def is_test_file(self, path: Path) -> bool:
