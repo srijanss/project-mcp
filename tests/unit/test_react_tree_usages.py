@@ -86,3 +86,9 @@ def test_the_grammar_follows_the_file_suffix():
     assert grammar_for("src/a.js") == "javascript"
     assert grammar_for("src/a.mjs") == "javascript"
     assert grammar_for("src/a.cjs") == "javascript"
+
+
+def test_imported_names_ignore_comments_inside_an_import_list():
+    source = "import { /* row */ A, // note\n  B as C /* end */ } from './ab';\n"
+
+    assert imported_names(source, "tsx") == {"A": ("./ab", "A"), "C": ("./ab", "B")}

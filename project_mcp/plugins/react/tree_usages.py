@@ -37,7 +37,7 @@ def imported_names(source: str, grammar: str) -> dict[str, tuple[str, str]]:
                 names[part.text] = (specifier, "default")
             elif part.type == "named_imports":
                 for item in part.children:
-                    if item.text.startswith("type "):
+                    if item.type != "import_specifier" or item.text.startswith("type "):
                         continue
                     identifiers = [child.text for child in item.children]
                     names[identifiers[-1]] = (specifier, identifiers[0])
