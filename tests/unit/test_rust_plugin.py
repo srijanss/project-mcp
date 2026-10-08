@@ -1,3 +1,6 @@
+import sys
+
+from project_mcp.plugins.rust import analyzer
 from project_mcp.plugins.rust.analyzer import RustAnalyzer
 
 LIB_SOURCE = """use crate::shapes;
@@ -65,3 +68,28 @@ def test_builtin_registry_serves_the_rust_analyzer():
     from project_mcp.plugins.registry import builtin_registry
 
     assert isinstance(builtin_registry().analyzer_for("rust"), RustAnalyzer)
+
+
+def test_analyze_parses_symbols_with_tree_sitter(monkeypatch):
+    monkeypatch.setattr(analyzer, "parse_rust_tree", lambda path, source: [{"qualified_name": "tree"}])
+
+    rust = RustAnalyzer()
+    symbols = rust.analyze("src/lib.rs", LIB_SOURCE).symbols
+
+    assert (rust.backend, rust.warnings) == ("tree-sitter", [])
+    assert symbols == [{"qualified_name": "tree"}]
+
+
+def test_analyze_falls_back_to_the_regex_parser_without_tree_sitter(monkeypatch):
+    monkeypatch.setitem(sys.modules, "tree_sitter_rust", None)
+    monkeypatch.setattr(analyzer, "parse_rust_tree", None)
+
+    rust = RustAnalyzer()
+    symbols = rust.analyze("src/lib.rs", LIB_SOURCE).symbols
+
+    assert rust.backend == "regex"
+    assert rust.warnings == [
+        "falls back to its regex parser: tree_sitter_rust is not installed"
+        " (import of tree_sitter_rust halted; None in sys.modules)"
+    ]
+    assert [s["name"] for s in symbols] == ["src.lib", "Describe", "Widget", "Gadget"]

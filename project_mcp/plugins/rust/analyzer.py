@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from project_mcp.plugins import treesitter
 from project_mcp.plugins.analysis import FileAnalysis
 from project_mcp.plugins.rust.dependencies import list_rust_dependencies
 from project_mcp.plugins.rust.parser import (
@@ -8,9 +9,15 @@ from project_mcp.plugins.rust.parser import (
     extract_rust_use,
     parse_rust_source,
 )
+from project_mcp.plugins.rust.tree_parser import parse_rust_tree
 
 
 class RustAnalyzer:
+    def __init__(self) -> None:
+        problem = treesitter.missing("rust")
+        self.backend = "regex" if problem else "tree-sitter"
+        self.warnings = [f"falls back to its regex parser: {problem}"] if problem else []
+
     def module_name(self, path: str) -> str:
         """The qualified name of the module symbol this file is indexed as."""
         return _module_qualified_name(path)
@@ -25,7 +32,10 @@ class RustAnalyzer:
         return in_test_dir or path.stem.startswith("test_") or path.stem.endswith("_test")
 
     def analyze(self, path: str, source: str) -> FileAnalysis:
-        symbols = parse_rust_source(path, source)
+        if self.backend == "tree-sitter":
+            symbols = parse_rust_tree(path, source)
+        else:
+            symbols = parse_rust_source(path, source)
         module_name = symbols[0]["qualified_name"]
         return FileAnalysis(
             symbols=symbols,
