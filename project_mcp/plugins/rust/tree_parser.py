@@ -10,11 +10,16 @@ _KINDS = {
     "trait_item": "trait",
     "function_item": "function",
     "function_signature_item": "function",
+    "mod_item": "module",
 }
 
 
 def parse_rust_tree(path: str, source: str) -> list[dict]:
-    """The symbols `parse_rust_source` reports, parsed with the rust tree-sitter grammar."""
+    """The symbols declared in `source`, parsed with the rust tree-sitter grammar.
+
+    Unlike `parse_rust_source`, items in inline mods are qualified by the
+    mod, and macro_rules bodies stay opaque.
+    """
     module_name = _module_qualified_name(path)
     symbols = [
         {
@@ -26,13 +31,13 @@ def parse_rust_tree(path: str, source: str) -> list[dict]:
             "visibility": "public",
         }
     ]
-    for node in _walk(treesitter.parse(source, "rust")):
+    for scope, node in _walk(treesitter.parse(source, "rust"), module_name):
         name = node.field("name").text
         public = any(child.type == "visibility_modifier" for child in node.children)
         symbols.append(
             {
                 "name": name,
-                "qualified_name": f"{module_name}.{name}",
+                "qualified_name": f"{scope}.{name}",
                 "kind": _KINDS[node.type],
                 "start_line": node.start_line,
                 "end_line": None,
@@ -42,8 +47,52 @@ def parse_rust_tree(path: str, source: str) -> list[dict]:
     return symbols
 
 
-def _walk(node):
+def parse_rust_implements(path: str, source: str, symbols: list[dict]) -> list[tuple[str, str, str]]:
+    """`implements` edges from each `impl Trait for Type` whose both ends are in `symbols`.
+
+    Generic parameters, where-clauses and paths (`super::Trait`) are looked
+    through; each name resolves to the innermost known item around the impl.
+    """
+    known = {symbol["qualified_name"] for symbol in symbols}
+    module_name = _module_qualified_name(path)
+    edges = []
+    for scope, impl in _walk(treesitter.parse(source, "rust"), module_name, {"impl_item"}):
+        if impl.field("trait") is None:
+            continue
+        type_name = _resolve(_type_name(impl.field("type")), scope, module_name, known)
+        trait_name = _resolve(_type_name(impl.field("trait")), scope, module_name, known)
+        if type_name and trait_name:
+            edges.append((type_name, trait_name, "implements"))
+    return edges
+
+
+def _type_name(node) -> str:
+    """The bare name a type node refers to, without generics or path."""
+    if node.type == "generic_type":
+        return _type_name(node.field("type"))
+    if node.type == "scoped_type_identifier":
+        return node.field("name").text
+    return node.text
+
+
+def _resolve(name: str, scope: str, module_name: str, known: set[str]) -> str | None:
+    while f"{scope}.{name}" not in known:
+        if scope == module_name:
+            return None
+        scope = scope.rpartition(".")[0]
+    return f"{scope}.{name}"
+
+
+def _walk(node, scope: str, types=_KINDS.keys()):
+    """(enclosing module, item) for every item of `types` under `node`.
+
+    An inline `mod` is an item nesting its own scope; a `mod name;`
+    declaration is not, since its file is indexed as a module of its own.
+    """
     for child in node.children:
-        if child.type in _KINDS:
-            yield child
-        yield from _walk(child)
+        if child.type in types and (child.type != "mod_item" or child.field("body") is not None):
+            yield scope, child
+        if child.type == "mod_item":
+            yield from _walk(child, f"{scope}.{child.field('name').text}", types)
+        else:
+            yield from _walk(child, scope, types)

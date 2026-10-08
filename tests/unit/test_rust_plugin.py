@@ -24,10 +24,7 @@ def test_analyze_returns_symbols_trait_impls_and_use_paths():
         ("src.lib.Widget", "struct"),
         ("src.lib.Gadget", "struct"),
     ]
-    assert analysis.symbol_edges == [
-        ("src.lib.Widget", "src.lib.Describe", "implements"),
-        ("src.lib.Missing", "src.lib.Describe", "implements"),
-    ]
+    assert analysis.symbol_edges == [("src.lib.Widget", "src.lib.Describe", "implements")]
     assert analysis.imports == ["crate", "std::fmt"]
 
 
@@ -93,3 +90,11 @@ def test_analyze_falls_back_to_the_regex_parser_without_tree_sitter(monkeypatch)
         " (import of tree_sitter_rust halted; None in sys.modules)"
     ]
     assert [s["name"] for s in symbols] == ["src.lib", "Describe", "Widget", "Gadget"]
+
+
+def test_analyze_links_multiline_generic_trait_impls():
+    source = "pub trait Describe {}\npub struct Wrapper<T>(T);\nimpl<T>\n    Describe for Wrapper<T>\nwhere\n    T: Clone,\n{}\n"
+
+    analysis = RustAnalyzer().analyze("src/lib.rs", source)
+
+    assert analysis.symbol_edges == [("src.lib.Wrapper", "src.lib.Describe", "implements")]

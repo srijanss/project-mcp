@@ -9,7 +9,7 @@ from project_mcp.plugins.rust.parser import (
     extract_rust_use,
     parse_rust_source,
 )
-from project_mcp.plugins.rust.tree_parser import parse_rust_tree
+from project_mcp.plugins.rust.tree_parser import parse_rust_implements, parse_rust_tree
 
 
 class RustAnalyzer:
@@ -34,12 +34,11 @@ class RustAnalyzer:
     def analyze(self, path: str, source: str) -> FileAnalysis:
         if self.backend == "tree-sitter":
             symbols = parse_rust_tree(path, source)
+            symbol_edges = parse_rust_implements(path, source, symbols)
         else:
             symbols = parse_rust_source(path, source)
-        module_name = symbols[0]["qualified_name"]
-        return FileAnalysis(
-            symbols=symbols,
-            symbol_edges=[
+            module_name = symbols[0]["qualified_name"]
+            symbol_edges = [
                 (
                     f"{module_name}.{impl['struct']}",
                     f"{module_name}.{impl['trait']}",
@@ -47,7 +46,10 @@ class RustAnalyzer:
                 )
                 for impl in extract_rust_impls(path, source)
                 if impl["trait"] is not None
-            ],
+            ]
+        return FileAnalysis(
+            symbols=symbols,
+            symbol_edges=symbol_edges,
             imports=[use["path"] for use in extract_rust_use(path, source)],
         )
 
