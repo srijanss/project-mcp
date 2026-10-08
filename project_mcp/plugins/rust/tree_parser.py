@@ -1,5 +1,7 @@
 """Rust symbols read from a tree-sitter syntax tree."""
 
+from pathlib import Path
+
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.rust.parser import _module_qualified_name
 
@@ -50,37 +52,64 @@ def parse_rust_tree(path: str, source: str) -> list[dict]:
 def parse_rust_implements(path: str, source: str, symbols: list[dict]) -> list[tuple[str, str, str]]:
     """`implements` edges from each `impl Trait for Type` whose both ends are in `symbols`.
 
-    Generic parameters, where-clauses and paths (`super::Trait`) are looked
-    through; each name resolves to the innermost known item around the impl.
+    Generic parameters and where-clauses are looked through. A `self::`,
+    `super::` or (in the crate root) `crate::` path names exactly one item;
+    any other path resolves to the innermost known item around the impl.
     """
     known = {symbol["qualified_name"] for symbol in symbols}
     module_name = _module_qualified_name(path)
+    crate_root = module_name if Path(path).stem in ("lib", "main") else None
     edges = []
     for scope, impl in _walk(treesitter.parse(source, "rust"), module_name, {"impl_item"}):
         if impl.field("trait") is None:
             continue
-        type_name = _resolve(_type_name(impl.field("type")), scope, module_name, known)
-        trait_name = _resolve(_type_name(impl.field("trait")), scope, module_name, known)
+        type_name = _resolve(_type_path(impl.field("type")), scope, module_name, crate_root, known)
+        trait_name = _resolve(_type_path(impl.field("trait")), scope, module_name, crate_root, known)
         if type_name and trait_name:
             edges.append((type_name, trait_name, "implements"))
     return edges
 
 
-def _type_name(node) -> str:
-    """The bare name a type node refers to, without generics or path."""
+def _type_path(node) -> list[str]:
+    """The path segments a type node refers to, without generics; a path
+    from the extern prelude (`::x::T`) starts with an empty segment."""
     if node.type == "generic_type":
-        return _type_name(node.field("type"))
+        return _type_path(node.field("type"))
     if node.type == "scoped_type_identifier":
-        return node.field("name").text
-    return node.text
+        path = node.field("path")
+        return (path.text.split("::") if path is not None else [""]) + [node.field("name").text]
+    return [node.text]
 
 
-def _resolve(name: str, scope: str, module_name: str, known: set[str]) -> str | None:
+def _resolve(
+    path: list[str], scope: str, module_name: str, crate_root: str | None, known: set[str]
+) -> str | None:
+    if path[0] == "":
+        return None
+    if path[0] == "crate":
+        if crate_root is None:
+            # The crate root is another file; only the item's own name can match here.
+            return _resolve(path[-1:], scope, module_name, crate_root, known)
+        return _exact(crate_root, path[1:], known)
+    if path[0] == "self":
+        return _exact(scope, path[1:], known)
+    if path[0] == "super":
+        while path[0] == "super":
+            if scope == module_name:
+                return None
+            scope, path = scope.rpartition(".")[0], path[1:]
+        return _exact(scope, path, known)
+    name = ".".join(path)
     while f"{scope}.{name}" not in known:
         if scope == module_name:
             return None
         scope = scope.rpartition(".")[0]
     return f"{scope}.{name}"
+
+
+def _exact(scope: str, path: list[str], known: set[str]) -> str | None:
+    qualified_name = ".".join([scope, *path])
+    return qualified_name if qualified_name in known else None
 
 
 def _walk(node, scope: str, types=_KINDS.keys()):
