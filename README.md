@@ -207,7 +207,7 @@ file, versus a single context-pack call. It reports files opened, bytes, and a
 token proxy for each, plus the percentage reduction per task. The token count
 is a proxy, not a real tokenizer measurement.
 
-## How to add a language plugin
+## How to add a new language analyzer (language plugin)
 
 Adding a language needs no core edits. See `project_mcp/plugins/rust/` for
 the shape.
@@ -229,7 +229,7 @@ the shape.
    `project_mcp/schema.py` or `project_mcp/db.py`. Cover it with tests and a
    fixture project under `tests/fixtures/`.
 
-## How to add a framework plugin
+## How to add a framework analyzer (framework plugin)
 
 1. Write a descriptor with `kind="framework"`, no `extensions`, and
    `requires` naming its language plugins (see `project_mcp/plugins/django/`).
