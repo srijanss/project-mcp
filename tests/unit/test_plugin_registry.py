@@ -179,8 +179,13 @@ def test_registry_loads_registered_framework_plugins():
 def test_builtin_registry_serves_the_django_framework_plugin():
     from project_mcp.plugins.astro.framework import AstroFramework
     from project_mcp.plugins.django.framework import DjangoFramework
+    from project_mcp.plugins.react.framework import ReactFramework
 
-    assert [type(f) for f in builtin_registry().frameworks()] == [DjangoFramework, AstroFramework]
+    assert [type(f) for f in builtin_registry().frameworks()] == [
+        DjangoFramework,
+        AstroFramework,
+        ReactFramework,
+    ]
 
 
 def test_configured_registry_disables_plugins_left_out_of_the_selection(tmp_path):
@@ -203,14 +208,17 @@ def test_configured_registry_disables_plugins_left_out_of_the_selection(tmp_path
         False,
     ]
     assert registry.analyzer_for("rust") is None
-    assert registry.disabled_plugins == {"astro", "javascript", "rust"}
+    assert registry.disabled_plugins == {"astro", "javascript", "react", "rust"}
 
 
 def test_registry_skips_frameworks_whose_required_language_plugin_is_inactive():
     registry = builtin_registry()
     registry.disable("python")
 
-    assert [type(f).__name__ for f in registry.frameworks()] == ["AstroFramework"]
+    assert [type(f).__name__ for f in registry.frameworks()] == [
+        "AstroFramework",
+        "ReactFramework",
+    ]
     assert registry.skipped_frameworks() == {"django": ["python"]}
 
 
@@ -355,7 +363,7 @@ def test_active_plugins_leave_out_disabled_failed_and_skipped_plugins():
     without_python.disable("python")
 
     assert registry.active_plugins() == ["python", "django"]
-    assert without_python.active_plugins() == ["javascript", "rust", "astro"]
+    assert without_python.active_plugins() == ["javascript", "rust", "astro", "react"]
 
 
 TOY_DESCRIPTOR = PluginDescriptor(
@@ -389,7 +397,7 @@ def test_configured_registry_rejects_an_unknown_plugin_in_enabled(tmp_path):
     with pytest.raises(
         ConfigError,
         match=r"unknown plugin pyhton in mcpctl.toml plugins.enabled"
-        r" \(installed: python, javascript, rust, django, astro\)",
+        r" \(installed: python, javascript, rust, django, astro, react\)",
     ):
         configured_registry(config)
 

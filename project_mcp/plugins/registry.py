@@ -18,6 +18,7 @@ BUILTIN_PLUGINS = (
     "project_mcp.plugins.rust.descriptor:DESCRIPTOR",
     "project_mcp.plugins.django.descriptor:DESCRIPTOR",
     "project_mcp.plugins.astro.descriptor:DESCRIPTOR",
+    "project_mcp.plugins.react.descriptor:DESCRIPTOR",
 )
 
 

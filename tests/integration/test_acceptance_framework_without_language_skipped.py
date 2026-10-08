@@ -13,4 +13,4 @@ def test_a_framework_whose_language_plugin_is_disabled_is_skipped_with_a_warning
         "django plugin skipped: it requires the python plugin, which is not active"
     ]
     frameworks = configured_registry(load_config(tmp_path)).frameworks()
-    assert [type(f).__name__ for f in frameworks] == ["AstroFramework"]
+    assert [type(f).__name__ for f in frameworks] == ["AstroFramework", "ReactFramework"]
