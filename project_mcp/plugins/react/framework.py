@@ -4,6 +4,8 @@ import os
 import re
 from pathlib import Path
 
+from project_mcp.plugins.react.pages import is_page_path
+
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 _EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
 _SKIPPED_DIRS = {"node_modules", ".git"}
@@ -52,16 +54,17 @@ class ReactFramework:
         self._tag_components(context)
 
     def _tag_components(self, context) -> None:
-        """Tag the components the javascript plugin found in .js/.ts files as react components."""
+        """Tag the components the javascript plugin found in .js/.ts files, as pages in page locations."""
         for path, file_id in context.path_to_file_id.items():
             if not path.endswith(_EXTENSIONS):
                 continue
+            framework_kind = "react_page" if is_page_path(path) else "react_component"
             context.conn.execute(
                 """
                 UPDATE symbols SET metadata_json = json_set(
-                    COALESCE(metadata_json, '{}'), '$.framework_kind', 'react_component'
+                    COALESCE(metadata_json, '{}'), '$.framework_kind', ?
                 )
                 WHERE file_id = ? AND kind = 'component'
                 """,
-                (file_id,),
+                (framework_kind, file_id),
             )

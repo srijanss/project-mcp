@@ -51,3 +51,20 @@ def test_astro_components_in_a_react_project_are_not_tagged_react(tmp_path):
     )
 
     assert set(kinds.values()) <= {None, "astro_component"}
+
+
+def test_components_in_page_files_are_tagged_react_pages(tmp_path):
+    kinds = _framework_kinds(
+        tmp_path,
+        {
+            "pages/index.tsx": "export default function Home() {\n  return <main />;\n}\n",
+            "app/blog/page.tsx": "export default function Blog() {\n  return <main />;\n}\n",
+            "src/Card.tsx": "export function Card() {\n  return <div />;\n}\n",
+        },
+    )
+
+    assert kinds == {
+        ("pages/index.tsx", "Home"): "react_page",
+        ("app/blog/page.tsx", "Blog"): "react_page",
+        ("src/Card.tsx", "Card"): "react_component",
+    }
