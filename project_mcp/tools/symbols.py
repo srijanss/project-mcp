@@ -3,6 +3,7 @@ from pathlib import Path
 from project_mcp.config import load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import ensure_fresh_index
+from project_mcp.plugins.registry import PluginRegistry, builtin_registry
 
 
 def _current_project_id(conn, project_root: Path) -> int | None:
@@ -42,18 +43,23 @@ def find_symbol(
     kind: str | None = None,
     limit: int | None = None,
     offset: int = 0,
+    registry: PluginRegistry | None = None,
 ) -> list[dict]:
+    if registry is None:
+        registry = builtin_registry()
     conn, project_id = _ensure_indexed(project_root)
 
     # `%` and `_` in the query are literal characters, not LIKE wildcards.
     escaped = query.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     like_query = f"%{escaped}%"
-    # Migrations are generated history that swamps real definitions in results.
+    # Migrations are generated history that swamps real definitions in results;
+    # framework plugins declare which framework kinds mark them.
+    hidden_kinds = [] if include_migrations else sorted(registry.migration_kinds())
     migration_filter = (
-        ""
-        if include_migrations
-        else "AND COALESCE(json_extract(s.metadata_json, '$.framework_kind'), '')"
-        " != 'django_migration'"
+        "AND COALESCE(json_extract(s.metadata_json, '$.framework_kind'), '')"
+        f" NOT IN ({', '.join('?' * len(hidden_kinds))})"
+        if hidden_kinds
+        else ""
     )
     rows = conn.execute(
         f"""
@@ -79,6 +85,7 @@ def find_symbol(
             like_query,
             kind,
             kind,
+            *hidden_kinds,
             query.lower(),
             f"{escaped}%",
             -1 if limit is None else limit,  # SQLite: a negative LIMIT is no limit

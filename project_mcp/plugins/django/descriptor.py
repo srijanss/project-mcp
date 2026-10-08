@@ -8,4 +8,5 @@ DESCRIPTOR = PluginDescriptor(
     kind="framework",
     requires=("python",),
     analyzer="project_mcp.plugins.django.framework:DjangoFramework",
+    migration_kinds=("django_migration",),
 )

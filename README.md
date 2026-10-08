@@ -234,7 +234,9 @@ the shape.
 1. Write a descriptor with `kind="framework"`, no `extensions`, and
    `requires` naming its language plugins (see `project_mcp/plugins/django/`).
    A framework plugin whose language plugin is not active is skipped with a
-   warning.
+   warning. `migration_kinds` lists the `framework_kind`s that mark generated
+   migration history, which `find_symbol` leaves out unless
+   `include_migrations`.
 2. Implement `detect(context) -> bool` and `enrich(context)`, which get a
    `FrameworkContext` after indexing. Enrich already-indexed symbols with
    framework metadata rather than re-parsing the language.

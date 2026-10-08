@@ -145,6 +145,14 @@ class PluginRegistry:
         ]
         return [framework for framework in loaded if framework is not None]
 
+    def migration_kinds(self) -> set[str]:
+        """The `framework_kind`s every registered plugin marks as migrations."""
+        return {
+            kind
+            for descriptor in self._descriptor_by_name.values()
+            for kind in descriptor.migration_kinds
+        }
+
     def skipped_frameworks(self) -> dict[str, list[str]]:
         """Enabled framework plugins skipped, with the inactive plugins they require."""
         return {

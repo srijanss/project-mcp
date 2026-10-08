@@ -2,6 +2,7 @@ from project_mcp.config import load_config
 from project_mcp.db import get_connection
 from project_mcp.indexer import refresh_index, run_scan
 from project_mcp.plugins.descriptor import PluginDescriptor
+from project_mcp.plugins.django.descriptor import DESCRIPTOR as django
 from project_mcp.plugins.python.descriptor import DESCRIPTOR as python
 from project_mcp.plugins.registry import PluginRegistry
 
@@ -54,3 +55,7 @@ def test_frameworks_enrich_only_projects_they_detect(tmp_path):
         ("detect", []),
         ("enrich", []),
     ]
+
+
+def test_django_marks_its_migrations_as_a_migration_kind():
+    assert django.migration_kinds == ("django_migration",)

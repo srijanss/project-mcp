@@ -14,6 +14,8 @@ class PluginDescriptor:
     the plugin's `ecosystem` (e.g. "pyproject.toml" for "python").
     A `kind="framework"` plugin claims no files; its analyzer enriches the
     files of the language plugins named in `requires`.
+    `migration_kinds` are the `framework_kind` values the plugin gives
+    generated migration history, which find_symbol leaves out by default.
     """
 
     name: str
@@ -26,3 +28,4 @@ class PluginDescriptor:
     ecosystem: str | None = None
     kind: str = "language"
     requires: tuple[str, ...] = ()
+    migration_kinds: tuple[str, ...] = ()

@@ -1,6 +1,9 @@
 import shutil
 from pathlib import Path
 
+from project_mcp.db import get_connection
+from project_mcp.plugins.descriptor import PluginDescriptor
+from project_mcp.plugins.registry import PluginRegistry
 from project_mcp.tools.symbols import (
     find_symbol,
     get_dependencies,
@@ -50,6 +53,33 @@ def test_find_symbol_leaves_out_migrations_unless_asked(tmp_path):
     assert "app.models.Widget" in default
     assert not any("migrations" in name for name in default)
     assert any("migrations" in name for name in included)
+
+
+def test_find_symbol_leaves_out_the_migration_kinds_its_registry_declares(tmp_path):
+    (tmp_path / "things.py").write_text("class Thing:\n    pass\n\n\nclass ThingHistory:\n    pass\n")
+    find_symbol(tmp_path, "thing")
+    conn = get_connection(tmp_path)
+    conn.execute(
+        "UPDATE symbols SET metadata_json = json_set(COALESCE(metadata_json, '{}'),"
+        " '$.framework_kind', 'orm_migration') WHERE name = 'ThingHistory'"
+    )
+    conn.commit()
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="orm",
+            version="0.1.0",
+            api_version=1,
+            extensions={},
+            kind="framework",
+            analyzer="orm:Framework",
+            migration_kinds=("orm_migration",),
+        )
+    )
+
+    results = find_symbol(tmp_path, "thing", kind="class", registry=registry)
+
+    assert [r["name"] for r in results] == ["Thing"]
 
 
 def test_find_symbol_ranks_exact_name_then_prefix_then_substring(tmp_path):

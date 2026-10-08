@@ -418,3 +418,21 @@ def test_an_entry_point_reusing_a_registered_plugin_name_is_failed_not_registere
     }
     assert registry.plugin_names().count("python") == 1
     assert registry.fingerprint("python").startswith("python@0.")
+
+
+def test_migration_kinds_gather_every_registered_plugins_declared_kinds():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="orm",
+            version="0.1.0",
+            api_version=1,
+            extensions={},
+            kind="framework",
+            analyzer="orm:Framework",
+            migration_kinds=("orm_migration",),
+        )
+    )
+    registry.register(_descriptor("go", {".go": "go"}))
+
+    assert registry.migration_kinds() == {"orm_migration"}
