@@ -4,6 +4,7 @@ import os
 import re
 from pathlib import Path
 
+from project_mcp.plugins.react.dynamic import computed_components, dynamic_route_lines, lazy_imports
 from project_mcp.plugins.react.pages import is_page_path
 from project_mcp.plugins.react.routes import route_declarations
 from project_mcp.plugins.react.usages import import_candidates, imported_names, jsx_tags
@@ -72,16 +73,18 @@ def _load_components(context) -> dict[str, list[tuple[int, str, int, int]]]:
     return components
 
 
-def _insert_relationship(context, relationship_type: str, source: int, target: int) -> None:
+def _insert_relationship(
+    context, relationship_type: str, source: int, target: int, confidence: str = "high"
+) -> None:
     context.conn.execute(
         """
         INSERT INTO relationships (
             source_entity_type, source_entity_id,
             target_entity_type, target_entity_id,
             relationship_type, confidence
-        ) VALUES ('symbol', ?, 'symbol', ?, ?, 'high')
+        ) VALUES ('symbol', ?, 'symbol', ?, ?, ?)
         """,
-        (source, target, relationship_type),
+        (source, target, relationship_type, confidence),
     )
 
 
@@ -123,6 +126,50 @@ class ReactFramework:
         self._tag_components(context)
         self._link_renders(context)
         self._declare_routes(context)
+        self._link_dynamic(context)
+
+    def _link_dynamic(self, context) -> None:
+        """Record lazy and computed components with low confidence, marking their users partial."""
+        components = _load_components(context)
+        context.conn.executemany(
+            "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.partial')"
+            " WHERE id = ?",
+            [(row[0],) for rows in components.values() for row in rows],
+        )
+        partial: set[int] = set()
+        links: set[tuple[int, int]] = set()
+        for path, file_id in context.path_to_file_id.items():
+            if not path.endswith(_EXTENSIONS):
+                continue
+            try:
+                source = (Path(context.project_root) / path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            rows = components.get(path, [])
+            imports = imported_names(source)
+            lazy = {name: (module, "default") for name, module in lazy_imports(source).items()}
+            computed = computed_components(source)
+            for tag, line in jsx_tags(source):
+                user = _declarer(context, file_id, rows, line)
+                if user is None or (tag not in lazy and tag not in computed):
+                    continue
+                partial.add(user)
+                for name in [tag] if tag in lazy else computed[tag]:
+                    target = _resolve_component(components, path, {**imports, **lazy}, name)
+                    if target is not None and target != user:
+                        links.add((user, target))
+            for line in dynamic_route_lines(source):
+                declarer = _declarer(context, file_id, rows, line)
+                if declarer is not None:
+                    partial.add(declarer)
+        for symbol_id in partial:
+            context.conn.execute(
+                "UPDATE symbols SET metadata_json = json_set(COALESCE(metadata_json, '{}'),"
+                " '$.partial', json('true')) WHERE id = ?",
+                (symbol_id,),
+            )
+        for user, target in sorted(links):
+            _insert_relationship(context, "renders", user, target, confidence="low")
 
     def _declare_routes(self, context) -> None:
         """Mark components routed by react-router as pages, linked from the declaring code."""
