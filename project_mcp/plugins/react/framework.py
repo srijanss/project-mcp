@@ -7,6 +7,7 @@ from pathlib import Path
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.react import tree_usages, usages
 from project_mcp.plugins.react.dynamic import computed_components, dynamic_route_lines, lazy_imports
+from project_mcp.plugins.react.exports import default_export_name
 from project_mcp.plugins.react.pages import is_page_path
 from project_mcp.plugins.react.routes import route_declarations
 from project_mcp.plugins.react.usages import import_candidates
@@ -50,13 +51,30 @@ def _imports_react(root: Path) -> bool:
 
 
 def _component_in(
-    rows: list[tuple[int, str, int, int]], name: str, default_import: bool
+    rows: list[tuple[int, str, int, int]], imported: str, default_name: str | None
 ) -> int | None:
-    """The component called `name` in a file; a default import falls back to its only component."""
-    named = [id_ for id_, component, _, _ in rows if component == name]
-    if named:
-        return named[0]
-    return rows[0][0] if default_import and len(rows) == 1 else None
+    """The component a file's `imported` export refers to.
+
+    A default import means the file's default export; when that can't be
+    read, the file's only component.
+    """
+    if imported == "default":
+        if default_name is None:
+            return rows[0][0] if len(rows) == 1 else None
+        imported = default_name
+    return next((id_ for id_, component, _, _ in rows if component == imported), None)
+
+
+def _default_exports(context, components) -> dict[str, str | None]:
+    """The default-exported name of each file that defines components."""
+    defaults: dict[str, str | None] = {}
+    for path in components:
+        try:
+            source = (Path(context.project_root) / path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            source = ""
+        defaults[path] = default_export_name(source)
+    return defaults
 
 
 def _load_components(context) -> dict[str, list[tuple[int, str, int, int]]]:
@@ -100,7 +118,7 @@ def _insert_relationship(
     )
 
 
-def _resolve_component(components, importer: str, imports, tag: str) -> int | None:
+def _resolve_component(components, defaults, importer: str, imports, tag: str) -> int | None:
     """The project component an imported JSX tag refers to, if any."""
     if tag not in imports:
         return None
@@ -110,11 +128,7 @@ def _resolve_component(components, importer: str, imports, tag: str) -> int | No
     )
     if target_path is None:
         return None
-    return _component_in(
-        components[target_path],
-        tag if imported == "default" else imported,
-        default_import=imported == "default",
-    )
+    return _component_in(components[target_path], imported, defaults[target_path])
 
 
 def _declarer(context, file_id: int, rows, line: int) -> int | None:
@@ -162,6 +176,7 @@ class ReactFramework:
     def _link_dynamic(self, context) -> None:
         """Record lazy and computed components with low confidence, marking their users partial."""
         components = _load_components(context)
+        defaults = _default_exports(context, components)
         context.conn.executemany(
             "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.partial')"
             " WHERE id = ?",
@@ -186,7 +201,7 @@ class ReactFramework:
                     continue
                 partial.add(user)
                 for name in [tag] if tag in lazy else computed[tag]:
-                    target = _resolve_component(components, path, {**imports, **lazy}, name)
+                    target = _resolve_component(components, defaults, path, {**imports, **lazy}, name)
                     if target is not None and target != user:
                         links.add((user, target))
             for line in dynamic_route_lines(source):
@@ -205,6 +220,7 @@ class ReactFramework:
     def _declare_routes(self, context) -> None:
         """Mark components routed by react-router as pages, linked from the declaring code."""
         components = _load_components(context)
+        defaults = _default_exports(context, components)
         context.conn.executemany(
             "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.routes')"
             " WHERE id = ?",
@@ -228,7 +244,7 @@ class ReactFramework:
                 continue
             imports = self._imported_names(path, source)
             for route, tag, line in route_declarations(source):
-                target = _resolve_component(components, path, imports, tag)
+                target = _resolve_component(components, defaults, path, imports, tag)
                 declarer = _declarer(context, file_id, components.get(path, []), line)
                 if target is None or declarer is None:
                     continue
@@ -246,6 +262,7 @@ class ReactFramework:
     def _link_renders(self, context) -> None:
         """Link each component to the imported project components its JSX renders."""
         components = _load_components(context)
+        defaults = _default_exports(context, components)
         context.conn.executemany(
             "DELETE FROM relationships WHERE relationship_type = 'renders'"
             " AND source_entity_type = 'symbol' AND source_entity_id = ?",
@@ -267,9 +284,7 @@ class ReactFramework:
                     (c for c in import_candidates(path, specifier) if c in components), None
                 )
                 target = target_path and _component_in(
-                    components[target_path],
-                    tag if imported == "default" else imported,
-                    default_import=imported == "default",
+                    components[target_path], imported, defaults[target_path]
                 )
                 if target is not None and target != user:
                     links.add((user, target))

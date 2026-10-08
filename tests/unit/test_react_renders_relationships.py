@@ -114,3 +114,42 @@ def test_a_named_import_that_is_not_a_component_is_not_linked_to_the_files_only_
     )
 
     assert _renders(conn) == []
+
+
+def test_a_default_import_links_to_the_exported_default_even_when_its_name_matches_another_component(
+    tmp_path,
+):
+    conn = _scan(
+        tmp_path,
+        {
+            "src/ui.tsx": (
+                "export function Helper() {\n  return <i />;\n}\n\n"
+                "export default function Main() {\n  return <main />;\n}\n"
+            ),
+            "src/App.tsx": (
+                "import Helper from './ui';\nimport Panel from './ui';\n\n"
+                "export function App() {\n  return <><Helper /><Panel /></>;\n}\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == [("src.App.App", "src.ui.Main", "high")]
+
+
+def test_a_default_import_of_a_non_component_does_not_fall_back_to_another_component(tmp_path):
+    conn = _scan(
+        tmp_path,
+        {
+            "src/store.tsx": (
+                "export const store = {};\n\n"
+                "export function Provider() {\n  return <div />;\n}\n\n"
+                "export default store;\n"
+            ),
+            "src/App.tsx": (
+                "import Store from './store';\n\n"
+                "export function App() {\n  return <Store />;\n}\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == []
