@@ -69,7 +69,8 @@ def find_symbol(
         JOIN files f ON f.id = s.file_id
         WHERE f.project_id = ?
           AND (LOWER(s.name) LIKE ? ESCAPE '\\'
-               OR LOWER(s.qualified_name) LIKE ? ESCAPE '\\')
+               OR LOWER(s.qualified_name) LIKE ? ESCAPE '\\'
+               OR json_extract(s.metadata_json, '$.route') = ?)
           AND (? IS NULL OR s.kind = ?)
           {migration_filter}
         ORDER BY (s.kind = 'field'),
@@ -83,6 +84,7 @@ def find_symbol(
             project_id,
             like_query,
             like_query,
+            query,  # a framework route path such as '/blog/[slug]'
             kind,
             kind,
             *hidden_kinds,
