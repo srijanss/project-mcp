@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PreToolUse hook (matcher: Bash, Read). Blocks cold source-code exploration
-# — grep/rg/ag/find/cat over the codebase, or Read of a .py file — until
+# — grep/rg/ag/find/cat over the codebase, or Read of a source file — until
 # project-mcp has been consulted at least once this session.
 #
 # Why this exists: the TTL-gated hooks (project-mcp-reminder.sh /
@@ -26,8 +26,8 @@
 #     mentions the word). Plain `ls`, git commands, test runs, etc. pass
 #     through ungated — those aren't the cold-exploration pattern this
 #     guards against.
-#   - Read: gated only for .py files (this project's v1 scope is Python +
-#     Django). Config, docs, and non-Python reads pass through.
+#   - Read: gated for supported source file extensions. Config and docs
+#     reads pass through.
 set -euo pipefail
 
 input="$(cat)"
@@ -61,9 +61,9 @@ case "$tool" in
     ;;
   Read)
     file_path="$(printf '%s' "$input" | jq -r '.tool_input.file_path // empty')"
-    if [[ "$file_path" == *.py ]]; then
-      is_gated=true
-    fi
+    case "$file_path" in
+      *.py|*.pyi|*.js|*.jsx|*.ts|*.tsx|*.rs|*.astro) is_gated=true ;;
+    esac
     ;;
 esac
 
