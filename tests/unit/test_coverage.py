@@ -29,7 +29,7 @@ def test_coverage_of_files_every_active_plugin_analyzed_is_full(tmp_path):
 
     assert block == {
         "status": "full",
-        "active_plugins": ["python", "javascript", "rust", "django"],
+        "active_plugins": ["python", "javascript", "rust", "django", "astro"],
         "languages": {"python": {"analyzed": True}},
     }
 

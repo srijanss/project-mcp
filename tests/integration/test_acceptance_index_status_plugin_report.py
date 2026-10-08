@@ -37,6 +37,6 @@ def test_index_status_reports_active_plugins_and_failed_plugins_with_errors(
     status = json.loads(result.content[0].text)
 
     assert status["plugins"] == {
-        "active": ["python", "javascript", "django"],
+        "active": ["python", "javascript", "django", "astro"],
         "failed": {"broken": "failed to load: missing toolchain"},
     }

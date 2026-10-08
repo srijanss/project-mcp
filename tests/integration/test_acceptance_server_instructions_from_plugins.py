@@ -6,7 +6,7 @@ def test_server_instructions_name_the_analyzed_languages_and_ask_to_report_gaps(
 
     instructions = build_server(tmp_path).instructions
 
-    assert "Active plugins: python, javascript, django." in instructions
+    assert "Active plugins: python, javascript, django, astro." in instructions
     assert "Analyzed languages: javascript, python, typescript." in instructions
     assert "rust" not in instructions
     assert "tell the user which files were not analyzed" in instructions

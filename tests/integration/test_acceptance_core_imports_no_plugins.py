@@ -11,6 +11,7 @@ PLUGIN_PACKAGES = (
     "project_mcp.plugins.javascript",
     "project_mcp.plugins.rust",
     "project_mcp.plugins.django",
+    "project_mcp.plugins.astro",
 )
 
 

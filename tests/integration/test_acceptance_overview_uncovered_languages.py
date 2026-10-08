@@ -11,5 +11,5 @@ def test_overview_lists_active_plugins_and_uncovered_languages_with_file_counts(
 
     overview = get_project_overview(tmp_path)
 
-    assert overview["active_plugins"] == ["python", "javascript", "django"]
+    assert overview["active_plugins"] == ["python", "javascript", "django", "astro"]
     assert overview["uncovered_languages"] == {"go": 1, "rust": 2}

@@ -713,7 +713,7 @@ def test_index_status_tools_report_the_servers_plugins(tmp_path, tool):
     result = asyncio.run(server.call_tool(tool, {}))
 
     plugins = json.loads(result.content[0].text)["plugins"]
-    assert plugins["active"] == ["python", "javascript", "django"]
+    assert plugins["active"] == ["python", "javascript", "django", "astro"]
 
 
 def test_build_server_sets_instructions_from_its_plugin_registry(tmp_path):
