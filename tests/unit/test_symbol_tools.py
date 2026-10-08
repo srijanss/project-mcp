@@ -274,6 +274,21 @@ def test_find_symbol_treats_like_wildcards_in_the_query_literally(tmp_path):
     assert percent == []
 
 
+def test_find_symbol_matches_a_path_in_the_routes_metadata_array(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "views.py").write_text("def users():\n    pass\n")
+    find_symbol(tmp_path, "users")
+    conn = get_connection(tmp_path)
+    conn.execute(
+        "UPDATE symbols SET metadata_json = '{\"routes\": [\"/users\", \"/people\"]}'"
+        " WHERE name = 'users'"
+    )
+    conn.commit()
+
+    assert [r["name"] for r in find_symbol(tmp_path, "/people")] == ["users"]
+    assert find_symbol(tmp_path, "/peop") == []
+
+
 def _watch_project(root: Path) -> Path:
     (root / "cms").mkdir()
     (root / "cms" / "models.py").write_text(

@@ -70,7 +70,9 @@ def find_symbol(
         WHERE f.project_id = ?
           AND (LOWER(s.name) LIKE ? ESCAPE '\\'
                OR LOWER(s.qualified_name) LIKE ? ESCAPE '\\'
-               OR json_extract(s.metadata_json, '$.route') = ?)
+               OR json_extract(s.metadata_json, '$.route') = ?
+               OR EXISTS (SELECT 1 FROM json_each(s.metadata_json, '$.routes')
+                          WHERE json_each.value = ?))
           AND (? IS NULL OR s.kind = ?)
           {migration_filter}
         ORDER BY (s.kind = 'field'),
@@ -85,6 +87,7 @@ def find_symbol(
             like_query,
             like_query,
             query,  # a framework route path such as '/blog/[slug]'
+            query,  # one of several route paths, as react-router declares them
             kind,
             kind,
             *hidden_kinds,
