@@ -39,7 +39,7 @@ def test_every_tool_response_carries_coverage_scoped_to_the_files_it_touches(tmp
     assert [s["qualified_name"] for s in symbols["items"]] == ["app.run"]
     assert symbols["coverage"] == {
         "status": "full",
-        "active_plugins": ["python", "javascript", "django", "astro"],
+        "active_plugins": ["python", "javascript", "django", "astro", "react"],
         "languages": PYTHON_ONLY,
     }
     assert history["coverage"]["status"] == "none"

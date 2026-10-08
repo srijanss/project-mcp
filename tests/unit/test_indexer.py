@@ -3681,7 +3681,7 @@ def test_get_index_status_with_a_registry_reports_active_and_failed_plugins(tmp_
     status = get_index_status(conn, registry=registry)
 
     assert status["plugins"] == {
-        "active": ["python", "javascript", "django", "astro"],
+        "active": ["python", "javascript", "django", "astro", "react"],
         "failed": {"toy": "failed to load: missing toolchain"},
     }
     assert "plugins" not in get_index_status(conn)

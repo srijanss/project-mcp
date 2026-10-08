@@ -126,5 +126,5 @@ def test_get_project_overview_lists_active_plugins_and_uncovered_languages(tmp_p
 
     overview = get_project_overview(tmp_path, registry=registry)
 
-    assert overview["active_plugins"] == ["python", "javascript", "django", "astro"]
+    assert overview["active_plugins"] == ["python", "javascript", "django", "astro", "react"]
     assert overview["uncovered_languages"] == {"rust": 1}
