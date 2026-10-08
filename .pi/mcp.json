@@ -2,11 +2,21 @@
   "mcpServers": {
     "outside-in-tdd": {
       "command": "/usr/local/bin/mcpctl",
-      "args": ["run", "outside-in-tdd-mcp"]
+      "args": [
+        "run",
+        "outside-in-tdd-mcp"
+      ],
+      "env": {
+        "TDD_ADAPTER_TIMEOUT_S": "120"
+      }
     },
     "project-mcp": {
       "command": "uv",
-      "args": ["run", "--quiet", "project-mcp"]
+      "args": [
+        "run",
+        "--quiet",
+        "project-mcp"
+      ]
     }
   }
 }

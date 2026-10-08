@@ -1,0 +1,13 @@
+version = 1
+
+[[mcp]]
+name = "outside-in-tdd-mcp"
+version = "0.1.14"
+source = "/home/dev/code/outside-in-tdd-mcp"
+manifest_digest = "sha256:e11c137801f3d1d39645bd08cea0ad4f2c13429eb34a1610079e1d46a7dd207c"
+
+[[mcp]]
+name = "project-mcp"
+version = "1.1.0"
+source = "/home/dev/code/project-mcp"
+manifest_digest = "sha256:59b436a3537edf726f5f7889a44581a33ecc7c049b056ecc8ca63e6513733fe0"

@@ -1,21 +1,9 @@
-# Codex CLI project config. Counterpart to .mcp.json (Claude Code) and
-# .claude/settings.json.
-#
-# Portable and committed. outside-in-tdd runs via the mcpctl-installed
-# snapshot; project-mcp runs from this checkout via `uv run` (Codex starts it
-# in the project, and the server's root defaults to the cwd). Hooks are
-# scripts in .agents/ that resolve their own project root.
-#
-# Relative paths here resolve relative to this file's own directory
-# (.codex/), not the project root or runtime cwd.
-
 [mcp_servers.outside-in-tdd]
 command = "/usr/local/bin/mcpctl"
-args = ["run", "outside-in-tdd-mcp"]
-
-[mcp_servers.project-mcp]
-command = "uv"
-args = ["run", "--quiet", "project-mcp"]
+args = [
+    "run",
+    "outside-in-tdd-mcp",
+]
 
 [mcp_servers.outside-in-tdd.tools.init_feature]
 approval_mode = "approve"
@@ -62,30 +50,35 @@ approval_mode = "approve"
 [mcp_servers.outside-in-tdd.tools.reset_feature]
 approval_mode = "approve"
 
+[mcp_servers.project-mcp]
+command = "uv"
+args = [
+    "run",
+    "--quiet",
+    "project-mcp",
+]
 
-# Counterpart to the .claude/settings.json PreToolUse hook — blocks direct
-# pytest/vitest/etc. invocations so agents go through run_tests() instead.
 [[hooks.PreToolUse]]
 matcher = "Bash"
 
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = ".agents/hooks/block-direct-test-runs.sh"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".agents/hooks/block-direct-test-runs.sh"
 
-# Match Claude's command safety guard: block autonomous destructive commands,
-# commits, pushes, branch creation, and shell writes to protected files.
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".agents/hooks/danger-guard.sh"
+
 [[hooks.PreToolUse]]
 matcher = "Bash"
 
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = ".agents/hooks/danger-guard.sh"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".agents/hooks/danger-guard.sh"
 
-# Match Claude's direct-file-edit protection for secrets and infrastructure
-# manifests. The shared script reads the tool's file_path input.
 [[hooks.PreToolUse]]
 matcher = "Edit|Write"
 
-  [[hooks.PreToolUse.hooks]]
-  type = "command"
-  command = ".agents/hooks/protect-sensitive-files.sh"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".agents/hooks/protect-sensitive-files.sh"
