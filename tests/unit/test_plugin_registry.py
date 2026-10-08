@@ -436,3 +436,51 @@ def test_migration_kinds_gather_every_registered_plugins_declared_kinds():
     registry.register(_descriptor("go", {".go": "go"}))
 
     assert registry.migration_kinds() == {"orm_migration"}
+
+
+def test_a_descriptor_with_malformed_migration_kinds_is_failed_and_contributes_nothing():
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="orm",
+            version="0.1.0",
+            api_version=1,
+            extensions={},
+            kind="framework",
+            analyzer="orm:Framework",
+            migration_kinds=None,
+        )
+    )
+
+    assert registry.failed_plugins["orm"].startswith("invalid descriptor: migration_kinds")
+    assert registry.plugin_names() == []
+    assert registry.migration_kinds() == set()
+
+
+@pytest.mark.parametrize("field", ["manifests", "requires", "migration_kinds"])
+@pytest.mark.parametrize("value", [None, "orm_migration", (None,), ("ok", 1)])
+def test_a_descriptor_whose_string_tuple_field_is_malformed_is_failed(field, value):
+    registry = PluginRegistry()
+    registry.register(
+        PluginDescriptor(
+            name="orm",
+            version="0.1.0",
+            api_version=1,
+            extensions={},
+            kind="framework",
+            analyzer="orm:Framework",
+            **{field: value},
+        )
+    )
+
+    assert registry.failed_plugins["orm"].startswith(f"invalid descriptor: {field}")
+    assert registry.plugin_names() == []
+
+
+@pytest.mark.parametrize("extensions", [None, {".orm": None}, {1: "orm"}])
+def test_a_descriptor_whose_extensions_are_not_a_string_mapping_is_failed(extensions):
+    registry = PluginRegistry()
+    registry.register(_descriptor("orm", extensions))
+
+    assert registry.failed_plugins["orm"].startswith("invalid descriptor: extensions")
+    assert registry.language_for(Path("models.orm")) is None

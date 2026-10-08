@@ -29,3 +29,22 @@ class PluginDescriptor:
     kind: str = "language"
     requires: tuple[str, ...] = ()
     migration_kinds: tuple[str, ...] = ()
+
+
+def descriptor_problem(descriptor: PluginDescriptor) -> str | None:
+    """Why `descriptor` is malformed, or None.
+
+    Checks the collection fields core iterates (extensions, manifests,
+    requires, migration_kinds), whose wrong types would otherwise crash
+    every scan or query rather than fail only this plugin.
+    """
+    extensions = descriptor.extensions
+    if not isinstance(extensions, Mapping) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in extensions.items()
+    ):
+        return f"extensions must map extensions to language names, got {extensions!r}"
+    for field in ("manifests", "requires", "migration_kinds"):
+        value = getattr(descriptor, field)
+        if not isinstance(value, (tuple, list)) or not all(isinstance(v, str) for v in value):
+            return f"{field} must be a tuple of strings, got {value!r}"
+    return None

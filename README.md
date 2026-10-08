@@ -216,7 +216,9 @@ the shape.
    `version`, `api_version=1`, the `extensions` it claims mapped to a
    language label, the `analyzer` as `"module:Class"`, and optionally
    `manifests` and `ecosystem`. The descriptor holds data only; the analyzer
-   is imported only when the plugin is enabled.
+   is imported only when the plugin is enabled. A descriptor whose
+   `extensions`, `manifests`, `requires` or `migration_kinds` have the wrong
+   type is reported as failed and registers nothing.
 2. Implement the analyzer: `analyze(path, source) -> FileAnalysis`
    (`project_mcp/plugins/analysis.py`), `resolve_import(importer, spec)`, and
    `is_test_file(path)`. Optional hooks: `module_name`, `list_dependencies`,

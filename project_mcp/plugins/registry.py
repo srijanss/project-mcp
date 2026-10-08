@@ -5,7 +5,7 @@ from importlib.metadata import entry_points
 from pathlib import Path
 
 from project_mcp.config import ConfigError
-from project_mcp.plugins.descriptor import PluginDescriptor
+from project_mcp.plugins.descriptor import PluginDescriptor, descriptor_problem
 from project_mcp.plugins.formats import FORMAT_DESCRIPTORS
 
 SUPPORTED_API_VERSIONS = (1,)
@@ -35,7 +35,14 @@ class PluginRegistry:
             self.register(descriptor)
 
     def register(self, descriptor: PluginDescriptor) -> None:
-        """Label files by `descriptor`; fail its analyzer if its api_version is unsupported."""
+        """Label files by `descriptor`; fail its analyzer if its api_version is unsupported.
+
+        A malformed descriptor is failed and registers nothing.
+        """
+        problem = descriptor_problem(descriptor)
+        if problem is not None:
+            self.failed_plugins[descriptor.name] = f"invalid descriptor: {problem}"
+            return
         if descriptor.api_version not in SUPPORTED_API_VERSIONS:
             supported = ", ".join(str(v) for v in SUPPORTED_API_VERSIONS)
             self.failed_plugins[descriptor.name] = (
