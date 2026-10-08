@@ -34,3 +34,17 @@ def test_pages_and_endpoints_map_to_filesystem_routes(path, route, kind):
 )
 def test_other_files_have_no_route(path):
     assert route_for(path) is None
+
+
+@pytest.mark.parametrize(
+    "path, route, kind",
+    [
+        ("src/pages/[id].json.ts", "/[id].json", "dynamic"),
+        ("src/pages/post-[slug].astro", "/post-[slug]", "dynamic"),
+        ("src/pages/[lang]-[id].astro", "/[lang]-[id]", "dynamic"),
+        ("src/pages/files/[...path].json.ts", "/files/[...path].json", "rest"),
+        ("src/pages/blog-[...rest].astro", "/blog-[...rest]", "rest"),
+    ],
+)
+def test_parameters_inside_a_segment_make_the_route_dynamic_or_rest(path, route, kind):
+    assert route_for(path) == {"route": route, "route_kind": kind}

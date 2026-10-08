@@ -1,7 +1,10 @@
+import re
 from pathlib import PurePosixPath
 
 _PAGES = ("src", "pages")
 _PAGE_EXTENSIONS = {".astro", ".ts", ".js"}
+_REST = re.compile(r"\[\.\.\.[^\]]+\]")
+_PARAM = re.compile(r"\[[^\]]+\]")
 
 
 def route_for(path: str) -> dict | None:
@@ -20,10 +23,6 @@ def route_for(path: str) -> dict | None:
     segments[-1] = last.stem
     if segments[-1] == "index":
         segments.pop()
-    kind = "static"
-    for segment in segments:
-        if segment.startswith("[...") and segment.endswith("]"):
-            kind = "rest"
-        elif segment.startswith("[") and segment.endswith("]") and kind == "static":
-            kind = "dynamic"
-    return {"route": "/" + "/".join(segments), "route_kind": kind}
+    route = "/" + "/".join(segments)
+    kind = "rest" if _REST.search(route) else "dynamic" if _PARAM.search(route) else "static"
+    return {"route": route, "route_kind": kind}
