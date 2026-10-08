@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from project_mcp.plugins.react.pages import is_page_path
+from project_mcp.plugins.react.routes import route_declarations
 from project_mcp.plugins.react.usages import import_candidates, imported_names, jsx_tags
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
@@ -71,17 +72,45 @@ def _load_components(context) -> dict[str, list[tuple[int, str, int, int]]]:
     return components
 
 
-def _insert_renders(context, user: int, target: int) -> None:
+def _insert_relationship(context, relationship_type: str, source: int, target: int) -> None:
     context.conn.execute(
         """
         INSERT INTO relationships (
             source_entity_type, source_entity_id,
             target_entity_type, target_entity_id,
             relationship_type, confidence
-        ) VALUES ('symbol', ?, 'symbol', ?, 'renders', 'high')
+        ) VALUES ('symbol', ?, 'symbol', ?, ?, 'high')
         """,
-        (user, target),
+        (source, target, relationship_type),
     )
+
+
+def _resolve_component(components, importer: str, imports, tag: str) -> int | None:
+    """The project component an imported JSX tag refers to, if any."""
+    if tag not in imports:
+        return None
+    specifier, imported = imports[tag]
+    target_path = next(
+        (c for c in import_candidates(importer, specifier) if c in components), None
+    )
+    if target_path is None:
+        return None
+    return _component_in(
+        components[target_path],
+        tag if imported == "default" else imported,
+        default_import=imported == "default",
+    )
+
+
+def _declarer(context, file_id: int, rows, line: int) -> int | None:
+    """The component enclosing `line`, else the file's module symbol."""
+    enclosing = next((id_ for id_, _, start, end in rows if start <= line <= end), None)
+    if enclosing is not None:
+        return enclosing
+    row = context.conn.execute(
+        "SELECT id FROM symbols WHERE file_id = ? AND kind = 'module'", (file_id,)
+    ).fetchone()
+    return row[0] if row else None
 
 
 class ReactFramework:
@@ -93,6 +122,48 @@ class ReactFramework:
     def enrich(self, context) -> None:
         self._tag_components(context)
         self._link_renders(context)
+        self._declare_routes(context)
+
+    def _declare_routes(self, context) -> None:
+        """Mark components routed by react-router as pages, linked from the declaring code."""
+        components = _load_components(context)
+        context.conn.executemany(
+            "UPDATE symbols SET metadata_json = json_remove(metadata_json, '$.routes')"
+            " WHERE id = ?",
+            [(row[0],) for rows in components.values() for row in rows],
+        )
+        context.conn.execute(
+            "DELETE FROM relationships WHERE relationship_type = 'routes_to'"
+            " AND source_entity_type = 'symbol'"
+            " AND source_entity_id IN (SELECT s.id FROM symbols s JOIN files f"
+            " ON f.id = s.file_id WHERE f.project_id = ?)",
+            (context.project_id,),
+        )
+        routes: dict[int, set[str]] = {}
+        links: set[tuple[int, int]] = set()
+        for path, file_id in context.path_to_file_id.items():
+            if not path.endswith(_EXTENSIONS):
+                continue
+            try:
+                source = (Path(context.project_root) / path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            imports = imported_names(source)
+            for route, tag, line in route_declarations(source):
+                target = _resolve_component(components, path, imports, tag)
+                declarer = _declarer(context, file_id, components.get(path, []), line)
+                if target is None or declarer is None:
+                    continue
+                routes.setdefault(target, set()).add(route)
+                links.add((declarer, target))
+        for target, paths in routes.items():
+            context.conn.execute(
+                "UPDATE symbols SET metadata_json = json_set(COALESCE(metadata_json, '{}'),"
+                " '$.framework_kind', 'react_page', '$.routes', json(?)) WHERE id = ?",
+                (json.dumps(sorted(paths)), target),
+            )
+        for declarer, target in sorted(links):
+            _insert_relationship(context, "routes_to", declarer, target)
 
     def _link_renders(self, context) -> None:
         """Link each component to the imported project components its JSX renders."""
@@ -125,7 +196,7 @@ class ReactFramework:
                 if target is not None and target != user:
                     links.add((user, target))
             for user, target in sorted(links):
-                _insert_renders(context, user, target)
+                _insert_relationship(context, "renders", user, target)
 
     def _tag_components(self, context) -> None:
         """Tag the components the javascript plugin found in .js/.ts files, as pages in page locations."""
