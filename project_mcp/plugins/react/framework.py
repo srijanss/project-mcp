@@ -4,10 +4,12 @@ import os
 import re
 from pathlib import Path
 
+from project_mcp.plugins import treesitter
+from project_mcp.plugins.react import tree_usages, usages
 from project_mcp.plugins.react.dynamic import computed_components, dynamic_route_lines, lazy_imports
 from project_mcp.plugins.react.pages import is_page_path
 from project_mcp.plugins.react.routes import route_declarations
-from project_mcp.plugins.react.usages import import_candidates, imported_names, jsx_tags
+from project_mcp.plugins.react.usages import import_candidates
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 _EXTENSIONS = (".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs")
@@ -58,18 +60,28 @@ def _component_in(
 
 
 def _load_components(context) -> dict[str, list[tuple[int, str, int, int]]]:
-    """The (id, name, start line, end line) of each component, by the .js/.ts file defining it."""
+    """The (id, name, start line, end line) of each component, by the .js/.ts file defining it.
+
+    The regex parser records no end line; a component then runs to the next one.
+    """
     components: dict[str, list[tuple[int, str, int, int]]] = {}
     for symbol_id, path, name, start, end in context.conn.execute(
         """
         SELECT s.id, f.path, s.name, s.start_line, s.end_line
         FROM symbols s JOIN files f ON f.id = s.file_id
         WHERE f.project_id = ? AND s.kind = 'component'
+        ORDER BY s.start_line
         """,
         (context.project_id,),
     ):
         if path.endswith(_EXTENSIONS):
             components.setdefault(path, []).append((symbol_id, name, start, end))
+    for path, rows in components.items():
+        ends = [start - 1 for _, _, start, _ in rows[1:]] + [float("inf")]
+        components[path] = [
+            (id_, name, start, end if end is not None else next_end)
+            for (id_, name, start, end), next_end in zip(rows, ends)
+        ]
     return components
 
 
@@ -117,6 +129,25 @@ def _declarer(context, file_id: int, rows, line: int) -> int | None:
 
 
 class ReactFramework:
+    def __init__(self) -> None:
+        problem = (
+            treesitter.missing("javascript")
+            or treesitter.missing("typescript")
+            or treesitter.missing("tsx")
+        )
+        self.backend = "regex" if problem else "tree-sitter"
+        self.warnings = [f"falls back to its regex parser: {problem}"] if problem else []
+
+    def _imported_names(self, path: str, source: str) -> dict[str, tuple[str, str]]:
+        if self.backend == "tree-sitter":
+            return tree_usages.imported_names(source, tree_usages.grammar_for(path))
+        return usages.imported_names(source)
+
+    def _jsx_tags(self, path: str, source: str) -> list[tuple[str, int]]:
+        if self.backend == "tree-sitter":
+            return tree_usages.jsx_tags(source, tree_usages.grammar_for(path))
+        return usages.jsx_tags(source)
+
     def detect(self, context) -> bool:
         """True when package.json declares `react` or a JS/TS file imports it."""
         root = context.project_root
@@ -146,10 +177,10 @@ class ReactFramework:
             except (OSError, UnicodeDecodeError):
                 continue
             rows = components.get(path, [])
-            imports = imported_names(source)
+            imports = self._imported_names(path, source)
             lazy = {name: (module, "default") for name, module in lazy_imports(source).items()}
             computed = computed_components(source)
-            for tag, line in jsx_tags(source):
+            for tag, line in self._jsx_tags(path, source):
                 user = _declarer(context, file_id, rows, line)
                 if user is None or (tag not in lazy and tag not in computed):
                     continue
@@ -195,7 +226,7 @@ class ReactFramework:
                 source = (Path(context.project_root) / path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            imports = imported_names(source)
+            imports = self._imported_names(path, source)
             for route, tag, line in route_declarations(source):
                 target = _resolve_component(components, path, imports, tag)
                 declarer = _declarer(context, file_id, components.get(path, []), line)
@@ -225,9 +256,9 @@ class ReactFramework:
                 source = (Path(context.project_root) / path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            imports = imported_names(source)
+            imports = self._imported_names(path, source)
             links = set()
-            for tag, line in jsx_tags(source):
+            for tag, line in self._jsx_tags(path, source):
                 user = next((id_ for id_, _, start, end in rows if start <= line <= end), None)
                 if tag not in imports or user is None:
                     continue

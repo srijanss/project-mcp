@@ -4,6 +4,7 @@ import re
 from pathlib import Path, PurePosixPath
 
 from project_mcp.plugins.analysis import FileAnalysis
+from project_mcp.plugins.astro import tree_usages
 from project_mcp.plugins.astro.routes import route_for
 from project_mcp.plugins.astro.usages import default_imports, rendered_tags
 from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
@@ -138,7 +139,11 @@ class AstroFramework:
             except (OSError, UnicodeDecodeError):
                 continue
             script, template = _split(source)
-            imports = default_imports(script)
+            imports = (
+                tree_usages.default_imports(script)
+                if self.backend == "tree-sitter"
+                else default_imports(script)
+            )
             targets = {
                 component_ids[candidate]
                 for tag in rendered_tags(template) & imports.keys()
