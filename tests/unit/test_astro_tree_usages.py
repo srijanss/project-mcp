@@ -2,7 +2,7 @@ import pytest
 
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.astro import usages
-from project_mcp.plugins.astro.tree_usages import default_imports
+from project_mcp.plugins.astro.tree_usages import default_imports, named_imports
 
 pytestmark = pytest.mark.skipif(
     treesitter.missing("typescript") is not None, reason="tree-sitter is not installed"
@@ -45,3 +45,21 @@ def test_commented_out_and_type_only_imports_are_skipped():
 )
 def test_the_tree_and_regex_parsers_agree(script):
     assert default_imports(script) == usages.default_imports(script)
+
+
+def test_named_imports_come_from_the_syntax_tree_and_agree_with_the_regex_parser():
+    script = (
+        "\nimport { Button, Link as Anchor } from '../ui';\n"
+        "import Card, {\n  Header,\n  type Props,\n} from './Card';\n"
+        "import type { Shape } from './shape';\n"
+        "// import { Ghost } from './ghost';\n"
+        "import * as UI from './all';\n"
+    )
+
+    assert named_imports(script) == {
+        "Button": ("../ui", "Button"),
+        "Anchor": ("../ui", "Link"),
+        "Header": ("./Card", "Header"),
+    }
+    assert named_imports("\nimport { default as Frame } from './ui';\n") == {"Frame": ("./ui", "default")}
+    assert named_imports(script) == usages.named_imports(script.replace("// import { Ghost } from './ghost';\n", ""))

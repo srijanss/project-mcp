@@ -1,4 +1,4 @@
-from project_mcp.plugins.astro.usages import default_imports, rendered_tags
+from project_mcp.plugins.astro.usages import default_imports, named_imports, rendered_tags
 
 
 def test_default_imports_map_local_names_to_specifiers():
@@ -37,3 +37,20 @@ def test_type_only_and_member_text_are_not_default_imports():
 
     assert default_imports(script) == {}
 
+
+
+def test_named_imports_map_local_names_to_specifier_and_exported_name():
+    script = (
+        "import { Button, Link as Anchor } from '../ui';\n"
+        "import Card, {\n  Header,\n  type Props,\n} from './Card';\n"
+        "import type { Shape } from './shape';\n"
+        "import Plain from './plain'; import { Inline } from './inline';\n"
+        "import * as UI from './all';\n"
+    )
+
+    assert named_imports(script) == {
+        "Button": ("../ui", "Button"),
+        "Anchor": ("../ui", "Link"),
+        "Header": ("./Card", "Header"),
+        "Inline": ("./inline", "Inline"),
+    }

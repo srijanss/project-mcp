@@ -1,5 +1,6 @@
 """The default imports of a frontmatter script, read from a tree-sitter syntax tree."""
 from project_mcp.plugins import treesitter
+from project_mcp.plugins.react import tree_usages as react_tree_usages
 
 
 def default_imports(script: str) -> dict[str, str]:
@@ -19,3 +20,13 @@ def default_imports(script: str) -> dict[str, str]:
         if default is not None:
             imports[default.text] = statement.field("source").text[1:-1]
     return imports
+
+
+def named_imports(script: str) -> dict[str, tuple[str, str]]:
+    """The (module specifier, exported name) behind each name a frontmatter script imports by name."""
+    defaults = default_imports(script)
+    return {
+        name: imported
+        for name, imported in react_tree_usages.imported_names(script, "typescript").items()
+        if name not in defaults
+    }

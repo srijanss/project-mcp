@@ -51,3 +51,33 @@ def test_astro_resolves_a_react_default_import_to_the_exported_component_on_eith
         """
     ).fetchall()
     assert renders == [("src.Badge.Badge",), ("src.Solo.Solo",)]
+
+
+def test_astro_links_a_named_import_only_to_the_component_exported_under_that_name(tmp_path):
+    files = {
+        "package.json": FILES["package.json"],
+        "src/ui.tsx": (
+            "export function Button() {\n  return <button />;\n}\n\n"
+            "export function Missing() {\n  return <i />;\n}\n\n"
+            "export default function Shell() {\n  return <div />;\n}\n"
+        ),
+        "src/pages/index.astro": (
+            "---\n"
+            "import { Button as Btn, Gone, default as Frame } from '../ui';\n"
+            "---\n<Btn /><Gone /><Frame />\n"
+        ),
+    }
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    renders = conn.execute(
+        """
+        SELECT dst.qualified_name FROM relationships r
+        JOIN symbols dst ON dst.id = r.target_entity_id
+        WHERE r.relationship_type = 'renders' ORDER BY 1
+        """
+    ).fetchall()
+    assert renders == [("src.ui.Button",), ("src.ui.Shell",)]

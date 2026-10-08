@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 from project_mcp.plugins.analysis import FileAnalysis
 from project_mcp.plugins.astro import tree_usages
 from project_mcp.plugins.astro.routes import route_for
-from project_mcp.plugins.astro.usages import default_imports, rendered_tags
+from project_mcp.plugins.astro.usages import default_imports, named_imports, rendered_tags
 from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
 from project_mcp.plugins.react import tree_usages as react_tree_usages
 from project_mcp.plugins.react.exports import default_export_name
@@ -153,16 +153,16 @@ class AstroFramework:
             except (OSError, UnicodeDecodeError):
                 continue
             script, template = _split(source)
-            imports = (
-                tree_usages.default_imports(script)
-                if self.backend == "tree-sitter"
-                else default_imports(script)
-            )
+            imports = self._imports(script)
             targets = set()
             for tag in rendered_tags(template) & imports.keys():
-                for candidate in self.resolve_import(path, imports[tag]):
-                    if candidate in component_ids:
+                specifier, imported = imports[tag]
+                for candidate in self.resolve_import(path, specifier):
+                    if candidate in component_ids and imported == "default":
                         targets.add(component_ids[candidate])
+                    elif candidate in script_components and imported != "default":
+                        rows = script_components[candidate]
+                        targets.add(next((id_ for id_, name in rows if name == imported), None))
                     elif candidate in script_components:
                         if candidate not in defaults:
                             defaults[candidate] = self._default_component(
@@ -181,6 +181,15 @@ class AstroFramework:
                     """,
                     (source_id, target_id),
                 )
+
+    def _imports(self, script: str) -> dict[str, tuple[str, str]]:
+        """The (module specifier, imported name) behind each name a frontmatter
+        script imports; a default import's imported name is "default"."""
+        if self.backend == "tree-sitter":
+            defaults, named = tree_usages.default_imports(script), tree_usages.named_imports(script)
+        else:
+            defaults, named = default_imports(script), named_imports(script)
+        return {**{name: (specifier, "default") for name, specifier in defaults.items()}, **named}
 
     def _default_component(self, context, path: str, rows: list[tuple[int, str]]) -> int | None:
         """The component a JS/TS file exports as its default; when that can't be
