@@ -1,4 +1,5 @@
 import json
+import posixpath
 from pathlib import Path
 
 from project_mcp.plugins.analysis import FileAnalysis
@@ -6,6 +7,7 @@ from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 _FENCE = "---"
+_EXTENSIONS = (".astro", ".ts", ".tsx", ".js", ".jsx")
 
 
 def _frontmatter(source: str) -> str:
@@ -57,7 +59,14 @@ class AstroFramework:
 
     def resolve_import(self, importer: str, module: str) -> list[str]:
         """Candidate files for a relative module specifier; bare packages resolve to none."""
-        return self._javascript.resolve_import(importer, module)
+        if not module.startswith("."):
+            return []
+        base = posixpath.normpath(posixpath.join(posixpath.dirname(importer), module))
+        if base.endswith(_EXTENSIONS):
+            return [base]
+        return [base + ext for ext in _EXTENSIONS] + [
+            f"{base}/index{ext}" for ext in _EXTENSIONS
+        ]
 
     def enrich(self, context) -> None:
         pass
