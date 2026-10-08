@@ -120,3 +120,58 @@ def _symbol(name: str, qualified_name: str, kind: str, start_line: int, end_line
         "end_line": end_line,
         "visibility": "public",
     }
+
+
+def parse_js_calls(path: str, source: str, grammar: str, symbols: list[dict]) -> list[tuple[str, str, str]]:
+    """`calls` edges between `symbols`, one per (caller, callee) pair, in source order.
+
+    A plain call `f()` resolves to the innermost known `f` around the caller
+    and `this.m()` to a method of the enclosing class. Calls through any
+    other expression are dynamic and left out.
+    """
+    known = {symbol["qualified_name"] for symbol in symbols}
+    module_name = _module_qualified_name(path)
+    edges = []
+    for caller, class_name, call in _calls(treesitter.parse(source, grammar), module_name, None):
+        callee = _callee(call.field("function"), caller, class_name, module_name, known)
+        edge = (caller, callee, "calls")
+        if caller in known and callee is not None and edge not in edges:
+            edges.append(edge)
+    return edges
+
+
+def _calls(node, scope: str, class_name: str | None):
+    """(caller, enclosing class, call node) for every call under `node`."""
+    for child in node.children:
+        child_scope, child_class = scope, class_name
+        name = child.field("name")
+        if child.type in ("function_declaration", "method_definition") or (
+            child.type == "variable_declarator"
+            and child.field("value") is not None
+            and child.field("value").type in _FUNCTION_TYPES
+        ):
+            child_scope = f"{scope}.{name.text}"
+        elif child.type in _CLASS_TYPES:
+            child_scope = child_class = f"{scope}.{name.text}"
+        if child.type == "call_expression":
+            yield scope, class_name, child
+        yield from _calls(child, child_scope, child_class)
+
+
+def _callee(function, caller: str, class_name: str | None, module_name: str, known: set[str]) -> str | None:
+    if function.type == "identifier":
+        scope = caller
+        while True:
+            if f"{scope}.{function.text}" in known:
+                return f"{scope}.{function.text}"
+            if scope == module_name:
+                return None
+            scope = scope.rpartition(".")[0]
+    if (
+        function.type == "member_expression"
+        and function.field("object").type == "this"
+        and class_name is not None
+        and f"{class_name}.{function.field('property').text}" in known
+    ):
+        return f"{class_name}.{function.field('property').text}"
+    return None

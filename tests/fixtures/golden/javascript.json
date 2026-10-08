@@ -7,7 +7,21 @@
       "path": "app/widget.js"
     }
   ],
-  "relationships": [],
+  "relationships": [
+    {
+      "confidence": "high",
+      "evidence": null,
+      "relationship_type": "calls",
+      "source": {
+        "path": "app/widget.js",
+        "symbol": "app.widget.Widget.render"
+      },
+      "target": {
+        "path": "app/widget.js",
+        "symbol": "app.widget.formatLabel"
+      }
+    }
+  ],
   "symbols": [
     {
       "end_line": 12,

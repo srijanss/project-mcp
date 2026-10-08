@@ -1,7 +1,7 @@
 import pytest
 
 from project_mcp.plugins.javascript.parser import parse_js_source
-from project_mcp.plugins.javascript.tree_parser import parse_js_tree
+from project_mcp.plugins.javascript.tree_parser import parse_js_calls, parse_js_tree
 
 JS_SOURCE = """\
 import React from 'react';
@@ -129,3 +129,32 @@ class Box {
     names = {s["qualified_name"] for s in parse_js_tree("nest.js", source, "javascript")}
 
     assert {"nest.outer.inner", "nest.outer.inner.leaf", "nest.Box.open.peek"} <= names
+
+
+def test_parse_js_calls_resolves_static_calls_to_the_innermost_known_function():
+    source = """\
+function helper() {}
+function run() {
+  function helper() {}
+  helper();
+  [1].map((n) => format(n));
+  this.missing();
+  obj.helper();
+  lookup[name]();
+}
+function format() {}
+class Job {
+  start() {
+    this.step();
+    this.step();
+  }
+  step() {}
+}
+"""
+    symbols = parse_js_tree("jobs.js", source, "javascript")
+
+    assert parse_js_calls("jobs.js", source, "javascript", symbols) == [
+        ("jobs.run", "jobs.run.helper", "calls"),
+        ("jobs.run", "jobs.format", "calls"),
+        ("jobs.Job.start", "jobs.Job.step", "calls"),
+    ]

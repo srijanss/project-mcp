@@ -101,3 +101,11 @@ def test_analyze_falls_back_to_the_regex_parser_without_tree_sitter(monkeypatch)
         " (import of tree_sitter_typescript halted; None in sys.modules)"
     ]
     assert [s["kind"] for s in symbols] == ["module", "component"]
+
+
+def test_analyze_reports_static_calls_as_symbol_edges():
+    source = "function a() { b(); }\nfunction b() {}\n"
+
+    analysis = JavaScriptAnalyzer().analyze("src/calls.js", source)
+
+    assert analysis.symbol_edges == [("src.calls.a", "src.calls.b", "calls")]

@@ -9,7 +9,7 @@ from project_mcp.plugins.javascript.parser import (
     extract_js_imports,
     parse_js_source,
 )
-from project_mcp.plugins.javascript.tree_parser import parse_js_tree
+from project_mcp.plugins.javascript.tree_parser import parse_js_calls, parse_js_tree
 
 _EXTENSIONS = (".js", ".jsx", ".ts", ".tsx")
 # file suffix -> the tree-sitter grammar that parses it
@@ -37,11 +37,15 @@ class JavaScriptAnalyzer:
 
     def analyze(self, path: str, source: str) -> FileAnalysis:
         if self.backend == "tree-sitter":
-            symbols = parse_js_tree(path, source, _GRAMMARS[Path(path).suffix])
+            grammar = _GRAMMARS[Path(path).suffix]
+            symbols = parse_js_tree(path, source, grammar)
+            symbol_edges = parse_js_calls(path, source, grammar, symbols)
         else:
             symbols = parse_js_source(path, source)
+            symbol_edges = []
         return FileAnalysis(
             symbols=symbols,
+            symbol_edges=symbol_edges,
             imports=[
                 imp["module"]
                 for imp in extract_js_imports(path, source)
