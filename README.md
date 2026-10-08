@@ -15,24 +15,30 @@ cost; the client's own filesystem and shell tools still handle raw file access.
 The server is not tied to any one repository. It is pointed at a project root
 and indexes whatever it finds there. The core schema, analyzer registry, and
 context-pack tool contracts are language-neutral; language and framework
-support are added as analyzers (see below).
+support are added as plugins (see below). Core imports no plugin module.
 
 ## Supported languages and frameworks
 
-- Python: symbols, imports, static calls, pytest test discovery, dependency
+Each is a built-in plugin under `project_mcp/plugins/`:
+
+- `python`: symbols, imports, static calls, pytest test discovery, dependency
   manifests (`pyproject.toml`, `uv.lock`, `requirements*.txt`).
-- Django: framework metadata enrichment.
-- JavaScript/TypeScript: generic symbols (functions, classes, methods,
-  components), imports, exports. Framework-specific enrichment (React,
-  Astro, etc.) is not yet implemented.
-- Rust: symbols (modules, structs, enums, traits, functions, impl blocks),
+- `django` (framework, requires `python`): models, views, services, URL
+  routes, and migrations enrichment.
+- `javascript` (`.js`, `.jsx`, `.ts`, `.tsx`): generic symbols (functions,
+  classes, methods, components), imports, exports, and npm dependency
+  manifests (`package.json`, `package-lock.json`).
+- `rust`: symbols (modules, structs, enums, traits, functions, impl blocks),
   `use` relationships, trait-implementation relationships, and Cargo
   dependency manifests (`Cargo.toml`, `Cargo.lock`).
-- Language-neutral: filesystem discovery, git history, architecture docs,
-  legacy signals.
+- Language-neutral (core, no plugin needed): filesystem discovery, git
+  history, architecture docs, legacy signals.
 
-npm dependency manifests and React/Astro framework enrichment are deferred
-to post-v1 adapters and are not indexed today.
+React and Astro framework enrichment is not implemented yet.
+
+Files no active plugin covers are still indexed at file level (path,
+language label, size, git and architecture facts), with no symbols or
+relationships.
 
 ## Setup
 
@@ -64,6 +70,26 @@ Consider adding `.project-mcp/` to the project's `.gitignore`.
 the legacy thresholds `large_file_lines` (500), `large_symbol_lines` (100),
 `high_churn_count` (20), `high_fan_in_count` (15), `high_fan_out_count` (15),
 `high_temporal_coupling_count` (5). Thresholds must be non-negative integers.
+`max_file_bytes` (default 1 MiB) skips larger files during discovery.
+
+### Plugin selection
+
+Plugins are chosen in the project's `mcpctl.toml`:
+
+```toml
+[plugins]
+enabled = ["python", "django"]   # omit to enable every installed plugin
+disabled = ["rust"]
+
+[plugins.python]                 # optional per-plugin settings
+# ...
+```
+
+An unknown name in `enabled`, a malformed `[plugins]` table, or two enabled
+language plugins claiming the same extension is a startup config error.
+`enabled = []` indexes at file level only and logs a warning. A disabled
+plugin's files keep their language label and report `analyzed: false`.
+Changing a plugin's version or settings re-indexes that plugin's files.
 
 ### Default excludes
 
@@ -96,6 +122,20 @@ Static analysis is best-effort: call and import relationships come from static
 parsing and can miss dynamic behavior. Legacy signals include a `confidence`
 and a list of `evidence` strings describing exactly what was measured. Treat
 low-confidence results as leads to verify, not conclusions.
+
+## Coverage
+
+Every tool response includes a `coverage` block: an aggregate `status`
+(`full` when every touched language was analyzed), the `active_plugins`, and
+one entry per language with `analyzed` and, when not analyzed, a `reason`
+(`plugin_failed`, `plugin_disabled`, `plugin_not_installed`, `file_failed`) and a
+`note` naming the missing plugin. Empty results carry `reason: "not_analyzed"` or
+`"none_found"`, so relationships are never reported absent for files no
+plugin analyzed. A plugin that fails to load is listed under
+`get_index_status` `plugins.failed`; an error on one file is recorded as
+`file_failed` for that file only. `get_project_overview` lists uncovered
+languages with file counts, and the server `instructions` are generated from
+the active plugins.
 
 ## Git history limitations
 
@@ -167,24 +207,38 @@ file, versus a single context-pack call. It reports files opened, bytes, and a
 token proxy for each, plus the percentage reduction per task. The token count
 is a proxy, not a real tokenizer measurement.
 
-## How to add a new language analyzer
+## How to add a language plugin
 
-1. Add a package under `project_mcp/analyzers/<language>/` (see
-   `project_mcp/analyzers/python/` for the shape).
-2. Emit facts in the existing normalized schema; do not change
-   `project_mcp/schema.py` or `project_mcp/db.py`.
-3. Wire the analyzer into the indexer scan in `project_mcp/indexer.py` for the
-   file extensions it owns.
-4. Write tests under `tests/unit/` with a fixture project under
-   `tests/fixtures/`.
+Adding a language needs no core edits. See `project_mcp/plugins/rust/` for
+the shape.
 
-## How to add a framework analyzer
+1. Write a `PluginDescriptor` (`project_mcp/plugins/descriptor.py`): `name`,
+   `version`, `api_version=1`, the `extensions` it claims mapped to a
+   language label, the `analyzer` as `"module:Class"`, and optionally
+   `manifests` and `ecosystem`. The descriptor holds data only; the analyzer
+   is imported only when the plugin is enabled.
+2. Implement the analyzer: `analyze(path, source) -> FileAnalysis`
+   (`project_mcp/plugins/analysis.py`), `resolve_import(importer, spec)`, and
+   `is_test_file(path)`. Optional hooks: `module_name`, `list_dependencies`,
+   `dependency_key`, `undeclared_dependency`, `link_cross_file`, and
+   `link_test_evidence`.
+3. Register it: built-ins go in `BUILTIN_PLUGINS` in
+   `project_mcp/plugins/registry.py`; external packages expose the
+   descriptor under the `project_mcp.plugins` entry-point group.
+4. Emit facts in the existing normalized schema; do not change
+   `project_mcp/schema.py` or `project_mcp/db.py`. Cover it with tests and a
+   fixture project under `tests/fixtures/`.
 
-1. Add a module under `project_mcp/analyzers/frameworks/` (see `django.py`).
-2. Enrich already-indexed symbols with framework metadata rather than
-   re-parsing the language.
-3. Call it from the indexer after the language analyzer runs, and cover it
-   with fixture-based tests.
+## How to add a framework plugin
+
+1. Write a descriptor with `kind="framework"`, no `extensions`, and
+   `requires` naming its language plugins (see `project_mcp/plugins/django/`).
+   A framework plugin whose language plugin is not active is skipped with a
+   warning.
+2. Implement `detect(context) -> bool` and `enrich(context)`, which get a
+   `FrameworkContext` after indexing. Enrich already-indexed symbols with
+   framework metadata rather than re-parsing the language.
+3. Cover it with fixture-based tests.
 
 ## Boundaries with other MCP servers
 
