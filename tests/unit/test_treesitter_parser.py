@@ -44,3 +44,17 @@ def test_missing_names_tree_sitter_itself_when_it_is_not_installed(monkeypatch):
     monkeypatch.setitem(sys.modules, "tree_sitter", None)
 
     assert "tree_sitter is not installed" in missing("javascript")
+
+
+@pytest.mark.parametrize(
+    ("grammar", "source", "node_type"),
+    [
+        ("typescript", "interface Point { x: number }\n", "interface_declaration"),
+        ("tsx", "const el = <div>{label as string}</div>;\n", "lexical_declaration"),
+    ],
+)
+def test_parse_reads_typescript_and_tsx_sources(grammar, source, node_type):
+    root = parse(source, grammar)
+
+    assert [child.type for child in root.children] == [node_type]
+    assert not root.has_error

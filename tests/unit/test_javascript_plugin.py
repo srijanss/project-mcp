@@ -1,3 +1,8 @@
+import sys
+
+import pytest
+
+from project_mcp.plugins.javascript import analyzer
 from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
 
 SOURCE = """import React from 'react';
@@ -63,3 +68,36 @@ def test_builtin_registry_serves_one_javascript_analyzer_for_js_and_ts():
 
     assert isinstance(registry.analyzer_for("javascript"), JavaScriptAnalyzer)
     assert registry.analyzer_for("typescript") is registry.analyzer_for("javascript")
+
+
+@pytest.mark.parametrize(
+    ("path", "grammar"),
+    [("a.js", "javascript"), ("a.jsx", "tsx"), ("a.ts", "typescript"), ("a.tsx", "tsx")],
+)
+def test_analyze_parses_with_the_grammar_for_the_file_suffix(path, grammar, monkeypatch):
+    grammars = []
+    monkeypatch.setattr(
+        analyzer, "parse_js_tree", lambda p, source, g: grammars.append(g) or []
+    )
+
+    js = JavaScriptAnalyzer()
+    js.analyze(path, "")
+
+    assert js.backend == "tree-sitter"
+    assert js.warnings == []
+    assert grammars == [grammar]
+
+
+def test_analyze_falls_back_to_the_regex_parser_without_tree_sitter(monkeypatch):
+    monkeypatch.setitem(sys.modules, "tree_sitter_typescript", None)
+    monkeypatch.setattr(analyzer, "parse_js_tree", None)
+
+    js = JavaScriptAnalyzer()
+    symbols = js.analyze("src/Widget.tsx", SOURCE).symbols
+
+    assert js.backend == "regex"
+    assert js.warnings == [
+        "falls back to its regex parser: tree_sitter_typescript is not installed"
+        " (import of tree_sitter_typescript halted; None in sys.modules)"
+    ]
+    assert [s["kind"] for s in symbols] == ["module", "component"]

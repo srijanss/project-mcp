@@ -11,6 +11,8 @@ import importlib
 GRAMMARS = {
     "javascript": ("tree_sitter_javascript", "language"),
     "rust": ("tree_sitter_rust", "language"),
+    "typescript": ("tree_sitter_typescript", "language_typescript"),
+    "tsx": ("tree_sitter_typescript", "language_tsx"),
 }
 
 
@@ -37,6 +39,10 @@ class Node:
     @property
     def text(self) -> str:
         return self._node.text.decode()
+
+    @property
+    def has_error(self) -> bool:
+        return self._node.has_error
 
     @property
     def children(self) -> list["Node"]:

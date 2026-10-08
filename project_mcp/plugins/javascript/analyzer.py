@@ -1,6 +1,7 @@
 import posixpath
 from pathlib import Path
 
+from project_mcp.plugins import treesitter
 from project_mcp.plugins.analysis import FileAnalysis
 from project_mcp.plugins.javascript.dependencies import list_npm_dependencies
 from project_mcp.plugins.javascript.parser import (
@@ -8,11 +9,19 @@ from project_mcp.plugins.javascript.parser import (
     extract_js_imports,
     parse_js_source,
 )
+from project_mcp.plugins.javascript.tree_parser import parse_js_tree
 
 _EXTENSIONS = (".js", ".jsx", ".ts", ".tsx")
+# file suffix -> the tree-sitter grammar that parses it
+_GRAMMARS = {".js": "javascript", ".jsx": "tsx", ".ts": "typescript", ".tsx": "tsx"}
 
 
 class JavaScriptAnalyzer:
+    def __init__(self) -> None:
+        problem = treesitter.missing("javascript") or treesitter.missing("typescript")
+        self.backend = "regex" if problem else "tree-sitter"
+        self.warnings = [f"falls back to its regex parser: {problem}"] if problem else []
+
     def module_name(self, path: str) -> str:
         """The qualified name of the module symbol this file is indexed as."""
         return _module_qualified_name(path)
@@ -27,8 +36,12 @@ class JavaScriptAnalyzer:
         return in_test_dir or path.stem.endswith((".test", ".spec"))
 
     def analyze(self, path: str, source: str) -> FileAnalysis:
+        if self.backend == "tree-sitter":
+            symbols = parse_js_tree(path, source, _GRAMMARS[Path(path).suffix])
+        else:
+            symbols = parse_js_source(path, source)
         return FileAnalysis(
-            symbols=parse_js_source(path, source),
+            symbols=symbols,
             imports=[
                 imp["module"]
                 for imp in extract_js_imports(path, source)
