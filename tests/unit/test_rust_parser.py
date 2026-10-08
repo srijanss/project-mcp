@@ -1,3 +1,4 @@
+import gc
 import time
 
 from project_mcp.plugins.rust.parser import (
@@ -227,17 +228,29 @@ def _use_block_source(item_count):
     return f"use crate::{{\n{items}\n}};\n"
 
 
-def _timed_extract(item_count):
-    source = _use_block_source(item_count)
-    start = time.perf_counter()
-    uses = extract_rust_use("src/widget.rs", source)
-    elapsed = time.perf_counter() - start
-    return elapsed, uses
+def _timed_extracts(item_counts, runs=10):
+    """(fastest time, uses) per item count, with GC off.
+
+    The sizes take turns in each round, so a slowdown that lasts across
+    rounds hits both alike instead of skewing their ratio.
+    """
+    sources = [_use_block_source(count) for count in item_counts]
+    timings = [[] for _ in sources]
+    results = [None] * len(sources)
+    gc.disable()
+    try:
+        for _ in range(runs):
+            for index, source in enumerate(sources):
+                start = time.perf_counter()
+                results[index] = extract_rust_use("src/widget.rs", source)
+                timings[index].append(time.perf_counter() - start)
+    finally:
+        gc.enable()
+    return [(min(times), uses) for times, uses in zip(timings, results)]
 
 
 def test_extract_rust_use_handles_large_multiline_use_block_efficiently():
-    small_elapsed, small_uses = _timed_extract(3000)
-    large_elapsed, large_uses = _timed_extract(12000)
+    (small_elapsed, small_uses), (large_elapsed, large_uses) = _timed_extracts([3000, 12000])
 
     assert len(small_uses) == 1
     assert len(small_uses[0]["names"]) == 3000
