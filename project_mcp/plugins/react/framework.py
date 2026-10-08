@@ -190,6 +190,44 @@ class ReactFramework:
         self._link_renders(context)
         self._declare_routes(context)
         self._link_dynamic(context)
+        self._mark_rendered_tests(context)
+
+    def _mark_rendered_tests(self, context) -> None:
+        """Add jsx_render evidence to a test file's tests link to each component it renders."""
+        components = _load_components(context)
+        defaults = self._default_exports(context, components)
+        links: dict[str, list[tuple[int, int, list[str]]]] = {}
+        for relationship_id, path, target, evidence_json in context.conn.execute(
+            """
+            SELECT r.id, f.path, r.target_entity_id, r.evidence_json
+            FROM relationships r JOIN files f ON f.id = r.source_entity_id
+            WHERE f.project_id = ? AND r.relationship_type = 'tests'
+              AND r.source_entity_type = 'file' AND r.target_entity_type = 'symbol'
+            """,
+            (context.project_id,),
+        ).fetchall():
+            if path.endswith(_EXTENSIONS):
+                evidence = json.loads(evidence_json) if evidence_json else []
+                links.setdefault(path, []).append((relationship_id, target, evidence))
+        for path, rows in links.items():
+            try:
+                source = (Path(context.project_root) / path).read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            imports = self._imported_names(path, source)
+            rendered = {
+                _resolve_component(components, defaults, path, imports, tag)
+                for tag, _ in self._jsx_tags(path, source)
+            }
+            for relationship_id, target, evidence in rows:
+                updated = [e for e in evidence if e != "jsx_render"]
+                if target in rendered:
+                    updated.append("jsx_render")
+                if updated != evidence:
+                    context.conn.execute(
+                        "UPDATE relationships SET evidence_json = ? WHERE id = ?",
+                        (json.dumps(updated), relationship_id),
+                    )
 
     def _link_dynamic(self, context) -> None:
         """Record lazy and computed components with low confidence, marking their users partial."""
