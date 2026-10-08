@@ -11,12 +11,20 @@ entrypoint = "project-mcp"
 # Only the project-mcp hook scripts are copied (not the whole .agents/ dir):
 # the shared safety hooks and the TDD skills belong to outside-in-tdd-mcp.
 #
-# .mcp.json, .claude/settings.json and .codex/config.toml are shared with
-# outside-in-tdd-mcp, so they are merged into an existing file rather than
-# skipped: what is already there is kept, and only missing entries are added.
+# .mcp.json, .claude/settings.json, .codex/config.toml and Pi's JSON configs
+# are merged: existing values win and only missing entries are added.
 # (Comments in an existing .codex/config.toml are not preserved when merged.)
+# Copy Pi's workflow assets, excluding configs handled separately and tests.
+# The Pi prompt wrappers reference the TDD skills supplied by outside-in-tdd-mcp.
 [scaffold]
 requires = ["jq"]  # the hooks parse JSON with it; `mcpctl init` warns if it is missing
+dirs = [".pi"]
+exclude = [
+  ".pi/mcp.json",
+  ".pi/mcp.json.example",
+  ".pi/settings.json",
+  ".pi/tests",
+]
 
 [[scaffold.files]]
 from = ".mcp.json.example"
@@ -54,6 +62,10 @@ from = ".pi/mcp.json.example"
 to = ".pi/mcp.json"
 merge = "json"
 
+[[scaffold.files]]
+from = ".pi/settings.json"
+to = ".pi/settings.json"
+merge = "json"
 
 [[scaffold.hints]]
 message = "Add .project-mcp/index.db and .project-mcp/state.json to .gitignore (generated index state)."
