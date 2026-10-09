@@ -44,7 +44,9 @@ def _resolved_npm_versions(project_root: Path) -> dict[str, str]:
     for path, info in packages.items():
         if not path.startswith("node_modules/"):
             continue
-        name = path.rsplit("node_modules/", 1)[-1]
+        name = path.removeprefix("node_modules/")
+        if "node_modules/" in name:
+            continue  # a copy nested under another package is not the root's own
         if "version" in info:
             resolved[name] = info["version"]
     return resolved

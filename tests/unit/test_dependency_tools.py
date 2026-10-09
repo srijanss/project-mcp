@@ -574,3 +574,18 @@ def test_get_dependency_version_skips_the_fallback_of_an_ecosystem_whose_manifes
         "status": "not_found",
         "manifest_errors": [{"ecosystem": "python", "error": "invalid pyproject.toml"}],
     }
+
+
+def test_get_dependency_version_ignores_a_nested_copy_listed_after_the_root_one(tmp_path: Path):
+    (tmp_path / "package.json").write_text('{"dependencies": {"left-pad": "^2.0.0"}}')
+    (tmp_path / "package-lock.json").write_text(
+        """{
+  "packages": {
+    "node_modules/left-pad": {"version": "2.0.0"},
+    "node_modules/other/node_modules/left-pad": {"version": "1.5.0"}
+  }
+}
+"""
+    )
+
+    assert get_dependency_version(tmp_path, "left-pad")["version"] == "2.0.0"
