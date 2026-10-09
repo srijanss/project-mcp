@@ -727,3 +727,22 @@ def test_build_server_sets_instructions_from_its_plugin_registry(tmp_path):
 
     expected = server_instructions(configured_registry(load_config(tmp_path)))
     assert server.instructions == expected
+
+
+def test_cap_dict_trims_the_largest_string_or_list_at_any_depth_and_names_its_path():
+    from project_mcp.main_stdio import _cap_dict, _size
+
+    result = {
+        "name": "pack",
+        "outer": {"label": "kept", "inner": {"log": "y" * 5_000}, "rows": [{"id": i} for i in range(20)]},
+    }
+
+    capped = _cap_dict(result, budget=1_000)
+
+    assert _size(capped) <= 1_000
+    assert capped["truncated"] is True
+    assert capped["truncated_fields"]["outer.inner.log"]["total"] == 5_000
+    assert capped["truncated_fields"]["outer.inner.log"]["returned"] == len(capped["outer"]["inner"]["log"])
+    assert capped["outer"]["label"] == "kept"
+    assert capped["name"] == "pack"
+    assert result["outer"]["inner"]["log"] == "y" * 5_000

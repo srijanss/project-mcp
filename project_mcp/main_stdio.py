@@ -136,16 +136,45 @@ def _cap_dict(result: dict, budget: int) -> dict:
     trimmed: dict[str, dict] = {}
     capped = {**result, "truncated": True, "truncated_fields": trimmed}
     while _size(capped) > budget:
-        trimmable = [
-            k for k, v in capped.items() if isinstance(v, (list, str)) and v
-        ]
-        if not trimmable:
+        path = _largest_trimmable(capped)
+        if path is None:
             break
-        name = max(trimmable, key=lambda k: _size(capped[k]))
-        total = trimmed.get(name, {}).get("total", len(capped[name]))
-        capped[name] = capped[name][: len(capped[name]) // 2]
-        trimmed[name] = {"total": total, "returned": len(capped[name])}
+        value = _value_at(capped, path)
+        field = ".".join(path)
+        total = trimmed.get(field, {}).get("total", len(value))
+        capped = _with_value_at(capped, path, value[: len(value) // 2])
+        trimmed[field] = {"total": total, "returned": len(value) // 2}
     return capped if trimmed else result
+
+
+def _largest_trimmable(result: dict):
+    """Key path of the biggest non-empty list or string at any dict depth."""
+    best: tuple[int, tuple[str, ...]] | None = None
+    stack: list[tuple[tuple[str, ...], dict]] = [((), result)]
+    while stack:
+        prefix, node = stack.pop()
+        for key, value in node.items():
+            if not prefix and key == "truncated_fields":
+                continue
+            if isinstance(value, dict):
+                stack.append(((*prefix, key), value))
+            elif isinstance(value, (list, str)) and value:
+                size = _size(value)
+                if best is None or size > best[0]:
+                    best = (size, (*prefix, key))
+    return None if best is None else best[1]
+
+
+def _value_at(node: dict, path: tuple[str, ...]):
+    for key in path:
+        node = node[key]
+    return node
+
+
+def _with_value_at(node: dict, path: tuple[str, ...], value) -> dict:
+    """A copy of `node` with the value at `path` replaced, leaving `node` as it was."""
+    key, *rest = path
+    return {**node, key: _with_value_at(node[key], tuple(rest), value) if rest else value}
 
 
 def _with_coverage(result, block: dict, needs_plugins: bool) -> dict:
