@@ -20,8 +20,13 @@ from project_mcp.plugins.python.pytest_analyzer import (
 )
 
 
-def _read_source(path: Path) -> str:
-    return path.read_text(errors="replace")
+def _read_source(path: Path) -> str | None:
+    """The file's text, or None when it can no longer be read (e.g. deleted or
+    made unreadable since the scan found it)."""
+    try:
+        return path.read_text(errors="replace")
+    except OSError:
+        return None
 
 
 def resolve_source_root_imports(
@@ -803,7 +808,7 @@ class _PatchTargetResolver:
         if path not in self._imports:
             source = _read_source(self.project_root / path)
             try:
-                imports = _analyze_python_file(path, source)["imports"]
+                imports = _analyze_python_file(path, source)["imports"] if source is not None else []
             except SyntaxError:
                 imports = []
             self._imports[path] = resolve_source_root_imports(
@@ -872,7 +877,7 @@ def index_mock_patch_relationships(
         for directory in reversed(Path(path).parents):
             outer_fixtures.update(conftest_fixtures.get(directory.as_posix(), {}))
         source = _read_source(Path(project_root) / path)
-        if "patch" not in source and not outer_fixtures:
+        if source is None or "patch" not in source and not outer_fixtures:
             continue
         try:
             patches = extract_mock_patches(path, source, outer_fixtures)
@@ -936,6 +941,8 @@ def _conftest_fixture_patches(
         if Path(path).name != "conftest.py":
             continue
         source = _read_source(Path(project_root) / path)
+        if source is None:
+            continue
         try:
             fixtures = extract_fixture_patches(path, source)
         except SyntaxError:
@@ -991,6 +998,8 @@ def refresh_cross_module_edges_for_importers(
         if path is None or path in refreshed_paths:
             continue
         source = _read_source(Path(project_root) / path)
+        if source is None:
+            continue
         analysis = _analyze_python_file(path, source)
         analysis["imports"] = resolve_source_root_imports(
             analysis["imports"], source_roots, path_to_file_id
@@ -1095,6 +1104,8 @@ def link_cross_file(context) -> None:
             parsed = context.changed[path].analysis.extra
         else:
             source = _read_source(Path(context.project_root) / path)
+            if source is None:
+                continue
             parsed = _analyze_python_file(path, source)
         parsed["imports"] = resolve_source_root_imports(
             parsed["imports"], context.source_roots, path_to_file_id
@@ -1121,6 +1132,8 @@ def link_test_evidence(context) -> None:
             source = context.changed[path].source
         else:
             source = _read_source(Path(context.project_root) / path)
+            if source is None:
+                continue
         index_python_test_relationships(
             conn, path_to_file_id[path], path, source, path_to_file_id, context.source_roots
         )

@@ -106,3 +106,13 @@ def test_link_test_evidence_indexes_tests_tested_modules_and_patch_targets(tmp_p
     assert _edges(conn, "mocks") == {
         ("tests.test_shapes.test_area", "app.shapes.Shape.area")
     }
+
+
+def test_read_source_is_none_for_a_file_that_cannot_be_read(tmp_path):
+    from project_mcp.plugins.python.linking import _read_source
+
+    (tmp_path / "ok.py").write_bytes(b"x = '\xff'\n")
+
+    assert _read_source(tmp_path / "ok.py") == "x = '�'\n"
+    assert _read_source(tmp_path / "gone.py") is None
+    assert _read_source(tmp_path) is None
