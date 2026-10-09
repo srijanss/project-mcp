@@ -983,3 +983,27 @@ def test_get_tests_for_credits_a_test_mocking_one_long_branch_through_the_unmock
             "tests": ["tests.test_c.test_c"],
         }
     ]
+
+
+def test_get_tests_for_does_not_set_aside_a_direct_test_that_also_patches_a_helper(tmp_path):
+    project_root = _order_project(tmp_path)
+    (project_root / "tests" / "test_helpers.py").write_text(
+        "from unittest import mock\n"
+        "from app.models import Order\n"
+        "\n"
+        "\n"
+        "def _hit():\n"
+        "    return Order().cancel()\n"
+        "\n"
+        "\n"
+        "def test_both():\n"
+        '    with mock.patch("tests.test_helpers._hit"):\n'
+        "        assert Order().cancel()\n"
+        "        _hit()\n"
+    )
+
+    tests_for = get_tests_for(project_root, "app.models.Order.cancel")
+
+    helpers_file = next(t for t in tests_for if t["test_file"] == "tests/test_helpers.py")
+    assert helpers_file["tests"] == ["tests.test_helpers.test_both"]
+    assert "mocked" not in helpers_file
