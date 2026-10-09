@@ -170,3 +170,23 @@ def test_server_instructions_are_built_from_the_active_plugins():
     assert "Analyzed languages: python, rust." in instructions
     assert "javascript" not in instructions and "typescript" not in instructions
     assert "relay each unanalyzed language's `note`" in instructions
+
+
+def test_coverage_lists_only_a_bounded_sample_of_file_errors_with_each_message_shortened(tmp_path):
+    registry = builtin_registry()
+    conn = _scanned(tmp_path, registry)
+    for i in range(30):
+        conn.execute(
+            "INSERT INTO files (project_id, path, language, analysis_status, analysis_error)"
+            " SELECT project_id, ?, 'python', 'file_failed', ? FROM files WHERE path = 'app.py'",
+            (f"gen/m{i:02}.py", f"ValueError: {'long ' * 200}"),
+        )
+
+    entry = coverage_block(conn, registry, set())["languages"]["python"]
+
+    assert entry["errors_total"] == 30
+    assert list(entry["errors"]) == [f"gen/m{i:02}.py" for i in range(len(entry["errors"]))]
+    assert 0 < len(entry["errors"]) < 30
+    assert all(len(message) <= 200 for message in entry["errors"].values())
+    assert all(message.startswith("ValueError: long") for message in entry["errors"].values())
+    assert "30 files" in entry["note"]

@@ -24,6 +24,8 @@ PLUGIN_FOR_EXTENSION = {
 
 _PATHS_PER_QUERY = 500
 _MAX_PATH_CHARS = 4096
+_MAX_LISTED_ERRORS = 20
+_MAX_ERROR_CHARS = 200
 _FILE_LEVEL_ONLY = (
     "Symbols and relationships are unavailable for these files; results are"
     " file-level only."
@@ -174,10 +176,15 @@ def _language_entry(
         }
     if failed_files:
         count = len(failed_files)
+        listed = {
+            path: _shortened(error)
+            for path, error in list(failed_files.items())[:_MAX_LISTED_ERRORS]
+        }
         return {
             "analyzed": False,
             "reason": "file_failed",
-            "errors": failed_files,
+            "errors": listed,
+            **({"errors_total": count} if len(listed) < count else {}),
             "note": (
                 f"The {plugin} plugin could not analyze {count}"
                 f" file{'' if count == 1 else 's'} (see `errors`); those files are"
@@ -185,6 +192,13 @@ def _language_entry(
             ),
         }
     return {"analyzed": True}
+
+
+def _shortened(message: str) -> str:
+    """`message`, cut to a length that keeps the coverage block small."""
+    if len(message) <= _MAX_ERROR_CHARS:
+        return message
+    return message[: _MAX_ERROR_CHARS - 1] + "…"
 
 
 def _not_installed_entry(plugin: str) -> dict:
