@@ -116,3 +116,41 @@ def test_read_source_is_none_for_a_file_that_cannot_be_read(tmp_path):
     assert _read_source(tmp_path / "ok.py") == "x = '�'\n"
     assert _read_source(tmp_path / "gone.py") is None
     assert _read_source(tmp_path) is None
+
+
+def test_link_test_evidence_keeps_the_mock_edges_of_a_test_file_it_cannot_read(tmp_path):
+    conn = _scan_without_linking(tmp_path, TEST_FILES)
+    context = _context(conn, tmp_path, TEST_FILES)
+    PythonAnalyzer().link_test_evidence(context)
+    (tmp_path / "tests" / "test_shapes.py").unlink()
+
+    PythonAnalyzer().link_test_evidence(context)
+
+    assert _edges(conn, "mocks") == {
+        ("tests.test_shapes.test_area", "app.shapes.Shape.area")
+    }
+
+
+def test_link_test_evidence_keeps_the_mock_edges_of_tests_under_a_conftest_it_cannot_read(tmp_path):
+    files = {
+        **FILES,
+        "tests/conftest.py": (
+            "import pytest\n"
+            "from unittest.mock import patch\n\n\n"
+            "@pytest.fixture(autouse=True)\n"
+            "def no_area():\n    with patch('app.shapes.Shape.area'):\n        yield\n"
+        ),
+        "tests/test_shapes.py": (
+            "from app.shapes import Shape\n\n\n"
+            "def test_area():\n    assert Shape().area() == 0\n"
+        ),
+    }
+    conn = _scan_without_linking(tmp_path, files)
+    context = _context(conn, tmp_path, files)
+    PythonAnalyzer().link_test_evidence(context)
+    assert _edges(conn, "mocks") == {("tests.test_shapes.test_area", "app.shapes.Shape.area")}
+    (tmp_path / "tests" / "conftest.py").unlink()
+
+    PythonAnalyzer().link_test_evidence(context)
+
+    assert _edges(conn, "mocks") == {("tests.test_shapes.test_area", "app.shapes.Shape.area")}

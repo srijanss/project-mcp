@@ -850,20 +850,17 @@ def index_mock_patch_relationships(
     path_to_file_id: dict,
     source_roots: list[str],
 ) -> None:
-    """Link tests to the symbols their `patch(...)` calls replace."""
-    conn.execute(
-        """
-        DELETE FROM relationships
-        WHERE relationship_type = 'mocks' AND source_entity_type = 'symbol'
-          AND source_entity_id IN (
-            SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id
-            WHERE f.project_id = ?
-          )
-        """,
-        (project_id,),
-    )
+    """Link tests to the symbols their `patch(...)` calls replace.
+
+    A test file that cannot be read, or sits under a conftest.py that cannot,
+    keeps the mock edges it had: dropping them would let a test that mocks a
+    symbol pass for one that really runs it.
+    """
     resolver = _PatchTargetResolver(project_root, path_to_file_id, source_roots)
-    conftest_fixtures = _conftest_fixture_patches(project_root, path_to_file_id, resolver)
+    unreadable_directories: set[str] = set()
+    conftest_fixtures = _conftest_fixture_patches(
+        project_root, path_to_file_id, resolver, unreadable_directories
+    )
     test_files = conn.execute(
         """
         SELECT id, path FROM files
@@ -871,12 +868,30 @@ def index_mock_patch_relationships(
         """,
         (project_id,),
     ).fetchall()
+    sources = {path: _read_source(Path(project_root) / path) for _, path in test_files}
+    unreadable = [
+        file_id
+        for file_id, path in test_files
+        if sources[path] is None
+        or unreadable_directories & {parent.as_posix() for parent in Path(path).parents}
+    ]
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'mocks' AND source_entity_type = 'symbol'
+          AND source_entity_id IN (
+            SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id
+            WHERE f.project_id = ? AND f.id NOT IN (SELECT value FROM json_each(?))
+          )
+        """,
+        (project_id, json.dumps(unreadable)),
+    )
     for file_id, path in test_files:
         # Nearer conftest.py files override fixtures of the same name.
         outer_fixtures = {}
         for directory in reversed(Path(path).parents):
             outer_fixtures.update(conftest_fixtures.get(directory.as_posix(), {}))
-        source = _read_source(Path(project_root) / path)
+        source = sources[path]
         if source is None or "patch" not in source and not outer_fixtures:
             continue
         try:
@@ -932,16 +947,24 @@ def _patched_symbol(resolver: _PatchTargetResolver, path: str, patch: dict) -> s
 
 
 def _conftest_fixture_patches(
-    project_root: Path, path_to_file_id: dict, resolver: _PatchTargetResolver
+    project_root: Path,
+    path_to_file_id: dict,
+    resolver: _PatchTargetResolver,
+    unreadable_directories: set[str],
 ) -> dict[str, dict]:
     """Per directory, the fixtures its conftest.py defines, with the symbols
-    each one's patches replace already resolved where the conftest wrote them."""
+    each one's patches replace already resolved where the conftest wrote them.
+
+    The directory of a conftest.py that cannot be read is added to
+    `unreadable_directories`.
+    """
     by_directory = {}
     for path in path_to_file_id:
         if Path(path).name != "conftest.py":
             continue
         source = _read_source(Path(project_root) / path)
         if source is None:
+            unreadable_directories.add(Path(path).parent.as_posix())
             continue
         try:
             fixtures = extract_fixture_patches(path, source)
