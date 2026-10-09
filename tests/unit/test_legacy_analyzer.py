@@ -251,3 +251,15 @@ def test_detect_test_signals_marks_tests_of_an_unanalyzed_target_unknown():
             ],
         }
     ]
+
+
+def test_detect_circular_dependency_signals_flags_a_member_reached_only_by_a_cross_edge():
+    edges = [("A", "B"), ("B", "A"), ("A", "C"), ("C", "B")]
+
+    signals = detect_circular_dependency_signals(edges)
+
+    assert {s["target"]: s["evidence"] for s in signals} == {
+        "A": ["cycle: A -> B -> A"],
+        "B": ["cycle: B -> A -> B"],
+        "C": ["cycle: C -> B -> A -> C"],
+    }

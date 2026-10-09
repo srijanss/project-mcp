@@ -6,6 +6,8 @@ verdict language, no DB access — callers (the indexer) supply the data and
 persist the results.
 """
 
+from collections import deque
+
 from project_mcp.config import ProjectConfig
 
 
@@ -131,54 +133,87 @@ def detect_circular_dependency_signals(edges: list[tuple[str, str]]) -> list[dic
         graph.setdefault(source, []).append(target)
         graph.setdefault(target, [])
 
-    nodes_in_cycles: dict[str, list[str]] = {}
-
-    # Iterative three-color DFS (white/gray/black): each node is fully
-    # explored at most once, giving O(V + E) total work and no recursion
-    # depth limit — the recursive path-copying version this replaced
-    # revisited shared subgraphs from every start node and could blow the
-    # Python call stack on long chains.
-    WHITE, GRAY, BLACK = 0, 1, 2
-    color: dict[str, int] = {node: WHITE for node in graph}
-
-    for start in graph:
-        if color[start] != WHITE:
-            continue
-
-        path = [start]
-        color[start] = GRAY
-        stack = [iter(graph[start])]
-
-        while stack:
-            node = path[-1]
-            neighbor = next(stack[-1], None)
-
-            if neighbor is None:
-                color[node] = BLACK
-                path.pop()
-                stack.pop()
-                continue
-
-            if color[neighbor] == WHITE:
-                color[neighbor] = GRAY
-                path.append(neighbor)
-                stack.append(iter(graph[neighbor]))
-            elif color[neighbor] == GRAY:
-                cycle_start = path.index(neighbor)
-                cycle = path[cycle_start:] + [neighbor]
-                for cycle_node in cycle[:-1]:
-                    nodes_in_cycles.setdefault(cycle_node, cycle)
-
+    cyclic = {
+        node: members
+        for component in _strongly_connected_components(graph)
+        if len(component) > 1 or component[0] in graph[component[0]]
+        for members in [set(component)]
+        for node in component
+    }
     return [
         {
             "target": node,
             "signal": "circular_dependency",
             "severity": "high",
             "confidence": "high",
-            "evidence": [f"cycle: {' -> '.join(cycle)}"],
+            "evidence": [f"cycle: {' -> '.join(_shortest_cycle(graph, node, cyclic[node]))}"],
         }
-        for node, cycle in nodes_in_cycles.items()
+        for node in graph
+        if node in cyclic
     ]
+
+
+def _strongly_connected_components(graph: dict[str, list[str]]) -> list[list[str]]:
+    """Tarjan's algorithm, iterative: O(V + E) with no recursion depth limit
+    (a recursive walk blows the Python call stack on long chains)."""
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    components: list[list[str]] = []
+
+    def visit(node: str) -> None:
+        index[node] = low[node] = len(index)
+        stack.append(node)
+        on_stack.add(node)
+
+    for root in graph:
+        if root in index:
+            continue
+        visit(root)
+        work = [(root, iter(graph[root]))]
+        while work:
+            node, neighbors = work[-1]
+            for neighbor in neighbors:
+                if neighbor not in index:
+                    visit(neighbor)
+                    work.append((neighbor, iter(graph[neighbor])))
+                    break
+                if neighbor in on_stack:
+                    low[node] = min(low[node], index[neighbor])
+            else:
+                work.pop()
+                if work:
+                    parent = work[-1][0]
+                    low[parent] = min(low[parent], low[node])
+                if low[node] == index[node]:
+                    component = []
+                    while True:
+                        member = stack.pop()
+                        on_stack.discard(member)
+                        component.append(member)
+                        if member == node:
+                            break
+                    components.append(component)
+    return components
+
+
+def _shortest_cycle(graph: dict[str, list[str]], node: str, component: set[str]) -> list[str]:
+    """The shortest cycle through `node` that stays inside its component."""
+    previous: dict[str, str | None] = {node: None}
+    queue = deque([node])
+    while queue:
+        current = queue.popleft()
+        for neighbor in graph[current]:
+            if neighbor == node:
+                path = [current]
+                while previous[path[-1]] is not None:
+                    path.append(previous[path[-1]])
+                return [*reversed(path), node]
+            if neighbor in component and neighbor not in previous:
+                previous[neighbor] = current
+                queue.append(neighbor)
+    raise AssertionError(f"{node} is in a cyclic component but on no cycle")
 
 
 def detect_churn_signals(targets: list[dict], config: ProjectConfig) -> list[dict]:
