@@ -746,3 +746,22 @@ def test_cap_dict_trims_the_largest_string_or_list_at_any_depth_and_names_its_pa
     assert capped["outer"]["label"] == "kept"
     assert capped["name"] == "pack"
     assert result["outer"]["inner"]["log"] == "y" * 5_000
+
+
+def test_cap_dict_halves_the_entries_of_the_largest_flat_dict_before_cutting_smaller_values():
+    from project_mcp.main_stdio import _cap_dict, _size
+
+    result = {
+        "name": "pack",
+        "outer": {"note": "short text", "counts": {f"k{i}": i for i in range(3_000)}},
+    }
+
+    capped = _cap_dict(result, budget=1_000)
+
+    assert _size(capped) <= 1_000
+    assert capped["truncated_fields"]["outer.counts"]["total"] == 3_000
+    assert capped["truncated_fields"]["outer.counts"]["returned"] == len(capped["outer"]["counts"])
+    assert list(capped["outer"]["counts"]) == [f"k{i}" for i in range(len(capped["outer"]["counts"]))]
+    assert capped["outer"]["note"] == "short text"
+    assert capped["name"] == "pack"
+    assert len(result["outer"]["counts"]) == 3_000

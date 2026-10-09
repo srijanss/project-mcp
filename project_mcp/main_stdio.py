@@ -142,13 +142,31 @@ def _cap_dict(result: dict, budget: int) -> dict:
         value = _value_at(capped, path)
         field = ".".join(path)
         total = trimmed.get(field, {}).get("total", len(value))
-        capped = _with_value_at(capped, path, value[: len(value) // 2])
-        trimmed[field] = {"total": total, "returned": len(value) // 2}
+        kept = _halved(value)
+        capped = _with_value_at(capped, path, kept)
+        trimmed[field] = {"total": total, "returned": len(kept)}
     return capped if trimmed else result
 
 
+def _halved(value):
+    """The first half of a list, string or dict (by entries)."""
+    if isinstance(value, dict):
+        return dict(list(value.items())[: len(value) // 2])
+    return value[: len(value) // 2]
+
+
+def _placeholder(value):
+    """`value`, or None in place of a non-empty list, string or dict."""
+    return None if isinstance(value, (list, str, dict)) and value else value
+
+
 def _largest_trimmable(result: dict):
-    """Key path of the biggest non-empty list or string at any dict depth."""
+    """Key path of the biggest non-empty list, string or dict at any dict depth.
+
+    A dict counts for its keys and scalar values alone, so one of thousands of
+    small entries is trimmed before a short string, and a long string inside
+    a dict is trimmed before the dict.
+    """
     best: tuple[int, tuple[str, ...]] | None = None
     stack: list[tuple[tuple[str, ...], dict]] = [((), result)]
     while stack:
@@ -158,6 +176,11 @@ def _largest_trimmable(result: dict):
                 continue
             if isinstance(value, dict):
                 stack.append(((*prefix, key), value))
+                if not value:
+                    continue
+                size = _size({k: _placeholder(v) for k, v in value.items()})
+                if best is None or size > best[0]:
+                    best = (size, (*prefix, key))
             elif isinstance(value, (list, str)) and value:
                 size = _size(value)
                 if best is None or size > best[0]:
