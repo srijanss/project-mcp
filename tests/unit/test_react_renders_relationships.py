@@ -218,3 +218,21 @@ def test_the_regex_backend_links_a_possibly_shadowed_tag_with_low_confidence_and
         "SELECT name FROM symbols WHERE json_extract(metadata_json, '$.partial')"
     ).fetchall()
     assert partial == [("List",)]
+
+
+@pytest.mark.skipif(treesitter.missing("tsx") is not None, reason="tree-sitter is not installed")
+def test_each_component_links_to_the_nested_component_it_declares_itself(tmp_path):
+    conn = _scan(
+        tmp_path,
+        {
+            "src/Lists.tsx": (
+                "export function A() {\n  const Item = () => <i />;\n  return <Item />;\n}\n\n"
+                "export function B() {\n  const Item = () => <b />;\n  return <Item />;\n}\n"
+            )
+        },
+    )
+
+    assert _renders(conn) == [
+        ("src.Lists.A", "src.Lists.A.Item", "high"),
+        ("src.Lists.B", "src.Lists.B.Item", "high"),
+    ]

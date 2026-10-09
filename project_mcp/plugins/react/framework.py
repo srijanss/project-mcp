@@ -11,6 +11,7 @@ from project_mcp.plugins.react.dynamic import computed_components, dynamic_route
 from project_mcp.plugins.react.exports import default_export_name
 from project_mcp.plugins.react.pages import is_page_path
 from project_mcp.plugins.react.routes import route_declarations
+from project_mcp.plugins.react.scope import visible_component
 from project_mcp.plugins.react.usages import import_candidates
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
@@ -368,7 +369,7 @@ class ReactFramework:
             except (OSError, UnicodeDecodeError):
                 continue
             imports = self._imported_names(path, source)
-            local = {name: id_ for id_, name, _, _ in rows}
+            local = {name for _, name, _, _ in rows}
             shadowed = self._shadowed_tags(path, source)
             links: dict[tuple[int, int], str] = {}
             for tag, line in self._jsx_tags(path, source):
@@ -379,7 +380,7 @@ class ReactFramework:
                 if tag in imports:
                     target = _resolve_component(components, defaults, path, imports, tag)
                 elif tag in local and (tag, line) not in shadowed:
-                    target = local[tag]
+                    target = visible_component(rows, tag, line)
                     if self.backend == "regex" and tag in usages.names_outside_tags(source, row[2], row[3]):
                         # Without scopes, a name used outside tags may be a local binding.
                         confidence = "low"
