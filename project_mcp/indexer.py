@@ -687,9 +687,6 @@ def _detect_stale_index(
         ).fetchall()
     }
 
-    if not indexed_files:
-        return False
-
     if registry is None:
         registry = configured_registry(config)
     discovered = discover_files(project_root, config, registry)

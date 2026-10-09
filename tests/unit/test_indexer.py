@@ -3832,3 +3832,14 @@ def test_record_scan_warnings_names_each_plugin_with_its_analyzer_warnings(tmp_p
     assert "toy plugin falls back to its regex parser: tree_sitter is not installed" in (
         get_index_status(conn).get("warnings", [])
     )
+
+
+def test_ensure_fresh_index_indexes_the_first_file_added_to_an_empty_index(tmp_path):
+    conn = get_connection(tmp_path)
+    ensure_fresh_index(conn, tmp_path, load_config(tmp_path))
+    assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 0
+    (tmp_path / "app.py").write_text("x = 1\n")
+
+    ensure_fresh_index(conn, tmp_path, load_config(tmp_path))
+
+    assert conn.execute("SELECT path FROM files").fetchall() == [("app.py",)]
