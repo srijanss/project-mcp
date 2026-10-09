@@ -158,21 +158,25 @@ class AstroFramework:
             targets = set()
             for tag in rendered_tags(template) & imports.keys():
                 specifier, imported = imports[tag]
-                for candidate in self.resolve_import(path, specifier):
-                    if candidate in component_ids and imported == "default":
-                        targets.add(component_ids[candidate])
-                    elif candidate in script_components and imported != "default":
-                        if candidate not in aliases:
-                            aliases[candidate] = self._export_aliases(context, candidate)
-                        name = aliases[candidate].get(imported, imported)
-                        rows = script_components[candidate]
-                        targets.add(next((id_ for id_, row_name in rows if row_name == name), None))
-                    elif candidate in script_components:
-                        if candidate not in defaults:
-                            defaults[candidate] = self._default_component(
-                                context, candidate, script_components[candidate]
-                            )
-                        targets.add(defaults[candidate])
+                # Like import resolution, the first candidate that exists is the one imported.
+                candidate = next(
+                    (c for c in self.resolve_import(path, specifier) if c in context.path_to_file_id),
+                    None,
+                )
+                if candidate in component_ids and imported == "default":
+                    targets.add(component_ids[candidate])
+                elif candidate in script_components and imported != "default":
+                    if candidate not in aliases:
+                        aliases[candidate] = self._export_aliases(context, candidate)
+                    name = aliases[candidate].get(imported, imported)
+                    rows = script_components[candidate]
+                    targets.add(next((id_ for id_, row_name in rows if row_name == name), None))
+                elif candidate in script_components:
+                    if candidate not in defaults:
+                        defaults[candidate] = self._default_component(
+                            context, candidate, script_components[candidate]
+                        )
+                    targets.add(defaults[candidate])
             targets -= {source_id, None}
             for target_id in sorted(targets):
                 context.conn.execute(

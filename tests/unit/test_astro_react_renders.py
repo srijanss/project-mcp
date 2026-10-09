@@ -118,3 +118,28 @@ def test_astro_links_a_named_import_to_the_component_behind_a_renamed_export(
         """
     ).fetchall()
     assert renders == [("src.ui.Button",), ("src.ui.Link",)]
+
+
+def test_a_named_import_renders_the_component_in_the_first_existing_candidate_only(tmp_path):
+    files = {
+        "package.json": FILES["package.json"],
+        "src/Chip.ts": "export const Chip = 1;\n",
+        "src/Chip.tsx": "export function Chip() {\n  return <b />;\n}\n",
+        "src/Chip.jsx": "export function Chip() {\n  return <i />;\n}\n",
+        "src/pages/index.astro": "---\nimport { Chip } from '../Chip';\n---\n<Chip />\n",
+    }
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    renders = conn.execute(
+        """
+        SELECT COUNT(*) FROM relationships r
+        JOIN symbols src ON src.id = r.source_entity_id
+        WHERE r.relationship_type = 'renders' AND src.qualified_name = 'src.pages.index.index'
+        """
+    ).fetchone()[0]
+
+    assert renders == 0
