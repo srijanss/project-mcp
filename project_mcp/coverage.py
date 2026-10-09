@@ -1,5 +1,6 @@
 """The `coverage` block: which plugins analyzed the files a query touched."""
 
+import json
 import sqlite3
 from pathlib import PurePosixPath
 
@@ -26,6 +27,8 @@ _PATHS_PER_QUERY = 500
 _MAX_PATH_CHARS = 4096
 _MAX_LISTED_ERRORS = 20
 _MAX_ERROR_CHARS = 200
+# JSON characters the listed errors of all languages together may take.
+_MAX_ERRORS_CHARS = 5_000
 _FILE_LEVEL_ONLY = (
     "Symbols and relationships are unavailable for these files; results are"
     " file-level only."
@@ -50,10 +53,14 @@ def coverage_block(
                 errors[path] = error
         elif language is None and _suggested_plugin(path):
             not_installed.add(_suggested_plugin(path))
-    languages = {
-        language: _language_entry(registry, language, plugin_by_language[language], errors)
-        for language, errors in failed_by_language.items()
-    }
+    languages = {}
+    error_budget = _MAX_ERRORS_CHARS
+    for language, errors in failed_by_language.items():
+        entry = _language_entry(
+            registry, language, plugin_by_language[language], errors, error_budget
+        )
+        error_budget -= len(json.dumps(entry.get("errors", {})))
+        languages[language] = entry
     for plugin in sorted(not_installed):
         languages[plugin] = _not_installed_entry(plugin)
     return {
@@ -155,7 +162,11 @@ def _rows_at(conn: sqlite3.Connection, select: str, paths: set[str]) -> list[tup
 
 
 def _language_entry(
-    registry: PluginRegistry, language: str, plugin: str, failed_files: dict[str, str]
+    registry: PluginRegistry,
+    language: str,
+    plugin: str,
+    failed_files: dict[str, str],
+    error_budget: int,
 ) -> dict:
     if plugin in registry.failed_plugins:
         return {
@@ -176,10 +187,7 @@ def _language_entry(
         }
     if failed_files:
         count = len(failed_files)
-        listed = {
-            path: _shortened(error)
-            for path, error in list(failed_files.items())[:_MAX_LISTED_ERRORS]
-        }
+        listed = _sampled(failed_files, error_budget)
         return {
             "analyzed": False,
             "reason": "file_failed",
@@ -192,6 +200,19 @@ def _language_entry(
             ),
         }
     return {"analyzed": True}
+
+
+def _sampled(failed_files: dict[str, str], budget: int) -> dict[str, str]:
+    """The first failed files with shortened errors, as many as fit `budget`
+    characters of JSON and `_MAX_LISTED_ERRORS` entries."""
+    listed: dict[str, str] = {}
+    for path, error in failed_files.items():
+        message = _shortened(error)
+        budget -= len(json.dumps({path: message}))
+        if len(listed) == _MAX_LISTED_ERRORS or budget < 0:
+            break
+        listed[path] = message
+    return listed
 
 
 def _shortened(message: str) -> str:

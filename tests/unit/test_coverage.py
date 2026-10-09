@@ -1,3 +1,5 @@
+import json
+
 from project_mcp.config import load_config
 from project_mcp.coverage import coverage_block
 from project_mcp.db import get_connection
@@ -190,3 +192,21 @@ def test_coverage_lists_only_a_bounded_sample_of_file_errors_with_each_message_s
     assert all(len(message) <= 200 for message in entry["errors"].values())
     assert all(message.startswith("ValueError: long") for message in entry["errors"].values())
     assert "30 files" in entry["note"]
+
+
+def test_coverage_lists_file_errors_within_one_size_budget_shared_by_every_language(tmp_path):
+    registry = builtin_registry()
+    conn = _scanned(tmp_path, registry)
+    for language, suffix in (("python", "py"), ("rust", "rs")):
+        for i in range(30):
+            conn.execute(
+                "INSERT INTO files (project_id, path, language, analysis_status, analysis_error)"
+                " SELECT project_id, ?, ?, 'file_failed', ? FROM files WHERE path = 'app.py'",
+                (f"{'d' * 300}/m{i:02}.{suffix}", language, "é" * 150),
+            )
+
+    languages = coverage_block(conn, registry, set())["languages"]
+
+    assert len(json.dumps(languages)) < 7_000
+    assert languages["python"]["errors"] and languages["python"]["errors_total"] == 30
+    assert languages["rust"]["errors_total"] == 30
