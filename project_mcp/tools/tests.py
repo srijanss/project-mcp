@@ -213,7 +213,9 @@ def _indirect_tests(conn, symbol_id: int, through_test_helpers: bool = False) ->
     # never runs the real symbol through it, so it is set aside as mocked.
     paths_by_file: dict[str, list[dict]] = {}
     mocked_by_file: dict[str, set[str]] = {}
-    seen = {symbol_id}
+    # A caller is revisited when another chain reaches it: a test mocking one
+    # branch of a diamond still runs the symbol through the other.
+    seen = {(symbol_id, frozenset({symbol_id}))}
     frontier = [(symbol_id, [], {symbol_id})]
     for _ in range(MAX_INDIRECT_CALL_HOPS):
         next_frontier = []
@@ -232,11 +234,11 @@ def _indirect_tests(conn, symbol_id: int, through_test_helpers: bool = False) ->
                 (callee_id,),
             ).fetchall()
             for caller_id, caller_name in callers:
-                if caller_id in seen:
-                    continue
-                seen.add(caller_id)
-                via = [caller_name, *chain]
                 via_ids = {caller_id, *chain_ids}
+                if caller_id in chain_ids or (caller_id, frozenset(via_ids)) in seen:
+                    continue
+                seen.add((caller_id, frozenset(via_ids)))
+                via = [caller_name, *chain]
                 for row in _referencing_tests(conn, caller_id):
                     if "tests" not in row:
                         continue

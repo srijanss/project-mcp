@@ -949,3 +949,37 @@ def test_get_tests_for_sets_aside_a_helper_test_that_mocks_the_symbol_beside_a_d
     assert helpers_file["tests"] == ["tests.test_helpers.test_direct"]
     assert helpers_file["mocked"] == ["tests.test_helpers.test_helper_mocked"]
     assert helpers_file["evidence"] == ["symbol_reference"]
+
+
+def test_get_tests_for_credits_a_test_mocking_one_long_branch_through_the_unmocked_one(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "core.py").write_text(
+        "def t():\n    return 1\n\n\n"
+        "def a1():\n    return t()\n\n\n"
+        "def b1():\n    return t()\n\n\n"
+        "def a2():\n    return a1()\n\n\n"
+        "def b2():\n    return b1()\n\n\n"
+        "def c():\n    return a2() + b2()\n"
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_c.py").write_text(
+        "from unittest import mock\n"
+        "from app.core import c\n"
+        "\n"
+        "\n"
+        '@mock.patch("app.core.a2")\n'
+        "def test_c(m):\n"
+        "    c()\n"
+    )
+
+    tests_for = get_tests_for(tmp_path, "app.core.t")
+
+    assert tests_for == [
+        {
+            "test_file": "tests/test_c.py",
+            "confidence": "medium",
+            "evidence": ["indirect_call"],
+            "via": ["app.core.c", "app.core.b2", "app.core.b1"],
+            "tests": ["tests.test_c.test_c"],
+        }
+    ]
