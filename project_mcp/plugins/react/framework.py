@@ -393,6 +393,7 @@ class ReactFramework:
             imports = self._imported_names(path, source)
             local = {name for _, name, _, _ in rows}
             shadowed = self._shadowed_tags(path, source)
+            hiding_imports = self._shadowed_tags(path, source, functions=True)
             links: dict[tuple[int, int], str] = {}
             for tag, line in self._jsx_tags(path, source):
                 row = next((row for row in rows if row[2] <= line <= row[3]), None)
@@ -400,6 +401,8 @@ class ReactFramework:
                     continue
                 user, confidence = row[0], "high"
                 if tag in imports:
+                    if (tag, line) in hiding_imports:
+                        continue  # a local binding hides the import here
                     target = _resolve_component(components, defaults, path, imports, tag)
                 elif tag in local and (tag, line) not in shadowed:
                     target = visible_component(rows, tag, line)

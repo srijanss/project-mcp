@@ -265,3 +265,20 @@ def test_a_named_import_links_to_the_component_behind_a_renamed_export(
         ("src.App.App", "src.ui.Button", "high"),
         ("src.App.App", "src.ui.Link", "high"),
     ]
+
+
+@pytest.mark.skipif(treesitter.missing("tsx") is not None, reason="tree-sitter is not installed")
+def test_a_default_import_hidden_by_a_local_binding_is_not_linked_where_the_binding_is_used(tmp_path):
+    conn = _scan(
+        tmp_path,
+        {
+            "src/Card.jsx": "export default function Card() {\n  return <b />;\n}\n",
+            "src/List.jsx": (
+                "import Card from './Card';\n\n"
+                "export function List() {\n  const Card = pick();\n  return <Card />;\n}\n\n"
+                "export function Grid() {\n  return <Card />;\n}\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == [("src.List.Grid", "src.Card.Card", "high")]
