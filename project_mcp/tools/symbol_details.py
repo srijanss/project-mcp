@@ -149,7 +149,8 @@ def describe_symbol(project_root: Path, qualified_name: str) -> dict:
     symbol = context["symbol"]
     qualified_name = symbol["qualified_name"]
     try:
-        lines = (Path(project_root) / symbol["file"]).read_text().splitlines()
+        # Replace invalid bytes as the indexer does, so its line numbers still match.
+        lines = (Path(project_root) / symbol["file"]).read_text(errors="replace").splitlines()
     except OSError as exc:  # e.g. the file was deleted after indexing
         source = {
             "source": None,

@@ -295,3 +295,28 @@ def test_describe_symbol_offers_no_suggestion_for_a_name_nothing_resembles(tmp_p
     details = describe_symbol(_project(tmp_path), "app.models.Zzzzzz")
 
     assert details == {"found": False, "symbol": None}
+
+
+def test_describe_symbol_replaces_bytes_that_are_not_valid_utf8_keeping_line_numbers(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "legacy.py").write_bytes(b"x = 1\ndef f():\n    return 'caf\xe9'\n")
+    context = {
+        "found": True,
+        "symbol": {
+            "name": "f",
+            "qualified_name": "legacy.f",
+            "kind": "function",
+            "start_line": 2,
+            "end_line": 3,
+            "file": "legacy.py",
+        },
+    }
+    monkeypatch.setattr(
+        "project_mcp.tools.symbol_details._resolve", lambda *a, **k: context
+    )
+
+    details = describe_symbol(tmp_path, "legacy.f")
+
+    assert details["source"] == "def f():\n    return 'caf�'"
+    assert "source_error" not in details
