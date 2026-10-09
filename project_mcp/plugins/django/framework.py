@@ -36,6 +36,8 @@ def _django_views_by_url_name(
         if posixpath.basename(path) != "urls.py":
             continue
         source = _read_source(Path(project_root) / path)
+        if source is None:
+            continue
         try:
             url_modules[path] = (source, extract_url_patterns(source))
         except SyntaxError:
@@ -121,7 +123,7 @@ def index_django_url_relationships(
     ).fetchall()
     for file_id, path in test_files:
         source = _read_source(Path(project_root) / path)
-        if "reverse" not in source:
+        if source is None or "reverse" not in source:
             continue
         try:
             reverses = extract_url_reverses(path, source)
