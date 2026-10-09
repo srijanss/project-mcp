@@ -400,9 +400,7 @@ class ReactFramework:
                 if row is None:
                     continue
                 user, confidence = row[0], "high"
-                if tag in imports:
-                    if (tag, line) in hiding_imports:
-                        continue  # a local binding hides the import here
+                if tag in imports and (tag, line) not in hiding_imports:
                     target = _resolve_component(components, defaults, path, imports, tag)
                 elif tag in local and (tag, line) not in shadowed:
                     target = visible_component(rows, tag, line)

@@ -282,3 +282,25 @@ def test_a_default_import_hidden_by_a_local_binding_is_not_linked_where_the_bind
     )
 
     assert _renders(conn) == [("src.List.Grid", "src.Card.Card", "high")]
+
+
+@pytest.mark.skipif(treesitter.missing("tsx") is not None, reason="tree-sitter is not installed")
+def test_a_nested_component_hiding_an_import_is_rendered_in_place_of_the_import(tmp_path):
+    conn = _scan(
+        tmp_path,
+        {
+            "src/Item.jsx": "export function Item() {\n  return <i />;\n}\n",
+            "src/Page.jsx": (
+                "import { Item } from './Item';\n\n"
+                "export function Page() {\n"
+                "  function Item() {\n    return <b />;\n  }\n"
+                "  return <Item />;\n}\n\n"
+                "export function Home() {\n  return <Item />;\n}\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == [
+        ("src.Page.Home", "src.Item.Item", "high"),
+        ("src.Page.Page", "src.Page.Page.Item", "high"),
+    ]
