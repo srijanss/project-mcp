@@ -109,3 +109,11 @@ def test_analyze_reports_static_calls_as_symbol_edges():
     analysis = JavaScriptAnalyzer().analyze("src/calls.js", source)
 
     assert analysis.symbol_edges == [("src.calls.a", "src.calls.b", "calls")]
+
+
+def test_resolve_import_keeps_a_specifier_that_already_names_a_source_file():
+    analyzer = JavaScriptAnalyzer()
+
+    assert analyzer.resolve_import("src/app/main.ts", "../util.js") == ["src/util.js"]
+    assert analyzer.resolve_import("src/app/main.ts", "./Card.tsx") == ["src/app/Card.tsx"]
+    assert analyzer.resolve_import("src/app/main.ts", "./data.json")[0] == "src/app/data.json.js"

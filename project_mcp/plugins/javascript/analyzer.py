@@ -63,6 +63,8 @@ class JavaScriptAnalyzer:
         if not module.startswith("."):
             return []
         base = posixpath.normpath(posixpath.join(posixpath.dirname(importer), module))
+        if base.endswith(_EXTENSIONS):
+            return [base]
         return [base + ext for ext in _EXTENSIONS] + [
             f"{base}/index{ext}" for ext in _EXTENSIONS
         ]
