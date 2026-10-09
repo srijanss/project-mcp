@@ -919,3 +919,33 @@ def test_get_tests_for_caps_the_mocked_tests_it_names(tmp_path):
         "tests.test_payments.test_mocked_1",
     ]
     assert tests_for[0]["mocked_total"] == 3
+
+
+def test_get_tests_for_sets_aside_a_helper_test_that_mocks_the_symbol_beside_a_direct_test(
+    tmp_path,
+):
+    project_root = _order_project(tmp_path)
+    (project_root / "tests" / "test_helpers.py").write_text(
+        "from unittest import mock\n"
+        "from app.models import Order\n"
+        "\n"
+        "\n"
+        "def _hit():\n"
+        "    return Order().cancel()\n"
+        "\n"
+        "\n"
+        "def test_direct():\n"
+        "    assert Order().cancel()\n"
+        "\n"
+        "\n"
+        '@mock.patch("app.models.Order.cancel")\n'
+        "def test_helper_mocked(cancel):\n"
+        "    _hit()\n"
+    )
+
+    tests_for = get_tests_for(project_root, "app.models.Order.cancel")
+
+    helpers_file = next(t for t in tests_for if t["test_file"] == "tests/test_helpers.py")
+    assert helpers_file["tests"] == ["tests.test_helpers.test_direct"]
+    assert helpers_file["mocked"] == ["tests.test_helpers.test_helper_mocked"]
+    assert helpers_file["evidence"] == ["symbol_reference"]

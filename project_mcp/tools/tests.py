@@ -297,6 +297,9 @@ def get_tests_for(
             existing = by_file.get(row["test_file"], {})
             if "tests" not in existing:
                 by_file[row["test_file"]] = row
+            elif "tests" not in row:
+                # Every helper test mocks the symbol: set aside beside the direct tests.
+                existing["mocked"] = list(dict.fromkeys([*existing.get("mocked", []), *row["mocked"]]))
             else:
                 # Tests calling the symbol come before those using a helper.
                 existing["tests"] = list(dict.fromkeys([*existing["tests"], *row["tests"]]))
