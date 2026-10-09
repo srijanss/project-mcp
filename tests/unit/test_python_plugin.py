@@ -77,8 +77,10 @@ def test_analyze_makes_relative_imports_absolute_and_drops_unresolvable_ones():
 def test_resolve_import_maps_a_module_and_its_imported_names_to_files():
     analyzer = PythonAnalyzer()
 
-    assert analyzer.resolve_import("main.py", ("app.util", ())) == ["app/util.py"]
-    assert analyzer.resolve_import("main.py", ("app", ("models", "views"))) == [
+    candidates = analyzer.resolve_import("main.py", ("app", ("models", "views")))
+
+    assert analyzer.resolve_import("main.py", ("app.util", ()))[0] == "app/util.py"
+    assert [c for c in candidates if not c.endswith("__init__.py")] == [
         "app.py",
         "app/models.py",
         "app/views.py",
@@ -152,3 +154,15 @@ def test_declared_dependencies_skip_requirements_includes_resolving_outside_the_
     )
 
     assert [d["name"] for d in declared_dependencies(project)] == ["httpx"]
+
+
+def test_resolve_import_tries_a_package_init_for_each_name_before_the_modules_own():
+    analyzer = PythonAnalyzer()
+
+    assert analyzer.resolve_import("main.py", ("pkg", ())) == ["pkg.py", "pkg/__init__.py"]
+    assert analyzer.resolve_import("main.py", ("app", ("models",))) == [
+        "app.py",
+        "app/models.py",
+        "app/models/__init__.py",
+        "app/__init__.py",
+    ]
