@@ -4,6 +4,7 @@ from project_mcp.plugins import treesitter
 from project_mcp.plugins.react import usages
 from project_mcp.plugins.react.tree_usages import (
     default_export_name,
+    export_aliases,
     grammar_for,
     imported_names,
     jsx_tags,
@@ -175,3 +176,17 @@ render(<Button />);
 
     assert shadowed_tags(source, "tsx") == set()
     assert shadowed_tags(source, "tsx", functions=True) == {("Button", 6), ("Icon", 6)}
+
+
+def test_export_aliases_map_each_renamed_export_to_its_local_name():
+    source = """\
+function Button() {}
+function Card() {}
+export { Button as Primary, Card, Card as Panel };
+export { Button as default };
+export { Other as Elsewhere } from './other';
+// export { Card as Commented };
+"""
+
+    assert export_aliases(source, "tsx") == {"Primary": "Button", "Panel": "Card"}
+    assert export_aliases("export function Plain() {}\n", "tsx") == {}

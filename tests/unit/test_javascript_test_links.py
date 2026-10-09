@@ -49,3 +49,30 @@ def test_test_files_link_to_imported_symbols_on_either_backend(backend, tmp_path
         ("src/__tests__/format.js", "src.format.plain", "high", ["direct_import"]),
         ("src/__tests__/format.js", "src.format.title", "high", ["direct_import"]),
     ]
+
+
+@pytest.mark.parametrize("backend", ["tree-sitter", "regex"])
+def test_a_renamed_export_links_to_the_symbol_it_renames(backend, tmp_path, monkeypatch):
+    if backend == "regex":
+        monkeypatch.setattr(treesitter, "missing", lambda grammar: "forced off for the test")
+    elif treesitter.missing("javascript") is not None:
+        pytest.skip("tree-sitter is not installed")
+    files = {
+        "src/math.js": "function add() {\n  return 1;\n}\n\nexport { add as sum, add as plus };\n",
+        "src/__tests__/math.js": "import { sum as total } from '../math';\n",
+    }
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    links = conn.execute(
+        """
+        SELECT f.path, s.qualified_name FROM relationships r
+        JOIN files f ON f.id = r.source_entity_id AND r.source_entity_type = 'file'
+        JOIN symbols s ON s.id = r.target_entity_id AND r.target_entity_type = 'symbol'
+        WHERE r.relationship_type = 'tests' AND r.evidence_json = '["direct_import"]'
+        """
+    ).fetchall()
+    assert links == [("src/__tests__/math.js", "src.math.add")]

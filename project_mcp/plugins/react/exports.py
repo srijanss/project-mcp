@@ -13,6 +13,9 @@ _DEFAULT_EXPRESSION = re.compile(
     re.MULTILINE,
 )
 _DEFAULT_ALIAS = re.compile(r"(?<![\w$])([A-Za-z_$][\w$]*)\s+as\s+default\b")
+# `export { A as B, C }`, but not a re-export `export { A } from './m'`
+_EXPORT_LIST = re.compile(r"\bexport\s*\{([^}]*)\}(?!\s*from\b)")
+_RENAMED = re.compile(r"^\s*([A-Za-z_$][\w$]*)\s+as\s+([A-Za-z_$][\w$]*)\s*$")
 
 
 def default_export_name(source: str) -> str | None:
@@ -23,3 +26,14 @@ def default_export_name(source: str) -> str | None:
         if match:
             return match[1]
     return None
+
+
+def export_aliases(source: str) -> dict[str, str]:
+    """The local name behind each export an export list renames, by exported name."""
+    aliases = {}
+    for clause in _EXPORT_LIST.findall(_without_comments(source)):
+        for item in clause.split(","):
+            match = _RENAMED.match(item)
+            if match and match[2] != "default":
+                aliases[match[2]] = match[1]
+    return aliases

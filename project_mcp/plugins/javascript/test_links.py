@@ -59,23 +59,29 @@ def _imported_names(analyzer, path: str, source: str) -> dict[str, tuple[str, st
 
 
 def _imported_symbol(context, analyzer, importer: str, specifier: str, imported: str) -> int | None:
-    """The symbol an import names: an export by its name, or the default export."""
+    """The symbol an import names: an export by its name or alias, or the default export."""
     target_path = next(
         (c for c in analyzer.resolve_import(importer, specifier) if c in context.path_to_file_id),
         None,
     )
     if target_path is None:
         return None
+    source = _source(context, target_path)
+    if source is None:
+        return None
     if imported == "default":
-        source = _source(context, target_path)
-        if source is None:
-            return None
         if analyzer.backend == "tree-sitter":
             imported = tree_usages.default_export_name(source, tree_usages.grammar_for(target_path))
         else:
             imported = exports.default_export_name(source)
         if imported is None:
             return None
+    else:
+        if analyzer.backend == "tree-sitter":
+            aliases = tree_usages.export_aliases(source, tree_usages.grammar_for(target_path))
+        else:
+            aliases = exports.export_aliases(source)
+        imported = aliases.get(imported, imported)
     row = context.conn.execute(
         "SELECT id FROM symbols WHERE file_id = ? AND qualified_name = ?",
         (context.path_to_file_id[target_path], f"{analyzer.module_name(target_path)}.{imported}"),

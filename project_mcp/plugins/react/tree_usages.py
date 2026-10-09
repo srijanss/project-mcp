@@ -150,3 +150,20 @@ def _function_names(body) -> list[str]:
                 names.append(child.field("name").text)
             names += _function_names(child)
     return names
+
+
+def export_aliases(source: str, grammar: str) -> dict[str, str]:
+    """The local name behind each export an export list renames, by exported name.
+
+    Re-exports from another module and `as default` aliases don't count.
+    """
+    aliases = {}
+    for statement in treesitter.parse(source, grammar).children:
+        clause = next((c for c in statement.children if c.type == "export_clause"), None)
+        if statement.type != "export_statement" or clause is None or statement.field("source"):
+            continue
+        for specifier in clause.children:
+            alias = specifier.field("alias")
+            if alias is not None and alias.text != "default":
+                aliases[alias.text] = specifier.field("name").text
+    return aliases

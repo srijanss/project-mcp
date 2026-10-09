@@ -3,12 +3,13 @@ import json
 import os
 import re
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.react import tree_usages, usages
 from project_mcp.plugins.react.colocated import colocated_source
 from project_mcp.plugins.react.dynamic import computed_components, dynamic_route_lines, lazy_imports
-from project_mcp.plugins.react.exports import default_export_name
+from project_mcp.plugins.react.exports import default_export_name, export_aliases
 from project_mcp.plugins.react.pages import is_page_path
 from project_mcp.plugins.react.routes import route_declarations
 from project_mcp.plugins.react.scope import visible_component
@@ -52,18 +53,28 @@ def _imports_react(root: Path) -> bool:
     return False
 
 
+class _Exports(NamedTuple):
+    """How a file names its exports: the default's local name and the renamed ones."""
+
+    default: str | None
+    aliases: dict[str, str]
+
+
 def _component_in(
-    rows: list[tuple[int, str, int, int]], imported: str, default_name: str | None
+    rows: list[tuple[int, str, int, int]], imported: str, exports: _Exports
 ) -> int | None:
     """The component a file's `imported` export refers to.
 
     A default import means the file's default export; when that can't be
-    read, the file's only component.
+    read, the file's only component. A renamed export means the component
+    declared under its local name.
     """
     if imported == "default":
-        if default_name is None:
+        if exports.default is None:
             return rows[0][0] if len(rows) == 1 else None
-        imported = default_name
+        imported = exports.default
+    else:
+        imported = exports.aliases.get(imported, imported)
     return next((id_ for id_, component, _, _ in rows if component == imported), None)
 
 
@@ -173,15 +184,22 @@ class ReactFramework:
             return tree_usages.default_export_name(source, tree_usages.grammar_for(path))
         return default_export_name(source)
 
-    def _default_exports(self, context, components) -> dict[str, str | None]:
-        """The default-exported name of each file that defines components."""
-        defaults: dict[str, str | None] = {}
+    def _export_aliases(self, path: str, source: str) -> dict[str, str]:
+        if self.backend == "tree-sitter":
+            return tree_usages.export_aliases(source, tree_usages.grammar_for(path))
+        return export_aliases(source)
+
+    def _default_exports(self, context, components) -> dict[str, _Exports]:
+        """How each file that defines components names its exports."""
+        defaults: dict[str, _Exports] = {}
         for path in components:
             try:
                 source = (Path(context.project_root) / path).read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 source = ""
-            defaults[path] = self._default_export_name(path, source)
+            defaults[path] = _Exports(
+                self._default_export_name(path, source), self._export_aliases(path, source)
+            )
         return defaults
 
     def detect(self, context) -> bool:

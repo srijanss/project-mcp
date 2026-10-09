@@ -9,7 +9,7 @@ from project_mcp.plugins.astro.routes import route_for
 from project_mcp.plugins.astro.usages import default_imports, named_imports, rendered_tags
 from project_mcp.plugins.javascript.analyzer import JavaScriptAnalyzer
 from project_mcp.plugins.react import tree_usages as react_tree_usages
-from project_mcp.plugins.react.exports import default_export_name
+from project_mcp.plugins.react.exports import default_export_name, export_aliases
 
 _DEPENDENCY_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 _FENCE = "---"
@@ -147,6 +147,7 @@ class AstroFramework:
         ):
             script_components.setdefault(path, []).append((symbol_id, name))
         defaults: dict[str, int | None] = {}
+        aliases: dict[str, dict[str, str]] = {}
         for path, source_id in component_ids.items():
             try:
                 source = (Path(context.project_root) / path).read_text(encoding="utf-8")
@@ -161,8 +162,11 @@ class AstroFramework:
                     if candidate in component_ids and imported == "default":
                         targets.add(component_ids[candidate])
                     elif candidate in script_components and imported != "default":
+                        if candidate not in aliases:
+                            aliases[candidate] = self._export_aliases(context, candidate)
+                        name = aliases[candidate].get(imported, imported)
                         rows = script_components[candidate]
-                        targets.add(next((id_ for id_, name in rows if name == imported), None))
+                        targets.add(next((id_ for id_, row_name in rows if row_name == name), None))
                     elif candidate in script_components:
                         if candidate not in defaults:
                             defaults[candidate] = self._default_component(
@@ -190,6 +194,16 @@ class AstroFramework:
         else:
             defaults, named = default_imports(script), named_imports(script)
         return {**{name: (specifier, "default") for name, specifier in defaults.items()}, **named}
+
+    def _export_aliases(self, context, path: str) -> dict[str, str]:
+        """The local name behind each export a JS/TS file renames, by exported name."""
+        try:
+            source = (Path(context.project_root) / path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return {}
+        if self.backend == "tree-sitter":
+            return react_tree_usages.export_aliases(source, react_tree_usages.grammar_for(path))
+        return export_aliases(source)
 
     def _default_component(self, context, path: str, rows: list[tuple[int, str]]) -> int | None:
         """The component a JS/TS file exports as its default; when that can't be

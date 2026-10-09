@@ -236,3 +236,32 @@ def test_each_component_links_to_the_nested_component_it_declares_itself(tmp_pat
         ("src.Lists.A", "src.Lists.A.Item", "high"),
         ("src.Lists.B", "src.Lists.B.Item", "high"),
     ]
+
+
+@pytest.mark.parametrize("backend", ["tree-sitter", "regex"])
+def test_a_named_import_links_to_the_component_behind_a_renamed_export(
+    backend, tmp_path, monkeypatch
+):
+    if backend == "regex":
+        monkeypatch.setattr(treesitter, "missing", lambda grammar: "forced off for the test")
+    elif treesitter.missing("tsx") is not None:
+        pytest.skip("tree-sitter is not installed")
+    conn = _scan(
+        tmp_path,
+        {
+            "src/ui.tsx": (
+                "function Button() {\n  return <button />;\n}\n\n"
+                "function Link() {\n  return <a />;\n}\n\n"
+                "export { Button as Primary, Link };\n"
+            ),
+            "src/App.tsx": (
+                "import { Primary, Link as Anchor } from './ui';\n\n"
+                "export function App() {\n  return <><Primary /><Anchor /></>;\n}\n"
+            ),
+        },
+    )
+
+    assert _renders(conn) == [
+        ("src.App.App", "src.ui.Button", "high"),
+        ("src.App.App", "src.ui.Link", "high"),
+    ]
