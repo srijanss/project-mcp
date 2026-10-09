@@ -552,3 +552,35 @@ def test_an_analyzers_backend_feeds_its_plugins_fingerprint():
 
     assert tree_sitter != regex
     assert plain not in (tree_sitter, regex)
+
+
+def test_a_languages_fingerprint_changes_when_a_framework_requiring_it_is_disabled():
+    def fingerprint(disabled=()):
+        registry = PluginRegistry()
+        registry.register(
+            PluginDescriptor(
+                name="toy",
+                version="0.1.0",
+                api_version=1,
+                extensions={".toy": "toy"},
+                analyzer=f"{__name__}:_PlainAnalyzer",
+            )
+        )
+        registry.register(
+            PluginDescriptor(
+                name="toyfw",
+                version="0.1.0",
+                api_version=1,
+                extensions={},
+                kind="framework",
+                requires=("toy",),
+                analyzer=f"{__name__}:_PlainAnalyzer",
+            )
+        )
+        for name in disabled:
+            registry.disable(name)
+        registry.resolve_extension_claims()
+        return registry.fingerprint("toy")
+
+    assert fingerprint(disabled=("toyfw",)) != fingerprint()
+    assert fingerprint() == fingerprint()

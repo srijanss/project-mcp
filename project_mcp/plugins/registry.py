@@ -96,6 +96,15 @@ class PluginRegistry:
         backend = getattr(self._load(descriptor), "backend", None)
         if backend is not None:
             hashed["backend"] = backend
+        # Frameworks enrich the language's files, so enabling or disabling one
+        # means those files need indexing again.
+        frameworks = sorted(
+            framework.name
+            for framework in self._framework_descriptors
+            if descriptor.name in framework.requires and self._usable(framework)
+        )
+        if frameworks:
+            hashed["frameworks"] = frameworks
         settings = json.dumps(hashed, sort_keys=True, default=str)
         config_hash = hashlib.sha256(settings.encode()).hexdigest()[:12]
         return f"{descriptor.name}@{descriptor.version}#{config_hash}"
