@@ -79,11 +79,11 @@ def test_resolve_import_maps_a_module_and_its_imported_names_to_files():
 
     candidates = analyzer.resolve_import("main.py", ("app", ("models", "views")))
 
-    assert analyzer.resolve_import("main.py", ("app.util", ()))[0] == "app/util.py"
+    assert analyzer.resolve_import("main.py", ("app.util", ())) == ["app/util/__init__.py", "app/util.py"]
     assert [c for c in candidates if not c.endswith("__init__.py")] == [
-        "app.py",
         "app/models.py",
         "app/views.py",
+        "app.py",
     ]
 
 
@@ -156,13 +156,13 @@ def test_declared_dependencies_skip_requirements_includes_resolving_outside_the_
     assert [d["name"] for d in declared_dependencies(project)] == ["httpx"]
 
 
-def test_resolve_import_tries_a_package_init_for_each_name_before_the_modules_own():
+def test_resolve_import_prefers_a_package_to_a_module_of_the_same_name():
     analyzer = PythonAnalyzer()
 
-    assert analyzer.resolve_import("main.py", ("pkg", ())) == ["pkg.py", "pkg/__init__.py"]
+    assert analyzer.resolve_import("main.py", ("pkg", ())) == ["pkg/__init__.py", "pkg.py"]
     assert analyzer.resolve_import("main.py", ("app", ("models",))) == [
-        "app.py",
-        "app/models.py",
         "app/models/__init__.py",
+        "app/models.py",
         "app/__init__.py",
+        "app.py",
     ]

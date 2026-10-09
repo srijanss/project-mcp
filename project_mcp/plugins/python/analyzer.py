@@ -191,11 +191,12 @@ class PythonAnalyzer:
         linking.link_test_evidence(context)
 
     def resolve_import(self, importer: str, spec: tuple[str, tuple[str, ...]]) -> list[str]:
-        """`import a.b` -> a/b.py, else the package a/b/__init__.py; `from a import x, y`
-        prefers the submodules a/x.py, a/x/__init__.py, ... over a/__init__.py."""
+        """`import a.b` -> the package a/b/__init__.py, else a/b.py (Python picks the
+        package when both exist); `from a import x, y` prefers the submodules
+        a/x/__init__.py, a/x.py, ... over a/__init__.py."""
         module, names = spec
         module_path = module.replace(".", "/")
-        candidates = [f"{module_path}.py"]
+        candidates = []
         for name in names:
-            candidates += [f"{module_path}/{name}.py", f"{module_path}/{name}/__init__.py"]
-        return [*candidates, f"{module_path}/__init__.py"]
+            candidates += [f"{module_path}/{name}/__init__.py", f"{module_path}/{name}.py"]
+        return [*candidates, f"{module_path}/__init__.py", f"{module_path}.py"]
