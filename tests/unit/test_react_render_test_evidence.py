@@ -40,3 +40,39 @@ def test_jsx_render_evidence_on_the_regex_backend_keeps_other_evidence(tmp_path,
     run_scan(conn, tmp_path, load_config(tmp_path))
 
     assert _evidence(conn) == {"Badge": ["direct_import", "jsx_render"], "Tag": ["direct_import"]}
+
+
+def test_a_tag_bound_by_a_helper_parameter_is_not_the_imported_component(tmp_path):
+    files = {
+        "package.json": FILES["package.json"],
+        "src/Badge.jsx": FILES["src/Badge.jsx"],
+        "src/Badge.spec.jsx": (
+            "import { Badge } from './Badge';\n\n"
+            "const show = (Badge) => <Badge />;\n\nit('shows', () => show(Badge));\n"
+        ),
+    }
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert _evidence(conn) == {"Badge": ["direct_import"]}
+
+
+def test_a_component_declared_inside_the_test_is_not_the_imported_component(tmp_path):
+    files = {
+        "package.json": FILES["package.json"],
+        "src/Badge.jsx": FILES["src/Badge.jsx"],
+        "src/Badge.spec.jsx": (
+            "import { Badge } from './Badge';\n\n"
+            "it('stubs', () => {\n  function Badge() {\n    return null;\n  }\n  mount(<Badge />);\n});\n"
+        ),
+    }
+    for path, text in files.items():
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_text(text)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+
+    assert _evidence(conn) == {"Badge": ["direct_import"]}

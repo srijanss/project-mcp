@@ -3,7 +3,11 @@ import re
 from pathlib import Path
 
 from project_mcp.plugins import treesitter
-from project_mcp.plugins.javascript.tree_parser import _SCOPE_TYPES, _local_names
+from project_mcp.plugins.javascript.tree_parser import (
+    _SCOPE_TYPES,
+    _declared_function,
+    _local_names,
+)
 
 # file suffix -> the tree-sitter grammar that parses it
 _GRAMMARS = {
@@ -109,13 +113,19 @@ def jsx_tags(source: str, grammar: str) -> list[tuple[str, int]]:
     return tags
 
 
-def shadowed_tags(source: str, grammar: str) -> set[tuple[str, int]]:
-    """The (name, line) of each JSX tag naming a parameter or variable of an enclosing function."""
+def shadowed_tags(source: str, grammar: str, functions: bool = False) -> set[tuple[str, int]]:
+    """The (name, line) of each JSX tag naming a parameter or variable of an enclosing function.
+
+    Functions declared in an enclosing function are symbols of their own, so
+    they only count as bindings when `functions` is set.
+    """
     shadowed: set[tuple[str, int]] = set()
 
     def visit(node, bound: frozenset[str]) -> None:
         if node.type in _SCOPE_TYPES:
             bound = bound | set(_local_names(node))
+            if functions and node.field("body") is not None:
+                bound = bound | set(_function_names(node.field("body")))
         if node.type in _JSX_TAGS:
             name = node.field("name")
             if name is not None and name.type == "identifier" and name.text in bound:
@@ -125,3 +135,18 @@ def shadowed_tags(source: str, grammar: str) -> set[tuple[str, int]]:
 
     visit(treesitter.parse(source, grammar), frozenset())
     return shadowed
+
+
+def _function_names(body) -> list[str]:
+    """The functions declared directly in `body`, not in functions nested in it."""
+    names = []
+    for child in body.children:
+        if child.type == "function_declaration":
+            names.append(child.field("name").text)
+        elif child.type in _SCOPE_TYPES:
+            continue
+        else:
+            if child.type == "variable_declarator" and _declared_function(child) is not None:
+                names.append(child.field("name").text)
+            names += _function_names(child)
+    return names

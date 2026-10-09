@@ -159,3 +159,19 @@ export function Table({ rows }) {
 """
 
     assert shadowed_tags(source, "tsx") == {("Row", 7), ("Icon", 7), ("Cell", 7), ("Item", 11)}
+
+
+def test_shadowed_tags_can_include_function_valued_variables_declared_in_an_enclosing_scope():
+    source = """\
+test('stubs', () => {
+  const Button = () => null;
+  function Icon() {
+    return null;
+  }
+  render(<div><Button /><Icon /></div>);
+});
+render(<Button />);
+"""
+
+    assert shadowed_tags(source, "tsx") == set()
+    assert shadowed_tags(source, "tsx", functions=True) == {("Button", 6), ("Icon", 6)}

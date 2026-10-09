@@ -161,9 +161,11 @@ class ReactFramework:
             return tree_usages.jsx_tags(source, tree_usages.grammar_for(path))
         return usages.jsx_tags(source)
 
-    def _shadowed_tags(self, path: str, source: str) -> set[tuple[str, int]]:
+    def _shadowed_tags(
+        self, path: str, source: str, functions: bool = False
+    ) -> set[tuple[str, int]]:
         if self.backend == "tree-sitter":
-            return tree_usages.shadowed_tags(source, tree_usages.grammar_for(path))
+            return tree_usages.shadowed_tags(source, tree_usages.grammar_for(path), functions)
         return set()
 
     def _default_export_name(self, path: str, source: str) -> str | None:
@@ -257,9 +259,11 @@ class ReactFramework:
             except (OSError, UnicodeDecodeError):
                 continue
             imports = self._imported_names(path, source)
+            shadowed = self._shadowed_tags(path, source, functions=True)
             rendered = {
                 _resolve_component(components, defaults, path, imports, tag)
-                for tag, _ in self._jsx_tags(path, source)
+                for tag, line in self._jsx_tags(path, source)
+                if (tag, line) not in shadowed
             }
             for relationship_id, target, evidence in rows:
                 updated = [e for e in evidence if e != "jsx_render"]
