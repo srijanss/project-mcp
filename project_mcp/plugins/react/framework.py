@@ -2,10 +2,11 @@
 import json
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.react import tree_usages, usages
+from project_mcp.plugins.react.colocated import colocated_source
 from project_mcp.plugins.react.dynamic import computed_components, dynamic_route_lines, lazy_imports
 from project_mcp.plugins.react.exports import default_export_name
 from project_mcp.plugins.react.pages import is_page_path
@@ -191,6 +192,46 @@ class ReactFramework:
         self._declare_routes(context)
         self._link_dynamic(context)
         self._mark_rendered_tests(context)
+        self._link_colocated_tests(context)
+
+    def _link_colocated_tests(self, context) -> None:
+        """Link each colocated test file to the component named like its source file,
+        else to that file, unless it already tests that target by a stronger link."""
+        context.conn.execute(
+            "DELETE FROM relationships WHERE relationship_type = 'tests'"
+            " AND source_entity_type = 'file' AND evidence_json = ?"
+            " AND source_entity_id IN (SELECT id FROM files WHERE project_id = ?)",
+            (json.dumps(["naming_convention"]), context.project_id),
+        )
+        paths = {path for path in context.path_to_file_id if path.endswith(_EXTENSIONS)}
+        for test_path in sorted(paths):
+            source_path = colocated_source(test_path, paths)
+            if source_path is None:
+                continue
+            test_id, source_id = context.path_to_file_id[test_path], context.path_to_file_id[source_path]
+            component = context.conn.execute(
+                "SELECT id FROM symbols WHERE file_id = ? AND kind = 'component' AND name = ?",
+                (source_id, PurePosixPath(source_path).stem),
+            ).fetchone()
+            target_type, target_id = ("symbol", component[0]) if component else ("file", source_id)
+            linked = context.conn.execute(
+                "SELECT 1 FROM relationships WHERE relationship_type = 'tests'"
+                " AND source_entity_type = 'file' AND source_entity_id = ?"
+                " AND target_entity_type = ? AND target_entity_id = ?",
+                (test_id, target_type, target_id),
+            ).fetchone()
+            if linked:
+                continue
+            context.conn.execute(
+                """
+                INSERT INTO relationships (
+                    source_entity_type, source_entity_id,
+                    target_entity_type, target_entity_id,
+                    relationship_type, confidence, evidence_json
+                ) VALUES ('file', ?, ?, ?, 'tests', 'low', ?)
+                """,
+                (test_id, target_type, target_id, json.dumps(["naming_convention"])),
+            )
 
     def _mark_rendered_tests(self, context) -> None:
         """Add jsx_render evidence to a test file's tests link to each component it renders."""
