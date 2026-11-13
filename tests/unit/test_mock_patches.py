@@ -309,3 +309,16 @@ def test_extract_fixture_requests_reads_keyword_only_parameters():
     assert extract_fixture_requests("tests/test_cube.py", source, {}) == [
         ("tests.test_cube.test_cube", "tests.test_cube.cube")
     ]
+
+
+def test_extract_fixture_requests_matches_a_fixture_by_its_registered_name():
+    source = (
+        "import pytest\n\n\n"
+        "@pytest.fixture(name='cube')\ndef make_cube():\n    return 8\n\n\n"
+        "def test_cube(cube):\n    pass\n\n\n"
+        "def test_by_function_name(make_cube):\n    pass\n"
+    )
+
+    assert extract_fixture_requests("tests/test_cube.py", source, {}) == [
+        ("tests.test_cube.test_cube", "tests.test_cube.make_cube")
+    ]

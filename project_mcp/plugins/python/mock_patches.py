@@ -47,6 +47,16 @@ def _is_autouse(decorator: ast.expr) -> bool:
     )
 
 
+def _registered_name(decorator: ast.expr) -> str | None:
+    """The literal `name=` a fixture decorator registers the fixture under."""
+    if not isinstance(decorator, ast.Call):
+        return None
+    for kw in decorator.keywords:
+        if kw.arg == "name":
+            return _string(kw.value)
+    return None
+
+
 def _is_patch_object(node: ast.Call) -> bool:
     """`patch.object(...)`, however `patch` itself was reached."""
     func = node.func
@@ -77,8 +87,9 @@ class _PatchCollector(ast.NodeVisitor):
         scope = ".".join([*self.scope, node.name])
         decorator = _fixture_decorator(node)
         if decorator is not None:
-            self.fixtures[node.name] = scope
-            self.fixture_definitions.append((node.name, scope))
+            name = _registered_name(decorator) or node.name
+            self.fixtures[name] = scope
+            self.fixture_definitions.append((name, scope))
             if _is_autouse(decorator):
                 self.autouse.append(scope)
         self.parameters[scope] = [arg.arg for arg in [*node.args.args, *node.args.kwonlyargs]]
