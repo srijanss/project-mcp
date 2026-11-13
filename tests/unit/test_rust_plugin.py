@@ -98,3 +98,39 @@ def test_analyze_links_multiline_generic_trait_impls():
     analysis = RustAnalyzer().analyze("src/lib.rs", source)
 
     assert analysis.symbol_edges == [("src.lib.Wrapper", "src.lib.Describe", "implements")]
+
+
+def test_link_test_evidence_records_each_test_function_once_against_its_symbol(tmp_path):
+    from project_mcp.config import load_config
+    from project_mcp.db import get_connection
+    from project_mcp.indexer import run_scan
+    from project_mcp.plugins.analysis import ChangedFile, LinkContext
+
+    source = "pub fn add() {}\n\n#[cfg(test)]\nmod tests {\n    fn helper() {}\n\n    #[test]\n    fn adds() {}\n}\n"
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text(source)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+    path_to_file_id = dict(conn.execute("SELECT path, id FROM files"))
+    rust = RustAnalyzer()
+    context = LinkContext(
+        conn=conn,
+        project_root=tmp_path,
+        source_roots=[],
+        path_to_file_id=path_to_file_id,
+        changed={"src/lib.rs": ChangedFile(path_to_file_id["src/lib.rs"], source, rust.analyze("src/lib.rs", source))},
+        added=set(),
+        plugin_paths=["src/lib.rs"],
+    )
+
+    rust.link_test_evidence(context)
+    rust.link_test_evidence(context)
+
+    recorded = conn.execute(
+        """
+        SELECT s.qualified_name, t.test_kind, t.framework FROM tests t
+        JOIN symbols s ON s.id = t.symbol_id
+        """
+    ).fetchall()
+    conn.close()
+    assert recorded == [("src.lib.tests.adds", "test_function", "cargo")]

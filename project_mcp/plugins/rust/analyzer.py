@@ -9,7 +9,11 @@ from project_mcp.plugins.rust.parser import (
     extract_rust_use,
     parse_rust_source,
 )
-from project_mcp.plugins.rust.tree_parser import parse_rust_implements, parse_rust_tree
+from project_mcp.plugins.rust.tree_parser import (
+    discover_rust_tests,
+    parse_rust_implements,
+    parse_rust_tree,
+)
 
 
 class RustAnalyzer:
@@ -52,6 +56,27 @@ class RustAnalyzer:
             symbol_edges=symbol_edges,
             imports=[use["path"] for use in extract_rust_use(path, source)],
         )
+
+    def link_test_evidence(self, context) -> None:
+        """Record the changed files' `#[test]` functions in the tests table.
+
+        The regex fallback cannot read attributes, so without tree-sitter a
+        file's tests are cleared but none are recorded.
+        """
+        conn = context.conn
+        for path, changed in context.changed.items():
+            conn.execute("DELETE FROM tests WHERE file_id = ?", (changed.file_id,))
+            if self.backend != "tree-sitter":
+                continue
+            for qualified_name in discover_rust_tests(path, changed.source):
+                conn.execute(
+                    """
+                    INSERT INTO tests (symbol_id, file_id, test_kind, framework)
+                    SELECT id, file_id, 'test_function', 'cargo' FROM symbols
+                    WHERE qualified_name = ? AND file_id = ?
+                    """,
+                    (qualified_name, changed.file_id),
+                )
 
     def resolve_import(self, importer: str, module: str) -> list[str]:
         """Candidate files for a `crate::` use path, relative to the crate's src/."""

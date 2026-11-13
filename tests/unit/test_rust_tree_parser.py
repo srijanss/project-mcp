@@ -1,7 +1,11 @@
 import pytest
 
 from project_mcp.plugins.rust.parser import parse_rust_source
-from project_mcp.plugins.rust.tree_parser import parse_rust_implements, parse_rust_tree
+from project_mcp.plugins.rust.tree_parser import (
+    discover_rust_tests,
+    parse_rust_implements,
+    parse_rust_tree,
+)
 
 SOURCE = """\
 use std::fmt;
@@ -121,3 +125,39 @@ def test_parse_rust_implements_resolves_explicit_paths_to_the_item_they_name(pat
     targets = [target for _, target, _ in parse_rust_implements(path, source, symbols)]
 
     assert targets == ([expected] if expected else [])
+
+
+def test_discover_rust_tests_finds_test_and_tokio_test_functions_and_skips_helpers():
+    source = """\
+#[test]
+fn top_level() {}
+
+#[cfg(test)]
+mod tests {
+    fn helper() {}
+
+    #[test]
+    #[should_panic]
+    fn panics() {}
+
+    /// Runs on tokio.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn on_tokio() {}
+
+    #[derive(Debug)]
+    struct NotATest;
+
+    #[cfg(test)]
+    mod nested {
+        #[tokio::test]
+        async fn deep() {}
+    }
+}
+"""
+
+    assert discover_rust_tests("src/lib.rs", source) == [
+        "src.lib.top_level",
+        "src.lib.tests.panics",
+        "src.lib.tests.on_tokio",
+        "src.lib.tests.nested.deep",
+    ]

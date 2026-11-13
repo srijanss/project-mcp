@@ -125,3 +125,41 @@ def _walk(node, scope: str, types=_KINDS.keys()):
             yield from _walk(child, f"{scope}.{child.field('name').text}", types)
         else:
             yield from _walk(child, scope, types)
+
+
+def discover_rust_tests(path: str, source: str) -> list[str]:
+    """Qualified names of the `#[test]` and `#[tokio::test]` functions in `source`.
+
+    Test functions are found wherever they are declared, whether in a
+    `#[cfg(test)]` inline mod or at the top of an integration test file.
+    """
+    return list(_test_functions(treesitter.parse(source, "rust"), _module_qualified_name(path)))
+
+
+_TEST_ATTRIBUTES = {"test", "tokio::test"}
+_COMMENTS = {"line_comment", "block_comment"}
+
+
+def _test_functions(node, scope: str):
+    attributes: list[str] = []
+    for child in node.children:
+        if child.type == "attribute_item":
+            attributes.append(_attribute_path(child))
+            continue
+        if child.type in _COMMENTS:
+            continue
+        if child.type == "function_item" and _TEST_ATTRIBUTES.intersection(attributes):
+            yield f"{scope}.{child.field('name').text}"
+        attributes = []
+        if child.type == "mod_item":
+            if child.field("body") is not None:
+                yield from _test_functions(child.field("body"), f"{scope}.{child.field('name').text}")
+        elif child.type != "function_item":
+            yield from _test_functions(child, scope)
+
+
+def _attribute_path(attribute_item) -> str:
+    attribute = next((child for child in attribute_item.children if child.type == "attribute"), None)
+    if attribute is None or not attribute.children:
+        return ""
+    return attribute.children[0].text
