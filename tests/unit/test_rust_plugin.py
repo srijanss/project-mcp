@@ -141,3 +141,36 @@ def test_descriptor_version_is_past_the_release_without_test_discovery():
     from project_mcp.plugins.rust.descriptor import DESCRIPTOR
 
     assert tuple(int(part) for part in DESCRIPTOR.version.split(".")) > (0, 1, 0)
+
+
+def test_link_test_evidence_ignores_a_method_sharing_the_test_s_qualified_name(tmp_path):
+    from project_mcp.config import load_config
+    from project_mcp.db import get_connection
+    from project_mcp.indexer import run_scan
+    from project_mcp.plugins.analysis import ChangedFile, LinkContext
+
+    source = "mod tests {\n    impl Fixture {\n        fn adds(&self) {}\n    }\n\n    #[test]\n    fn adds() {}\n}\n"
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text(source)
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+    file_id = conn.execute("SELECT id FROM files WHERE path = 'src/lib.rs'").fetchone()[0]
+    rust = RustAnalyzer()
+
+    rust.link_test_evidence(
+        LinkContext(
+            conn=conn,
+            project_root=tmp_path,
+            source_roots=[],
+            path_to_file_id={"src/lib.rs": file_id},
+            changed={"src/lib.rs": ChangedFile(file_id, source, rust.analyze("src/lib.rs", source))},
+            added=set(),
+            plugin_paths=["src/lib.rs"],
+        )
+    )
+
+    recorded = conn.execute(
+        "SELECT s.start_line FROM tests t JOIN symbols s ON s.id = t.symbol_id"
+    ).fetchall()
+    conn.close()
+    assert recorded == [(7,)]

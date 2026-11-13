@@ -127,8 +127,8 @@ def _walk(node, scope: str, types=_KINDS.keys()):
             yield from _walk(child, scope, types)
 
 
-def discover_rust_tests(path: str, source: str) -> list[str]:
-    """Qualified names of the `#[test]` and `#[tokio::test]` functions in `source`.
+def discover_rust_tests(path: str, source: str) -> list[tuple[str, int]]:
+    """(qualified name, start line) of the `#[test]` and `#[tokio::test]` functions in `source`.
 
     Test functions are found wherever they are declared, whether in a
     `#[cfg(test)]` inline mod or at the top of an integration test file.
@@ -149,7 +149,7 @@ def _test_functions(node, scope: str):
         if child.type in _COMMENTS:
             continue
         if child.type == "function_item" and _TEST_ATTRIBUTES.intersection(attributes):
-            yield f"{scope}.{child.field('name').text}"
+            yield f"{scope}.{child.field('name').text}", child.start_line
         attributes = []
         if child.type == "mod_item":
             if child.field("body") is not None:

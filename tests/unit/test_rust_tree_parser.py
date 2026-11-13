@@ -155,9 +155,24 @@ mod tests {
 }
 """
 
-    assert discover_rust_tests("src/lib.rs", source) == [
+    assert [name for name, _ in discover_rust_tests("src/lib.rs", source)] == [
         "src.lib.top_level",
         "src.lib.tests.panics",
         "src.lib.tests.on_tokio",
         "src.lib.tests.nested.deep",
     ]
+
+
+def test_discover_rust_tests_gives_the_line_each_test_function_starts_on():
+    source = """\
+mod tests {
+    impl Fixture {
+        fn adds(&self) {}
+    }
+
+    #[test]
+    fn adds() {}
+}
+"""
+
+    assert discover_rust_tests("src/lib.rs", source) == [("src.lib.tests.adds", 7)]

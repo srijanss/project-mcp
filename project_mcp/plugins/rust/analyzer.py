@@ -68,14 +68,16 @@ class RustAnalyzer:
             conn.execute("DELETE FROM tests WHERE file_id = ?", (changed.file_id,))
             if self.backend != "tree-sitter":
                 continue
-            for qualified_name in discover_rust_tests(path, changed.source):
+            # An impl method can share a test's qualified name, since impls add
+            # no scope; the start line tells the test function apart.
+            for qualified_name, start_line in discover_rust_tests(path, changed.source):
                 conn.execute(
                     """
                     INSERT INTO tests (symbol_id, file_id, test_kind, framework)
                     SELECT id, file_id, 'test_function', 'cargo' FROM symbols
-                    WHERE qualified_name = ? AND file_id = ?
+                    WHERE qualified_name = ? AND file_id = ? AND start_line = ?
                     """,
-                    (qualified_name, changed.file_id),
+                    (qualified_name, changed.file_id, start_line),
                 )
 
     def resolve_import(self, importer: str, module: str) -> list[str]:
