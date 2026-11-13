@@ -161,3 +161,24 @@ def test_get_connection_puts_the_index_in_wal_mode(tmp_path):
         assert conn.execute("PRAGMA journal_mode").fetchone() == ("wal",)
     finally:
         conn.close()
+
+
+def test_get_connection_skips_the_wal_switch_while_another_connection_reads_and_keeps_its_timeout(tmp_path):
+    get_connection(tmp_path).close()
+    db_path = tmp_path / ".project-mcp" / "index.db"
+    other = sqlite3.connect(db_path, isolation_level=None)
+    other.execute("PRAGMA journal_mode=DELETE")
+    other.execute("BEGIN")
+    other.execute("SELECT * FROM index_metadata").fetchall()
+
+    try:
+        conn = get_connection(tmp_path)
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        timeout_ms = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        conn.close()
+    finally:
+        other.execute("COMMIT")
+        other.close()
+
+    assert mode == "delete"
+    assert timeout_ms >= 30_000

@@ -19,11 +19,27 @@ def get_connection(project_root: Path) -> sqlite3.Connection:
     project_mcp_dir.mkdir(exist_ok=True)
     db_path = project_mcp_dir / "index.db"
     conn = sqlite3.connect(db_path, timeout=BUSY_TIMEOUT_SECONDS)
-    # WAL lets readers in other sessions keep reading while a re-index writes.
-    conn.execute("PRAGMA journal_mode=WAL")
+    _enable_wal(conn)
     init_schema(conn)
     _invalidate_if_stale(conn)
     return conn
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switch the index to WAL so readers keep reading while a re-index writes.
+
+    Converting an older rollback-journal index needs an exclusive lock. When
+    another session holds a lock, skip it without waiting: this connection
+    works in the old mode and a later connection converts the index.
+    """
+    conn.execute("PRAGMA busy_timeout = 0")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError as error:
+        if error.sqlite_errorcode not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+            raise
+    finally:
+        conn.execute(f"PRAGMA busy_timeout = {int(BUSY_TIMEOUT_SECONDS * 1000)}")
 
 
 def _invalidate_if_stale(conn: sqlite3.Connection) -> None:
