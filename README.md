@@ -55,11 +55,9 @@ Register it in your MCP client as a stdio server running the command above.
 Run the tests with `uv run pytest`.
 
 For an installed server, `mcpctl init project-mcp` scaffolds project-local
-client configuration and hooks. It also copies `.pi/` workflow assets,
-excluding test files and JSON configs handled separately. Pi's `mcp.json`
-and `settings.json` are merged with existing values preserved. See
-[the Pi workflow guide](.pi/README.md) for activation and review sessions.
-The TDD commands rely on skills supplied by the `outside-in-tdd-mcp` scaffold.
+client configuration and hooks. Pi's workflow assets and config (including
+the project-mcp entry in `.pi/mcp.json`) come from the `outside-in-tdd-mcp`
+scaffold, not this one.
 
 ## Project-local `.project-mcp/`
 
