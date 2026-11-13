@@ -1,4 +1,4 @@
-from project_mcp.plugins.rust.calls import rust_symbol_uses, rust_use_imports
+from project_mcp.plugins.rust.calls import rust_file_links, rust_symbol_uses, rust_use_imports
 
 LIB = """\
 pub struct Widget;
@@ -196,3 +196,24 @@ def test_rust_use_imports_resolves_a_block_use_through_the_module_s_aliases_only
     )
 
     assert rust_use_imports("src/app.rs", source, {}, known) == ["src.shapes.Square"]
+
+
+def test_rust_file_links_reads_uses_and_imports_from_one_parse(monkeypatch):
+    from types import SimpleNamespace
+
+    from project_mcp.plugins import treesitter
+    from project_mcp.plugins.rust import calls
+
+    known = {"src.lib.add", "src.app.run"}
+    source = "use crate::add;\n\npub fn run() {\n    add();\n}\n"
+    parsed = []
+    monkeypatch.setattr(
+        calls, "treesitter",
+        SimpleNamespace(parse=lambda text, language: parsed.append(text) or treesitter.parse(text, language)),
+    )
+
+    assert rust_file_links("src/app.rs", source, {}, known) == (
+        [("src.app.run", "src.lib.add", "calls")],
+        ["src.lib.add"],
+    )
+    assert parsed == [source]

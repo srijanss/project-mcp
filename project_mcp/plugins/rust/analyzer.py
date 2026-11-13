@@ -87,6 +87,7 @@ class RustAnalyzer:
                     source = (Path(context.project_root) / path).read_text(errors="replace")
                 except OSError:
                     continue
+            uses, imports = calls.rust_file_links(path, source, crates, known, index=index)
             conn.execute(
                 """
                 DELETE FROM relationships
@@ -96,7 +97,7 @@ class RustAnalyzer:
                 """,
                 (file_id,),
             )
-            for caller, target, kind in calls.rust_symbol_uses(path, source, crates, known, index=index):
+            for caller, target, kind in uses:
                 if caller not in known:
                     continue
                 conn.execute(
@@ -118,7 +119,7 @@ class RustAnalyzer:
                 """,
                 (file_id,),
             )
-            for target in calls.rust_use_imports(path, source, crates, known, index=index):
+            for target in imports:
                 conn.execute(
                     """
                     INSERT INTO relationships (

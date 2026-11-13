@@ -284,3 +284,25 @@ def test_descriptor_version_is_past_the_release_without_use_import_edges():
     from project_mcp.plugins.rust.descriptor import DESCRIPTOR
 
     assert tuple(int(part) for part in DESCRIPTOR.version.split(".")) > (0, 3, 0)
+
+
+def test_link_cross_file_links_each_file_through_one_parse(tmp_path, monkeypatch):
+    from project_mcp.config import load_config
+    from project_mcp.db import get_connection
+    from project_mcp.indexer import run_scan
+    from project_mcp.plugins.rust import calls
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("pub fn add() {}\n")
+    linked = []
+    file_links = calls.rust_file_links
+    monkeypatch.setattr(
+        calls, "rust_file_links",
+        lambda path, *args, **kwargs: linked.append(path) or file_links(path, *args, **kwargs),
+    )
+
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+    conn.close()
+
+    assert linked == ["src/lib.rs"]

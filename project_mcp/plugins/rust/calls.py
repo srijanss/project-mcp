@@ -24,8 +24,20 @@ _TURBOFISH = re.compile(r"::<[^>]*>")
 _CRATE_DIRS = ("src", "tests", "benches", "examples")
 
 
-def rust_symbol_uses(
+def rust_file_links(
     path: str, source: str, crates: dict[str, str], known, index: dict[str, str] | None = None
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """`rust_symbol_uses` and `rust_use_imports` for one file, parsing it once."""
+    index = symbol_index(known) if index is None else index
+    tree = treesitter.parse(source, "rust")
+    return (
+        rust_symbol_uses(path, source, crates, known, index=index, tree=tree),
+        rust_use_imports(path, source, crates, known, index=index, tree=tree),
+    )
+
+
+def rust_symbol_uses(
+    path: str, source: str, crates: dict[str, str], known, index: dict[str, str] | None = None, tree=None
 ) -> list[tuple[str, str, str]]:
     """(function, item, "calls" | "references") for each item in `known` a function uses.
 
@@ -37,7 +49,8 @@ def rust_symbol_uses(
     """
     resolver = _Resolver(_crate_dir(path), crates, symbol_index(known) if index is None else index)
     edges: list[tuple[str, str, str]] = []
-    _visit_module(treesitter.parse(source, "rust"), _module_qualified_name(path), resolver, edges)
+    tree = treesitter.parse(source, "rust") if tree is None else tree
+    _visit_module(tree, _module_qualified_name(path), resolver, edges)
     called = {(caller, target) for caller, target, kind in edges if kind == "calls"}
     # A called name is also an identifier; the call is the stronger evidence.
     return [
@@ -47,7 +60,7 @@ def rust_symbol_uses(
 
 
 def rust_use_imports(
-    path: str, source: str, crates: dict[str, str], known, index: dict[str, str] | None = None
+    path: str, source: str, crates: dict[str, str], known, index: dict[str, str] | None = None, tree=None
 ) -> list[str]:
     """Each item in `known` that one of the file's `use` declarations names.
 
@@ -56,7 +69,8 @@ def rust_use_imports(
     """
     resolver = _Resolver(_crate_dir(path), crates, symbol_index(known) if index is None else index)
     imports: list[str] = []
-    _visit_imports(treesitter.parse(source, "rust"), _module_qualified_name(path), resolver, imports)
+    tree = treesitter.parse(source, "rust") if tree is None else tree
+    _visit_imports(tree, _module_qualified_name(path), resolver, imports)
     return list(dict.fromkeys(imports))
 
 
