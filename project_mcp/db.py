@@ -19,6 +19,8 @@ def get_connection(project_root: Path) -> sqlite3.Connection:
     project_mcp_dir.mkdir(exist_ok=True)
     db_path = project_mcp_dir / "index.db"
     conn = sqlite3.connect(db_path, timeout=BUSY_TIMEOUT_SECONDS)
+    # WAL lets readers in other sessions keep reading while a re-index writes.
+    conn.execute("PRAGMA journal_mode=WAL")
     init_schema(conn)
     _invalidate_if_stale(conn)
     return conn

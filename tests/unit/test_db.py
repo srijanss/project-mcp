@@ -1,3 +1,5 @@
+import sqlite3
+
 from project_mcp.db import get_connection
 from project_mcp.schema import CURRENT_SCHEMA_VERSION, REQUIRED_TABLES
 
@@ -149,3 +151,13 @@ def test_get_connection_reads_while_another_connection_holds_the_write_lock(tmp_
         writer.close()
 
     assert rows == [(str(CURRENT_SCHEMA_VERSION),)]
+
+
+def test_get_connection_puts_the_index_in_wal_mode(tmp_path):
+    get_connection(tmp_path).close()
+
+    conn = sqlite3.connect(tmp_path / ".project-mcp" / "index.db")
+    try:
+        assert conn.execute("PRAGMA journal_mode").fetchone() == ("wal",)
+    finally:
+        conn.close()
