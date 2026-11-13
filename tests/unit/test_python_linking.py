@@ -209,3 +209,25 @@ def test_link_test_evidence_keeps_the_fixture_edges_of_tests_under_a_conftest_it
     PythonAnalyzer().link_test_evidence(context)
 
     assert _edges(conn, "calls") == {("tests.test_shapes.test_area", "tests.conftest.shape")}
+
+
+def test_link_test_evidence_reads_each_test_file_once(tmp_path, monkeypatch):
+    from collections import Counter
+    from pathlib import Path
+
+    from project_mcp.plugins.python import linking
+
+    conn = _scan_without_linking(tmp_path, FIXTURE_FILES)
+    context = _context(conn, tmp_path, {"app/shapes.py": FIXTURE_FILES["app/shapes.py"]})
+    reads = Counter()
+    original = linking._read_source
+
+    def counting_read(path):
+        reads[Path(path).relative_to(tmp_path).as_posix()] += 1
+        return original(path)
+
+    monkeypatch.setattr(linking, "_read_source", counting_read)
+
+    PythonAnalyzer().link_test_evidence(context)
+
+    assert reads == {"tests/conftest.py": 1, "tests/test_shapes.py": 1}

@@ -851,26 +851,21 @@ def index_mock_patch_relationships(
     project_root: Path,
     path_to_file_id: dict,
     source_roots: list[str],
+    test_sources: dict[str, tuple[int, str | None]],
 ) -> None:
     """Link tests to the symbols their `patch(...)` calls replace.
 
     A test file that cannot be read, or sits under a conftest.py that cannot,
     keeps the mock edges it had: dropping them would let a test that mocks a
     symbol pass for one that really runs it.
+
+    `test_sources` are the Python test files as `_read_test_sources` reads them.
     """
     resolver = _PatchTargetResolver(project_root, path_to_file_id, source_roots)
     unreadable_directories: set[str] = set()
-    conftest_fixtures = _conftest_fixture_patches(
-        project_root, path_to_file_id, resolver, unreadable_directories
-    )
-    test_files = conn.execute(
-        """
-        SELECT id, path FROM files
-        WHERE project_id = ? AND file_kind = 'test' AND language = 'python'
-        """,
-        (project_id,),
-    ).fetchall()
-    sources = {path: _read_source(Path(project_root) / path) for _, path in test_files}
+    conftest_fixtures = _conftest_fixture_patches(test_sources, resolver, unreadable_directories)
+    test_files = [(file_id, path) for path, (file_id, _) in test_sources.items()]
+    sources = {path: source for path, (_, source) in test_sources.items()}
     unreadable = [
         file_id
         for file_id, path in test_files
@@ -948,9 +943,25 @@ def _patched_symbol(resolver: _PatchTargetResolver, path: str, patch: dict) -> s
     return resolver.resolve(f"{obj}.{patch['attribute']}")
 
 
+def _read_test_sources(
+    conn: sqlite3.Connection, project_id: int, project_root: Path
+) -> dict[str, tuple[int, str | None]]:
+    """Each Python test file and every conftest.py (even one outside a test
+    directory), as path -> (file id, source), the source None when the file
+    cannot be read."""
+    test_files = conn.execute(
+        """
+        SELECT id, path FROM files
+        WHERE project_id = ? AND language = 'python'
+          AND (file_kind = 'test' OR path = 'conftest.py' OR path LIKE '%/conftest.py')
+        """,
+        (project_id,),
+    ).fetchall()
+    return {path: (file_id, _read_source(Path(project_root) / path)) for file_id, path in test_files}
+
+
 def _conftest_fixture_patches(
-    project_root: Path,
-    path_to_file_id: dict,
+    test_sources: dict[str, tuple[int, str | None]],
     resolver: _PatchTargetResolver,
     unreadable_directories: set[str],
 ) -> dict[str, dict]:
@@ -961,10 +972,9 @@ def _conftest_fixture_patches(
     `unreadable_directories`.
     """
     by_directory = {}
-    for path in path_to_file_id:
+    for path, (_, source) in test_sources.items():
         if Path(path).name != "conftest.py":
             continue
-        source = _read_source(Path(project_root) / path)
         if source is None:
             unreadable_directories.add(Path(path).parent.as_posix())
             continue
@@ -1163,29 +1173,39 @@ def link_test_evidence(context) -> None:
             conn, path_to_file_id[path], path, source, path_to_file_id, context.source_roots
         )
     if context.changed:
+        project_id = _project_id(context)
+        # Both passes read every test file; they share one read of each.
+        test_sources = _read_test_sources(conn, project_id, context.project_root)
         index_mock_patch_relationships(
             conn,
-            _project_id(context),
+            project_id,
             context.project_root,
             path_to_file_id,
             context.source_roots,
+            test_sources,
         )
         index_pytest_fixture_relationships(
-            conn, _project_id(context), context.project_root, path_to_file_id
+            conn, project_id, context.project_root, path_to_file_id, test_sources
         )
 
 
 def index_pytest_fixture_relationships(
-    conn: sqlite3.Connection, project_id: int, project_root: Path, path_to_file_id: dict
+    conn: sqlite3.Connection,
+    project_id: int,
+    project_root: Path,
+    path_to_file_id: dict,
+    test_sources: dict[str, tuple[int, str | None]],
 ) -> None:
     """Link each test-file function to the fixtures it requests as parameters,
-    so a test is credited for what its fixtures call."""
+    so a test is credited for what its fixtures call.
+
+    `test_sources` are the Python test files as `_read_test_sources` reads them.
+    """
     conftest_fixtures = {}
     unreadable_directories = set()
-    for path in path_to_file_id:
+    for path, (_, source) in test_sources.items():
         if Path(path).name != "conftest.py":
             continue
-        source = _read_source(Path(project_root) / path)
         if source is None:
             unreadable_directories.add(Path(path).parent.as_posix())
             continue
@@ -1193,14 +1213,8 @@ def index_pytest_fixture_relationships(
             conftest_fixtures[Path(path).parent.as_posix()] = extract_fixtures(path, source)
         except SyntaxError:
             continue
-    test_files = conn.execute(
-        """
-        SELECT id, path FROM files
-        WHERE project_id = ? AND file_kind = 'test' AND language = 'python'
-        """,
-        (project_id,),
-    ).fetchall()
-    sources = {path: _read_source(Path(project_root) / path) for _, path in test_files}
+    test_files = [(file_id, path) for path, (file_id, _) in test_sources.items()]
+    sources = {path: source for path, (_, source) in test_sources.items()}
     # A test file that cannot be read, or sits under a conftest.py that
     # cannot, keeps the fixture edges it had.
     unreadable = [
