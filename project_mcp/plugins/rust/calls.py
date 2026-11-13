@@ -46,6 +46,35 @@ def rust_symbol_uses(
     ]
 
 
+def rust_use_imports(
+    path: str, source: str, crates: dict[str, str], known, index: dict[str, str] | None = None
+) -> list[str]:
+    """Each item in `known` that one of the file's `use` declarations names.
+
+    Declarations in inline mods and in function bodies count too; glob
+    imports name no single item and are left out.
+    """
+    resolver = _Resolver(_crate_dir(path), crates, symbol_index(known) if index is None else index)
+    imports: list[str] = []
+    _visit_imports(treesitter.parse(source, "rust"), _module_qualified_name(path), resolver, imports)
+    return list(dict.fromkeys(imports))
+
+
+def _visit_imports(node, scope: str, resolver: "_Resolver", imports: list) -> None:
+    bindings, _ = _use_bindings(node)
+    for name in bindings:
+        target = resolver.resolve([name], scope, bindings, [])
+        if target is not None:
+            imports.append(target)
+    for child in node.children:
+        if child.type == "mod_item":
+            body = child.field("body")
+            if body is not None:
+                _visit_imports(body, f"{scope}.{child.field('name').text}", resolver, imports)
+        elif child.type != "token_tree":
+            _visit_imports(child, scope, resolver, imports)
+
+
 def workspace_crates(project_root: Path, paths) -> dict[str, str]:
     """Crate name (as `use` paths spell it) → dotted crate dir, from each file's Cargo.toml."""
     crates: dict[str, str] = {}

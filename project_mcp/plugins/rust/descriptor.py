@@ -2,7 +2,7 @@ from project_mcp.plugins.descriptor import PluginDescriptor
 
 DESCRIPTOR = PluginDescriptor(
     name="rust",
-    version="0.3.0",
+    version="0.4.0",
     api_version=1,
     extensions={".rs": "rust"},
     analyzer="project_mcp.plugins.rust.analyzer:RustAnalyzer",

@@ -243,3 +243,44 @@ def test_link_cross_file_builds_one_symbol_index_for_every_file(tmp_path, monkey
     conn.close()
 
     assert built == [["src.a", "src.a.first", "src.lib", "src.lib.add"]]
+
+
+def test_link_cross_file_records_the_items_each_file_s_use_declarations_import(tmp_path):
+    from project_mcp.config import load_config
+    from project_mcp.db import get_connection
+    from project_mcp.indexer import run_scan
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("pub mod app;\n\npub struct Widget;\n\npub fn add() {}\n")
+    (tmp_path / "src" / "app.rs").write_text("use crate::{add, Widget};\n")
+
+    def imports():
+        return sorted(
+            conn.execute(
+                """
+                SELECT f.path, s.qualified_name, r.confidence FROM relationships r
+                JOIN files f ON f.id = r.source_entity_id
+                JOIN symbols s ON s.id = r.target_entity_id
+                WHERE r.relationship_type = 'imports'
+                  AND r.source_entity_type = 'file' AND r.target_entity_type = 'symbol'
+                """
+            )
+        )
+
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+    try:
+        assert imports() == [("src/app.rs", "src.lib.Widget", "high"), ("src/app.rs", "src.lib.add", "high")]
+
+        (tmp_path / "src" / "app.rs").write_text("use crate::add;\n")
+        run_scan(conn, tmp_path, load_config(tmp_path))
+        assert imports() == [("src/app.rs", "src.lib.add", "high")]
+    finally:
+        conn.close()
+
+
+def test_descriptor_version_is_past_the_release_without_use_import_edges():
+    """Files indexed by 0.3.0 have no file-to-item `imports` edges; a new version re-indexes them."""
+    from project_mcp.plugins.rust.descriptor import DESCRIPTOR
+
+    assert tuple(int(part) for part in DESCRIPTOR.version.split(".")) > (0, 3, 0)

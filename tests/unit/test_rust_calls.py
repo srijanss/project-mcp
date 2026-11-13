@@ -1,4 +1,4 @@
-from project_mcp.plugins.rust.calls import rust_symbol_uses
+from project_mcp.plugins.rust.calls import rust_symbol_uses, rust_use_imports
 
 LIB = """\
 pub struct Widget;
@@ -163,3 +163,18 @@ def test_workspace_crates_skips_a_manifest_that_is_not_utf_8(tmp_path):
     (tmp_path / "bad" / "Cargo.toml").write_bytes(b'[package]\nname = "caf\xe9"\n')
 
     assert workspace_crates(tmp_path, ["bad/src/lib.rs", "good/src/lib.rs"]) == {"good_crate": "good"}
+
+
+def test_rust_use_imports_lists_the_known_items_a_file_s_use_declarations_name():
+    known = {"src.lib.add", "src.shapes.Square", "src.shapes.Circle", "src.util.mod.helper", "src.app.run"}
+    source = (
+        "use crate::shapes::{Circle, Square as Shape};\n"
+        "use std::fmt::Display;\n"
+        "use crate::shapes::*;\n\n"
+        "mod inner {\n    use crate::util::helper;\n}\n\n"
+        "fn run() {\n    use crate::add;\n}\n"
+    )
+
+    imports = rust_use_imports("src/app.rs", source, {}, known)
+
+    assert sorted(imports) == ["src.lib.add", "src.shapes.Circle", "src.shapes.Square", "src.util.mod.helper"]

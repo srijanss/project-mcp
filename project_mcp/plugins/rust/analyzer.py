@@ -60,7 +60,8 @@ class RustAnalyzer:
         )
 
     def link_cross_file(self, context) -> None:
-        """Link each function to the items it calls or names through `use`.
+        """Link each function to the items it calls or names through `use`,
+        and each file to the items its `use` declarations import.
 
         Re-indexing a file drops the edges other files had into it, so every
         Rust file is relinked, not only the changed ones. The regex fallback
@@ -107,6 +108,26 @@ class RustAnalyzer:
                     ) VALUES ('symbol', ?, 'symbol', ?, ?, 'high', ?)
                     """,
                     (known[caller], known[target], kind, json.dumps([f"rust_{kind}"])),
+                )
+            conn.execute(
+                """
+                DELETE FROM relationships
+                WHERE relationship_type = 'imports'
+                  AND source_entity_type = 'file' AND source_entity_id = ?
+                  AND target_entity_type = 'symbol'
+                """,
+                (file_id,),
+            )
+            for target in calls.rust_use_imports(path, source, crates, known, index=index):
+                conn.execute(
+                    """
+                    INSERT INTO relationships (
+                        source_entity_type, source_entity_id,
+                        target_entity_type, target_entity_id,
+                        relationship_type, confidence, evidence_json
+                    ) VALUES ('file', ?, 'symbol', ?, 'imports', 'high', ?)
+                    """,
+                    (file_id, known[target], json.dumps(["rust_use"])),
                 )
 
     def link_test_evidence(self, context) -> None:
