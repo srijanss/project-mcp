@@ -1239,9 +1239,14 @@ def index_pytest_fixture_relationships(
         source = sources[path]
         if file_id in unreadable:
             continue
-        # Nearer conftest.py files override fixtures of the same name.
+        # Nearer conftest.py files override fixtures of the same name; a
+        # conftest.py itself sees only those above it, so a fixture
+        # overriding one of the same name requests the one it overrides.
+        directories = list(Path(path).parents)
+        if Path(path).name == "conftest.py":
+            directories = directories[1:]
         outer_fixtures = {}
-        for directory in reversed(Path(path).parents):
+        for directory in reversed(directories):
             outer_fixtures.update(conftest_fixtures.get(directory.as_posix(), {}))
         try:
             requests = extract_fixture_requests(path, source, outer_fixtures)

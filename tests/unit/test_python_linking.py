@@ -231,3 +231,15 @@ def test_link_test_evidence_reads_each_test_file_once(tmp_path, monkeypatch):
     PythonAnalyzer().link_test_evidence(context)
 
     assert reads == {"tests/conftest.py": 1, "tests/test_shapes.py": 1}
+
+
+def test_link_test_evidence_links_a_conftest_override_to_the_fixture_it_overrides(tmp_path):
+    files = {
+        "conftest.py": "import pytest\n\n\n@pytest.fixture\ndef shape():\n    return 1\n",
+        "tests/conftest.py": "import pytest\n\n\n@pytest.fixture\ndef shape(shape):\n    return shape + 1\n",
+    }
+    conn = _scan_without_linking(tmp_path, files)
+
+    PythonAnalyzer().link_test_evidence(_context(conn, tmp_path, files))
+
+    assert _edges(conn, "calls") == {("tests.conftest.shape", "conftest.shape")}
