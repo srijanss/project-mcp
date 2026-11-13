@@ -76,12 +76,14 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
     ]
 
 
-def _symbol_name(qualified_name: str | None, query: str | None, symbol: str | None) -> str:
+def _symbol_name(
+    qualified_name: str | None, query: str | None, symbol: str | None, name: str | None
+) -> str:
     """The name a symbol tool was asked about, under any of its accepted spellings."""
-    for name in (qualified_name, query, symbol):
-        if name:
-            return name
-    raise ToolError("qualified_name is required (query and symbol are accepted aliases)")
+    for spelling in (qualified_name, query, symbol, name):
+        if spelling:
+            return spelling
+    raise ToolError("a symbol is required: pass qualified_name, name, query or symbol")
 
 
 def _size(value) -> int:
@@ -298,7 +300,10 @@ def build_server(project_root: Path) -> MCPServer:
 
     @server.tool(name="find_symbol", needs_plugins=True)
     def find_symbol_tool(
-        query: str,
+        query: str | None = None,
+        name: str | None = None,
+        symbol: str | None = None,
+        qualified_name: str | None = None,
         limit: int = DEFAULT_FIND_SYMBOL_LIMIT,
         offset: int = 0,
         kind: str | None = None,
@@ -310,8 +315,10 @@ def build_server(project_root: Path) -> MCPServer:
         (class, function, method, field, module, ...); migrations are left out
         unless `include_migrations`. When more than `limit` symbols match, the
         result is {"truncated": true, "items": [...], "next_offset": N}: pass
-        `offset=N` for the next page.
+        `offset=N` for the next page. `name`, `symbol` and `qualified_name`
+        are aliases for `query`.
         """
+        query = _symbol_name(qualified_name, query, symbol, name)
         if limit < 1:
             raise ToolError("limit must be at least 1")
         if offset < 0:
@@ -338,56 +345,60 @@ def build_server(project_root: Path) -> MCPServer:
         qualified_name: str | None = None,
         query: str | None = None,
         symbol: str | None = None,
+        name: str | None = None,
     ) -> dict:
         """Return one symbol's location, source, direct callers/callees and tests.
 
         `source` is cut at 80 lines (see `source_truncated`); tests fall back
-        to the enclosing module's, marked `scope: "module"`. `query` and
-        `symbol` are aliases for `qualified_name`.
+        to the enclosing module's, marked `scope: "module"`. `name`,
+        `query` and `symbol` are aliases for `qualified_name`.
         """
-        return describe_symbol(project_root, _symbol_name(qualified_name, query, symbol))
+        return describe_symbol(project_root, _symbol_name(qualified_name, query, symbol, name))
 
     @server.tool(name="get_dependencies", needs_plugins=True)
     def get_dependencies_tool(
         qualified_name: str | None = None,
         query: str | None = None,
         symbol: str | None = None,
+        name: str | None = None,
     ) -> list[dict]:
         """Return what a symbol or module imports or inherits from.
 
-        `query` and `symbol` are aliases for `qualified_name`.
+        `name`, `query` and `symbol` are aliases for `qualified_name`.
         """
-        return get_dependencies(project_root, _symbol_name(qualified_name, query, symbol))
+        return get_dependencies(project_root, _symbol_name(qualified_name, query, symbol, name))
 
     @server.tool(name="get_dependents", needs_plugins=True)
     def get_dependents_tool(
         qualified_name: str | None = None,
         query: str | None = None,
         symbol: str | None = None,
+        name: str | None = None,
     ) -> list[dict]:
         """Return what imports or inherits from a symbol or module.
 
-        `query` and `symbol` are aliases for `qualified_name`.
+        `name`, `query` and `symbol` are aliases for `qualified_name`.
         """
-        return get_dependents(project_root, _symbol_name(qualified_name, query, symbol))
+        return get_dependents(project_root, _symbol_name(qualified_name, query, symbol, name))
 
     @server.tool(name="get_tests_for", needs_plugins=True)
     def get_tests_for_tool(
         qualified_name: str | None = None,
         query: str | None = None,
         symbol: str | None = None,
+        name: str | None = None,
         limit: int = MAX_TESTS_NAMED_PER_FILE,
     ) -> list[dict]:
         """Return tests associated with a source module or symbol, with confidence and evidence.
 
-        `query` and `symbol` are aliases for `qualified_name`.
+        `name`, `query` and `symbol` are aliases for `qualified_name`.
         Each test file names at most `limit` tests (`tests_total` gives the full
         count when more exist); `limit=0` names every test. A file reached
         through several call `paths` names every test at the top level and at
         most `limit` per path.
         """
         return get_tests_for(
-            project_root, _symbol_name(qualified_name, query, symbol), limit
+            project_root, _symbol_name(qualified_name, query, symbol, name), limit
         )
 
     @server.tool(name="get_test_summary", needs_plugins=True)
@@ -444,9 +455,19 @@ def build_server(project_root: Path) -> MCPServer:
         return get_legacy_signals(project_root, target)
 
     @server.tool(name="get_context_for_symbol", needs_plugins=True)
-    def get_context_for_symbol_tool(qualified_name: str) -> dict:
-        """Return a compact context pack for a specific symbol."""
-        return get_context_for_symbol(project_root, qualified_name)
+    def get_context_for_symbol_tool(
+        qualified_name: str | None = None,
+        query: str | None = None,
+        symbol: str | None = None,
+        name: str | None = None,
+    ) -> dict:
+        """Return a compact context pack for a specific symbol.
+
+        `name`, `query` and `symbol` are aliases for `qualified_name`.
+        """
+        return get_context_for_symbol(
+            project_root, _symbol_name(qualified_name, query, symbol, name)
+        )
 
     @server.tool(name="get_context_for_feature", needs_plugins=True)
     def get_context_for_feature_tool(query: str) -> dict:

@@ -594,11 +594,18 @@ def test_find_symbol_tool_call_sees_edits_made_after_first_index(tmp_path):
     assert "Gadget" in result.content[0].text
 
 
-@pytest.mark.parametrize("alias", ["query", "symbol"])
+@pytest.mark.parametrize("alias", ["name", "query", "symbol"])
 @pytest.mark.parametrize(
-    "tool", ["get_symbol_context", "get_dependents", "get_tests_for", "get_dependencies"]
+    "tool",
+    [
+        "get_symbol_context",
+        "get_dependents",
+        "get_tests_for",
+        "get_dependencies",
+        "get_context_for_symbol",
+    ],
 )
-def test_symbol_tools_accept_query_and_symbol_as_aliases_for_qualified_name(
+def test_symbol_tools_accept_name_query_and_symbol_as_aliases_for_qualified_name(
     tmp_path, tool, alias
 ):
     (tmp_path / "app").mkdir()
@@ -620,13 +627,28 @@ def test_symbol_tools_accept_query_and_symbol_as_aliases_for_qualified_name(
     assert [c.text for c in by_alias.content] == [c.text for c in by_name.content]
 
 
-def test_symbol_tools_say_which_argument_is_missing(tmp_path):
+@pytest.mark.parametrize("alias", ["name", "symbol"])
+def test_find_symbol_accepts_name_and_symbol_as_aliases_for_query(tmp_path, alias):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n")
+    server = build_server(tmp_path)
+
+    by_query = asyncio.run(server.call_tool("find_symbol", {"query": "widget"}))
+    by_alias = asyncio.run(server.call_tool("find_symbol", {alias: "widget"}))
+
+    assert "Widget" in by_query.content[0].text
+    assert by_alias.is_error is False
+    assert [c.text for c in by_alias.content] == [c.text for c in by_query.content]
+
+
+@pytest.mark.parametrize("tool", ["get_dependents", "find_symbol"])
+def test_symbol_tools_name_every_accepted_spelling_when_the_symbol_is_missing(tmp_path, tool):
     from mcp.server.mcpserver.exceptions import ToolError
 
     server = build_server(tmp_path)
 
-    with pytest.raises(ToolError, match="qualified_name is required"):
-        asyncio.run(server.call_tool("get_dependents", {}))
+    with pytest.raises(ToolError, match="pass qualified_name, name, query or symbol"):
+        asyncio.run(server.call_tool(tool, {}))
 
 
 def test_dict_results_are_serialized_compactly(tmp_path):
