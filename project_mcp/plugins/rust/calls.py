@@ -60,9 +60,11 @@ def rust_use_imports(
     return list(dict.fromkeys(imports))
 
 
-def _visit_imports(node, scope: str, resolver: "_Resolver", imports: list) -> None:
-    bindings, _ = _use_bindings(node)
-    targets = [resolver.resolve([name], scope, bindings, []) for name in bindings]
+def _visit_imports(node, scope: str, resolver: "_Resolver", imports: list, outer: dict | None = None) -> None:
+    local, _ = _use_bindings(node)
+    # A block's declarations see the enclosing module's and blocks' names too.
+    bindings = {**(outer or {}), **local}
+    targets = [resolver.resolve([name], scope, bindings, []) for name in local]
     # `use path::Trait as _;` binds no name but still brings the trait in.
     targets += [resolver.resolve(path, scope, bindings, []) for path, name in _use_paths(node) if name == "_"]
     imports.extend(target for target in targets if target is not None)
@@ -70,9 +72,10 @@ def _visit_imports(node, scope: str, resolver: "_Resolver", imports: list) -> No
         if child.type == "mod_item":
             body = child.field("body")
             if body is not None:
+                # An inline mod starts a new scope: it inherits no imports.
                 _visit_imports(body, f"{scope}.{child.field('name').text}", resolver, imports)
         elif child.type != "token_tree":
-            _visit_imports(child, scope, resolver, imports)
+            _visit_imports(child, scope, resolver, imports, bindings)
 
 
 def workspace_crates(project_root: Path, paths) -> dict[str, str]:
@@ -138,7 +141,12 @@ class _Resolver:
 
     def resolve(self, segments: list[str], scope: str, bindings: dict, globs: list) -> str | None:
         if segments[0] in bindings:
-            segments = bindings[segments[0]] + segments[1:]
+            # An alias may name another alias (`use a as b; use b::T;`);
+            # each is expanded once, so `use foo::foo;` cannot loop.
+            seen = set()
+            while segments[0] in bindings and segments[0] not in seen:
+                seen.add(segments[0])
+                segments = bindings[segments[0]] + segments[1:]
             return self._first(self.candidates(segments, scope))
         found = self._first(self.candidates(segments, scope))
         if found is None and len(segments) == 1:

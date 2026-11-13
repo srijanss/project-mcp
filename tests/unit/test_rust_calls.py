@@ -185,3 +185,14 @@ def test_rust_use_imports_lists_an_item_imported_as_underscore():
     source = "use crate::traits::Describe as _;\nuse crate::traits::{Show as _};\n"
 
     assert sorted(rust_use_imports("src/app.rs", source, {}, known)) == ["src.traits.Describe", "src.traits.Show"]
+
+
+def test_rust_use_imports_resolves_a_block_use_through_the_module_s_aliases_only():
+    known = {"src.shapes.Square", "src.shapes.Circle"}
+    source = (
+        "use crate::shapes as shapes_alias;\n\n"
+        "fn run() {\n    use shapes_alias::Square;\n}\n\n"
+        "mod inner {\n    use shapes_alias::Circle;\n}\n"
+    )
+
+    assert rust_use_imports("src/app.rs", source, {}, known) == ["src.shapes.Square"]
