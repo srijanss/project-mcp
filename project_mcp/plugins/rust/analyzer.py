@@ -1,7 +1,9 @@
+import json
 from pathlib import Path
 
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.analysis import FileAnalysis
+from project_mcp.plugins.rust.calls import rust_symbol_uses, workspace_crates
 from project_mcp.plugins.rust.dependencies import list_rust_dependencies
 from project_mcp.plugins.rust.parser import (
     _module_qualified_name,
@@ -56,6 +58,55 @@ class RustAnalyzer:
             symbol_edges=symbol_edges,
             imports=[use["path"] for use in extract_rust_use(path, source)],
         )
+
+    def link_cross_file(self, context) -> None:
+        """Link each function to the items it calls or names through `use`.
+
+        Re-indexing a file drops the edges other files had into it, so every
+        Rust file is relinked, not only the changed ones. The regex fallback
+        cannot read function bodies and links nothing.
+        """
+        if self.backend != "tree-sitter":
+            return
+        conn = context.conn
+        file_ids = [context.path_to_file_id[path] for path in context.plugin_paths]
+        known: dict[str, int] = {}
+        for file_id in file_ids:
+            known.update(
+                conn.execute("SELECT qualified_name, id FROM symbols WHERE file_id = ?", (file_id,))
+            )
+        crates = workspace_crates(context.project_root, context.plugin_paths)
+        for path, file_id in zip(context.plugin_paths, file_ids):
+            changed = context.changed.get(path)
+            if changed is not None:
+                source = changed.source
+            else:
+                try:
+                    source = (Path(context.project_root) / path).read_text(errors="replace")
+                except OSError:
+                    continue
+            conn.execute(
+                """
+                DELETE FROM relationships
+                WHERE relationship_type IN ('calls', 'references')
+                  AND source_entity_type = 'symbol' AND target_entity_type = 'symbol'
+                  AND source_entity_id IN (SELECT id FROM symbols WHERE file_id = ?)
+                """,
+                (file_id,),
+            )
+            for caller, target, kind in rust_symbol_uses(path, source, crates, known):
+                if caller not in known:
+                    continue
+                conn.execute(
+                    """
+                    INSERT INTO relationships (
+                        source_entity_type, source_entity_id,
+                        target_entity_type, target_entity_id,
+                        relationship_type, confidence, evidence_json
+                    ) VALUES ('symbol', ?, 'symbol', ?, ?, 'high', ?)
+                    """,
+                    (known[caller], known[target], kind, json.dumps([f"rust_{kind}"])),
+                )
 
     def link_test_evidence(self, context) -> None:
         """Record the changed files' `#[test]` functions in the tests table.

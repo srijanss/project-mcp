@@ -174,3 +174,45 @@ def test_link_test_evidence_ignores_a_method_sharing_the_test_s_qualified_name(t
     ).fetchall()
     conn.close()
     assert recorded == [(7,)]
+
+
+def test_link_cross_file_links_calls_and_use_references_and_keeps_them_when_the_callee_is_reindexed(tmp_path):
+    from project_mcp.config import load_config
+    from project_mcp.db import get_connection
+    from project_mcp.indexer import run_scan
+
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "my-crate"\nversion = "0.1.0"\n')
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("pub struct Widget;\n\npub fn add() {}\n")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "it.rs").write_text(
+        "use my_crate::Widget;\n\n#[test]\nfn uses() {\n    my_crate::add();\n    let _w: Widget = Widget;\n}\n"
+    )
+
+    def edges():
+        return set(
+            conn.execute(
+                """
+                SELECT source.qualified_name, target.qualified_name, r.relationship_type, r.confidence
+                FROM relationships r
+                JOIN symbols source ON source.id = r.source_entity_id
+                JOIN symbols target ON target.id = r.target_entity_id
+                WHERE r.relationship_type IN ('calls', 'references')
+                """
+            )
+        )
+
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+    expected = {
+        ("tests.it.uses", "src.lib.add", "calls", "high"),
+        ("tests.it.uses", "src.lib.Widget", "references", "high"),
+    }
+    assert edges() == expected
+
+    (tmp_path / "src" / "lib.rs").write_text("pub struct Widget;\n\n\npub fn add() {}\n")
+    run_scan(conn, tmp_path, load_config(tmp_path))
+    try:
+        assert edges() == expected
+    finally:
+        conn.close()

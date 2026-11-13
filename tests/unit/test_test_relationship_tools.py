@@ -1007,3 +1007,23 @@ def test_get_tests_for_does_not_set_aside_a_direct_test_that_also_patches_a_help
     helpers_file = next(t for t in tests_for if t["test_file"] == "tests/test_helpers.py")
     assert helpers_file["tests"] == ["tests.test_helpers.test_both"]
     assert "mocked" not in helpers_file
+
+
+def test_get_tests_for_names_a_recorded_test_in_a_source_file_whatever_it_is_called(tmp_path):
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text(
+        "pub fn add() {}\n\n#[cfg(test)]\nmod tests {\n    use super::*;\n\n"
+        "    fn helper() {\n        add();\n    }\n\n"
+        "    #[test]\n    fn adds() {\n        add();\n    }\n}\n"
+    )
+
+    tests_for = get_tests_for(tmp_path, "src.lib.add")
+
+    assert tests_for == [
+        {
+            "test_file": "src/lib.rs",
+            "confidence": "high",
+            "evidence": ["rust_calls"],
+            "tests": ["src.lib.tests.adds"],
+        }
+    ]

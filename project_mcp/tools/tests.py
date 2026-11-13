@@ -98,18 +98,20 @@ def _referencing_tests(conn, symbol_id: int) -> list[dict]:
     """Test files whose tests call or read the symbol, with those tests named."""
     rows = conn.execute(
         """
-        SELECT f.path, s.qualified_name, s.kind, r.confidence, r.evidence_json
+        SELECT f.path, s.qualified_name, s.kind, r.confidence, r.evidence_json,
+               EXISTS (SELECT 1 FROM tests t WHERE t.symbol_id = s.id) AS recorded
         FROM relationships r
         JOIN symbols s ON s.id = r.source_entity_id
         JOIN files f ON f.id = s.file_id
         WHERE r.source_entity_type = 'symbol' AND r.target_entity_type = 'symbol'
           AND r.target_entity_id = ? AND r.relationship_type IN ('calls', 'references')
-          AND f.file_kind = 'test'
+          AND (f.file_kind = 'test' OR recorded)
         """,
         (symbol_id,),
     ).fetchall()
     by_file: dict[str, dict] = {}
-    for path, test_name, kind, confidence, evidence_json in rows:
+    # A recorded test counts wherever it lives (Rust unit tests sit in src/).
+    for path, test_name, kind, confidence, evidence_json, recorded in rows:
         entry = by_file.setdefault(
             path,
             {
@@ -124,7 +126,7 @@ def _referencing_tests(conn, symbol_id: int) -> list[dict]:
                 entry["evidence"].append(evidence)
         # Helpers and fixtures reach the symbol too; only real tests are named.
         is_test = kind in ("function", "method")
-        if is_test and test_name.rsplit(".", 1)[-1].startswith("test"):
+        if recorded or (is_test and test_name.rsplit(".", 1)[-1].startswith("test")):
             entry["tests"].add(test_name)
         if confidence == "high":
             entry["confidence"] = "high"
