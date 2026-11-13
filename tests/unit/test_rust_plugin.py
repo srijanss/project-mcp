@@ -134,3 +134,10 @@ def test_link_test_evidence_records_each_test_function_once_against_its_symbol(t
     ).fetchall()
     conn.close()
     assert recorded == [("src.lib.tests.adds", "test_function", "cargo")]
+
+
+def test_descriptor_version_is_past_the_release_without_test_discovery():
+    """Files indexed by 0.1.0 never had their tests recorded; a new version re-indexes them."""
+    from project_mcp.plugins.rust.descriptor import DESCRIPTOR
+
+    assert tuple(int(part) for part in DESCRIPTOR.version.split(".")) > (0, 1, 0)
