@@ -123,7 +123,8 @@ def _walk(node, scope: str, types=_KINDS.keys()):
             yield scope, child
         if child.type == "mod_item":
             yield from _walk(child, f"{scope}.{child.field('name').text}", types)
-        else:
+        elif child.type != "token_tree":
+            # A macro's tokens hold no parsed items and can nest very deep.
             yield from _walk(child, scope, types)
 
 

@@ -153,10 +153,15 @@ def _visit_body(node, caller, scope, bindings, globs, resolver, edges) -> None:
             if function is not None and function.type in ("identifier", "scoped_identifier"):
                 _add(edges, caller, resolver.resolve(_segments(function.text), scope, bindings, globs), "calls")
         elif child.type == "token_tree":
+            # A macro's tokens are scanned once, nested token trees included.
             for match in _CALL_IN_TOKENS.finditer(_code_text(child)):
                 segments = _segments(match.group(1))
                 if segments[0] not in _KEYWORDS:
                     _add(edges, caller, resolver.resolve(segments, scope, bindings, globs), "calls")
+            for token in _tokens(child):
+                if token.type == "identifier" and token.text in bindings:
+                    _add(edges, caller, resolver.resolve([token.text], scope, bindings, globs), "references")
+            continue
         elif child.type in ("identifier", "type_identifier") and child.text in bindings:
             _add(edges, caller, resolver.resolve([child.text], scope, bindings, globs), "references")
         _visit_body(child, caller, scope, bindings, globs, resolver, edges)
@@ -165,7 +170,7 @@ def _visit_body(node, caller, scope, bindings, globs, resolver, edges) -> None:
 def _code_text(token_tree) -> str:
     """The token tree's text with its strings and comments blanked out."""
     text, parts, cursor = token_tree.text, [], 0
-    for literal in _literals(token_tree):
+    for literal in (token for token in _tokens(token_tree) if token.type in _NOT_CODE):
         # Literals come in source order, so each is found after the last.
         index = text.find(literal.text, cursor)
         if index < 0:
@@ -176,12 +181,18 @@ def _code_text(token_tree) -> str:
     return "".join(parts)
 
 
-def _literals(node):
-    for child in node.children:
-        if child.type in _NOT_CODE:
-            yield child
-        elif child.type == "token_tree":
-            yield from _literals(child)
+def _tokens(token_tree):
+    """The tokens inside a token tree and its nested ones, in source order.
+
+    Walked with a stack: macro arguments can nest deeper than Python recursion.
+    """
+    stack = list(reversed(token_tree.children))
+    while stack:
+        token = stack.pop()
+        if token.type == "token_tree":
+            stack.extend(reversed(token.children))
+        else:
+            yield token
 
 
 def _add(edges: list, caller: str, target: str | None, kind: str) -> None:

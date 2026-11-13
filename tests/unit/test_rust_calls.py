@@ -108,3 +108,17 @@ def test_rust_symbol_uses_skips_call_like_text_in_macro_strings_and_comments():
     uses = rust_symbol_uses("src/lib.rs", source, {}, {"src.lib.add", "src.lib.sub", "src.lib.checks"})
 
     assert uses == [("src.lib.checks", "src.lib.sub", "calls")]
+
+
+def test_rust_symbol_uses_scans_a_macro_s_tokens_once_however_deeply_nested(monkeypatch):
+    from project_mcp.plugins.rust import calls
+
+    scanned = []
+    code_text = calls._code_text
+    monkeypatch.setattr(calls, "_code_text", lambda tree: scanned.append(tree) or code_text(tree))
+    source = "fn checks() {\n    assert!(" + "(" * 3000 + "add()" + ")" * 3000 + ");\n}\n"
+
+    uses = rust_symbol_uses("src/lib.rs", source, {}, {"src.lib.add", "src.lib.checks"})
+
+    assert uses == [("src.lib.checks", "src.lib.add", "calls")]
+    assert len(scanned) == 1

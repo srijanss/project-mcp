@@ -176,3 +176,11 @@ mod tests {
 """
 
     assert discover_rust_tests("src/lib.rs", source) == [("src.lib.tests.adds", 7)]
+
+
+def test_parse_rust_tree_reads_a_file_with_deeply_nested_macro_arguments():
+    source = "pub fn checks() {\n    assert!(" + "(" * 3000 + "1" + ")" * 3000 + " == 1);\n}\n"
+
+    symbols = parse_rust_tree("src/lib.rs", source)
+
+    assert [s["qualified_name"] for s in symbols] == ["src.lib", "src.lib.checks"]
