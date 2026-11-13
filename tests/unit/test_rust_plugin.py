@@ -216,3 +216,10 @@ def test_link_cross_file_links_calls_and_use_references_and_keeps_them_when_the_
         assert edges() == expected
     finally:
         conn.close()
+
+
+def test_descriptor_version_is_past_the_release_without_call_edges():
+    """Files indexed by 0.2.0 have no calls/references edges; a new version re-indexes them."""
+    from project_mcp.plugins.rust.descriptor import DESCRIPTOR
+
+    assert tuple(int(part) for part in DESCRIPTOR.version.split(".")) > (0, 2, 0)
