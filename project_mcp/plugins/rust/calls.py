@@ -14,6 +14,10 @@ _KEYWORDS = {
     "as", "async", "await", "else", "fn", "for", "if", "in", "let", "loop",
     "match", "move", "mut", "ref", "return", "unsafe", "where", "while",
 }
+# Tokens inside a macro that hold text rather than code.
+_NOT_CODE = {
+    "string_literal", "raw_string_literal", "char_literal", "line_comment", "block_comment",
+}
 _USE = re.compile(r"^(?:pub(?:\([^)]*\))?\s+)?use\s+(.*?);?$", re.DOTALL)
 _TURBOFISH = re.compile(r"::<[^>]*>")
 # Directories a crate's files live in; the crate's own path is what precedes them.
@@ -149,13 +153,35 @@ def _visit_body(node, caller, scope, bindings, globs, resolver, edges) -> None:
             if function is not None and function.type in ("identifier", "scoped_identifier"):
                 _add(edges, caller, resolver.resolve(_segments(function.text), scope, bindings, globs), "calls")
         elif child.type == "token_tree":
-            for match in _CALL_IN_TOKENS.finditer(child.text):
+            for match in _CALL_IN_TOKENS.finditer(_code_text(child)):
                 segments = _segments(match.group(1))
                 if segments[0] not in _KEYWORDS:
                     _add(edges, caller, resolver.resolve(segments, scope, bindings, globs), "calls")
         elif child.type in ("identifier", "type_identifier") and child.text in bindings:
             _add(edges, caller, resolver.resolve([child.text], scope, bindings, globs), "references")
         _visit_body(child, caller, scope, bindings, globs, resolver, edges)
+
+
+def _code_text(token_tree) -> str:
+    """The token tree's text with its strings and comments blanked out."""
+    text, parts, cursor = token_tree.text, [], 0
+    for literal in _literals(token_tree):
+        # Literals come in source order, so each is found after the last.
+        index = text.find(literal.text, cursor)
+        if index < 0:
+            continue
+        parts += [text[cursor:index], " "]
+        cursor = index + len(literal.text)
+    parts.append(text[cursor:])
+    return "".join(parts)
+
+
+def _literals(node):
+    for child in node.children:
+        if child.type in _NOT_CODE:
+            yield child
+        elif child.type == "token_tree":
+            yield from _literals(child)
 
 
 def _add(edges: list, caller: str, target: str | None, kind: str) -> None:

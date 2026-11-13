@@ -95,3 +95,16 @@ def test_rust_symbol_uses_applies_a_block_s_use_only_inside_that_block():
         ("src.lib.outer", "src.lib.a.run", "calls"),
         ("src.lib.outer", "src.lib.b.run", "calls"),
     ]
+
+
+def test_rust_symbol_uses_skips_call_like_text_in_macro_strings_and_comments():
+    source = (
+        'fn checks() {\n'
+        '    println!("add() {}", r#"add()"#, \'a\', b"add()");\n'
+        '    assert!(sub() /* add() */ == 0); // add()\n'
+        '}\n'
+    )
+
+    uses = rust_symbol_uses("src/lib.rs", source, {}, {"src.lib.add", "src.lib.sub", "src.lib.checks"})
+
+    assert uses == [("src.lib.checks", "src.lib.sub", "calls")]
