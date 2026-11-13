@@ -238,3 +238,16 @@ def test_scope_bindings_reuses_the_outer_bindings_when_a_scope_declares_none():
     outer = {"Square": ["crate", "shapes", "Square"]}
 
     assert _scope_bindings(outer, {}) is outer
+
+
+def test_scope_bindings_does_not_reexpand_an_inherited_path_through_the_block_s_names():
+    from project_mcp.plugins.rust.calls import _scope_bindings
+
+    outer = {"build": ["dep", "make"]}
+    local = {"dep": ["crate", "other"], "go": ["build"]}
+
+    assert _scope_bindings(outer, local) == {
+        "build": ["dep", "make"],
+        "dep": ["crate", "other"],
+        "go": ["dep", "make"],
+    }

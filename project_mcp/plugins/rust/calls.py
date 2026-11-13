@@ -290,13 +290,16 @@ def _scope_bindings(outer: dict, local: dict) -> dict:
     """
     if not local:
         return outer
-    visible = {**outer, **local}
     expanded = dict(outer)
     for name, segments in local.items():
         seen = {name}
-        while segments[0] in visible and segments[0] not in seen:
+        while segments[0] in local and segments[0] not in seen:
             seen.add(segments[0])
-            segments = visible[segments[0]] + segments[1:]
+            segments = local[segments[0]] + segments[1:]
+        if segments[0] in outer and segments[0] not in local:
+            # An inherited binding was expanded where it was declared; this
+            # scope's names must not re-expand it.
+            segments = outer[segments[0]] + segments[1:]
         expanded[name] = segments
     return expanded
 
