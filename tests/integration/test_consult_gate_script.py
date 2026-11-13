@@ -46,3 +46,24 @@ def test_both_modes_fail_open_without_a_scratchpad_dir(tmp_path, monkeypatch):
     assert _hook("mark", {"tool_name": "mcp__project-mcp__find_symbol"}) == {}
     assert _hook("check", {"tool_name": "mcp__outside-in-tdd__init_feature"}) == {}
     assert list(tmp_path.iterdir()) == []
+
+
+def test_concurrent_checks_after_one_mark_allow_exactly_one(tmp_path):
+    payload = json.dumps({"tool_name": "mcp__outside-in-tdd__write_code", "scratchpad_dir": str(tmp_path)})
+
+    for _ in range(30):
+        _hook("mark", {"tool_name": "mcp__project-mcp__get_dependents", "scratchpad_dir": str(tmp_path)})
+        checks = [
+            subprocess.Popen(["bash", str(SCRIPT), "check"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            for _ in range(32)
+        ]
+        for check in checks:
+            check.stdin.write(payload)
+        for check in checks:
+            check.stdin.close()
+        allowed = [json.loads(check.stdout.read()) == {} for check in checks]
+        for check in checks:
+            check.wait()
+
+        assert allowed.count(True) == 1
+        assert list(tmp_path.iterdir()) == []

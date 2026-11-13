@@ -34,8 +34,11 @@ if [ "$mode" = mark ]; then
   exit 0
 fi
 
-if [ -f "$marker" ]; then
-  rm -f "$marker"
+# Claim the marker with a rename: it is atomic, so when several gated calls
+# race for one consult only the process whose mv succeeds is allowed.
+claimed="$marker.claimed.$$"
+if mv "$marker" "$claimed" 2>/dev/null; then
+  rm -f "$claimed"
   echo '{}'
   exit 0
 fi
