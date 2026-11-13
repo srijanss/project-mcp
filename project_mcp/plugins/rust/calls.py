@@ -67,13 +67,16 @@ class _Resolver:
     def __init__(self, crate_dir: str, crates: dict[str, str], known) -> None:
         self.crate_dir = crate_dir
         self.crates = crates
-        self.known = known
+        # A `foo/mod.rs` file is indexed as `foo.mod` but named `foo` in paths.
+        self.by_path = {_module_path(name): name for name in known}
+        self.by_path.update({name: name for name in known})
 
     def roots(self, crate_dir: str) -> list[str]:
         prefix = f"{crate_dir}." if crate_dir else ""
         return [f"{prefix}src.lib", f"{prefix}src.main", f"{prefix}src"]
 
     def candidates(self, segments: list[str], scope: str) -> list[str]:
+        scope = _module_path(scope)
         head, rest = segments[0], segments[1:]
         if head == "crate":
             bases = self.roots(self.crate_dir)
@@ -103,7 +106,12 @@ class _Resolver:
         return found
 
     def _first(self, candidates: list[str]) -> str | None:
-        return next((name for name in candidates if name in self.known), None)
+        return next((self.by_path[name] for name in candidates if name in self.by_path), None)
+
+
+def _module_path(name: str) -> str:
+    """The name as Rust paths spell it: `mod` is a keyword, so only a mod.rs file adds it."""
+    return ".".join(part for part in name.split(".") if part != "mod")
 
 
 def _visit_module(node, scope: str, resolver: _Resolver, edges: list) -> None:

@@ -67,3 +67,17 @@ def test_rust_symbol_uses_resolves_calls_and_use_bound_names_to_known_symbols():
         ("tests.integration.adds_through_a_helper", "tests.integration.sum_of", "calls"),
         ("tests.integration.holds_a_widget", "src.lib.Widget", "references"),
     ]
+
+
+def test_rust_symbol_uses_resolves_paths_into_and_out_of_mod_rs_modules():
+    known = {"src.utils.mod.add", "src.utils.mod.tests.checks", "src.utils.math.double", "tests.it.calls"}
+
+    assert rust_symbol_uses(
+        "tests/it.rs", "fn calls() {\n    sample::utils::add();\n}\n", {"sample": ""}, known
+    ) == [("tests.it.calls", "src.utils.mod.add", "calls")]
+    assert rust_symbol_uses(
+        "src/utils/math.rs", "pub fn double() {\n    super::add();\n}\n", {}, known
+    ) == [("src.utils.math.double", "src.utils.mod.add", "calls")]
+    assert rust_symbol_uses(
+        "src/utils/mod.rs", "mod tests {\n    fn checks() {\n        super::math::double();\n    }\n}\n", {}, known
+    ) == [("src.utils.mod.tests.checks", "src.utils.math.double", "calls")]
