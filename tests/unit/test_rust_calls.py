@@ -230,3 +230,11 @@ def test_rust_file_links_keeps_an_outer_alias_s_target_when_a_block_shadows_its_
 
     assert uses == [("src.app.run", "src.shapes.make", "calls")]
     assert sorted(imports) == ["src.other", "src.shapes.Square", "src.shapes.make"]
+
+
+def test_scope_bindings_reuses_the_outer_bindings_when_a_scope_declares_none():
+    from project_mcp.plugins.rust.calls import _scope_bindings
+
+    outer = {"Square": ["crate", "shapes", "Square"]}
+
+    assert _scope_bindings(outer, {}) is outer

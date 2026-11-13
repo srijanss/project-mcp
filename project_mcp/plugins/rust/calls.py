@@ -286,7 +286,10 @@ def _scope_bindings(outer: dict, local: dict) -> dict:
     A declaration may build on another alias (`use a::T as S;`); expanding it
     here keeps it pointing there when an inner block rebinds `a`. Each name
     is expanded at most once, so `use foo::foo;` or a cycle cannot loop.
+    Most nodes declare nothing; they share (and must not change) `outer`.
     """
+    if not local:
+        return outer
     visible = {**outer, **local}
     expanded = dict(outer)
     for name, segments in local.items():
