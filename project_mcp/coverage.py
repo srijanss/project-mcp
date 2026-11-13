@@ -106,7 +106,9 @@ def server_instructions(registry: PluginRegistry) -> str:
         " relationships. Every tool response carries a `coverage` block. When its"
         " status is not \"full\", tell the user which files were not analyzed and"
         " relay each unanalyzed language's `note`, so an empty or partial result"
-        " is not mistaken for a complete one."
+        " is not mistaken for a complete one.\n"
+        "Prefer find_symbol, get_symbol_context and get_project_overview over"
+        " grep/find/cat for code navigation."
     )
 
 

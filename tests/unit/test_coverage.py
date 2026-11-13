@@ -210,3 +210,14 @@ def test_coverage_lists_file_errors_within_one_size_budget_shared_by_every_langu
     assert len(json.dumps(languages)) < 7_000
     assert languages["python"]["errors"] and languages["python"]["errors_total"] == 30
     assert languages["rust"]["errors_total"] == 30
+
+
+def test_server_instructions_prefer_project_mcp_tools_over_shell_navigation():
+    from project_mcp.coverage import server_instructions
+
+    instructions = server_instructions(builtin_registry())
+
+    assert (
+        "Prefer find_symbol, get_symbol_context and get_project_overview over"
+        " grep/find/cat for code navigation." in instructions.splitlines()
+    )
