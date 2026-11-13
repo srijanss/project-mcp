@@ -81,3 +81,17 @@ def test_rust_symbol_uses_resolves_paths_into_and_out_of_mod_rs_modules():
     assert rust_symbol_uses(
         "src/utils/mod.rs", "mod tests {\n    fn checks() {\n        super::math::double();\n    }\n}\n", {}, known
     ) == [("src.utils.mod.tests.checks", "src.utils.math.double", "calls")]
+
+
+def test_rust_symbol_uses_applies_a_block_s_use_only_inside_that_block():
+    source = (
+        "use crate::a::run;\n\n"
+        "fn outer() {\n    {\n        use crate::b::run;\n        run();\n    }\n    run();\n}\n"
+    )
+
+    uses = rust_symbol_uses("src/lib.rs", source, {}, {"src.lib.a.run", "src.lib.b.run", "src.lib.outer"})
+
+    assert sorted(uses) == [
+        ("src.lib.outer", "src.lib.a.run", "calls"),
+        ("src.lib.outer", "src.lib.b.run", "calls"),
+    ]

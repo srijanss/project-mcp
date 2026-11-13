@@ -127,16 +127,7 @@ def _visit_items(node, scope, bindings, globs, resolver, edges) -> None:
                 _visit_module(body, f"{scope}.{child.field('name').text}", resolver, edges)
         elif child.type == "function_item":
             caller = f"{scope}.{child.field('name').text}"
-            local_bindings, local_globs = _use_bindings(child.field("body"), nested=True)
-            _visit_body(
-                child.field("body"),
-                caller,
-                scope,
-                {**bindings, **local_bindings},
-                [*globs, *local_globs],
-                resolver,
-                edges,
-            )
+            _visit_body(child.field("body"), caller, scope, bindings, globs, resolver, edges)
         else:
             _visit_items(child, scope, bindings, globs, resolver, edges)
 
@@ -144,7 +135,13 @@ def _visit_items(node, scope, bindings, globs, resolver, edges) -> None:
 def _visit_body(node, caller, scope, bindings, globs, resolver, edges) -> None:
     if node is None:
         return
+    if node.type == "block":
+        # A block's `use` declarations bind names for that block alone.
+        local_bindings, local_globs = _use_bindings(node)
+        bindings, globs = {**bindings, **local_bindings}, [*globs, *local_globs]
     for child in node.children:
+        if child.type == "use_declaration":
+            continue
         if child.type == "call_expression":
             function = child.field("function")
             if function is not None and function.type == "generic_function":
@@ -170,13 +167,14 @@ def _segments(path_text: str) -> list[str]:
     return [segment for segment in _TURBOFISH.sub("", path_text).split("::") if segment]
 
 
-def _use_bindings(node, nested: bool = False) -> tuple[dict[str, list[str]], list[list[str]]]:
+def _use_bindings(node) -> tuple[dict[str, list[str]], list[list[str]]]:
     """The names a module's (or block's) `use` declarations bind, and its glob imports."""
     bindings: dict[str, list[str]] = {}
     globs: list[list[str]] = []
     if node is None:
         return bindings, globs
-    for declaration in _use_declarations(node, nested):
+    declarations = (child for child in node.children if child.type == "use_declaration")
+    for declaration in declarations:
         match = _USE.match(declaration.text.strip())
         if match is None:
             continue
@@ -188,14 +186,6 @@ def _use_bindings(node, nested: bool = False) -> tuple[dict[str, list[str]], lis
             elif name != "_":
                 bindings[name] = segments
     return bindings, globs
-
-
-def _use_declarations(node, nested: bool):
-    for child in node.children:
-        if child.type == "use_declaration":
-            yield child
-        elif nested and child.type not in ("function_item", "mod_item"):
-            yield from _use_declarations(child, nested)
 
 
 def _expand_use(text: str, prefix: list[str]):
