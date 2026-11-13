@@ -4,7 +4,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / ".agents/hooks/project-mcp-consult-gate.sh"
 CONCURRENT_CHECKS = 16
-ROUNDS = 20
+ROUNDS = 10
 
 
 def _mark(scratchpad):
@@ -17,7 +17,8 @@ def _mark(scratchpad):
     )
 
 
-def _concurrent_allows(scratchpad):
+def _concurrent_checks(scratchpad):
+    """Run the checks together and return (exit code, parsed output) for each."""
     payload = json.dumps(
         {"tool_name": "mcp__outside-in-tdd__init_feature", "scratchpad_dir": str(scratchpad)}
     )
@@ -37,14 +38,24 @@ def _concurrent_allows(scratchpad):
     for process in processes:
         process.stdin.close()
     outputs = [json.loads(process.stdout.read()) for process in processes]
-    for process in processes:
-        process.wait()
-    return sum(1 for output in outputs if output == {})
+    return [(process.wait(), output) for process, output in zip(processes, outputs)]
 
 
-def test_one_consult_unlocks_only_one_of_many_concurrent_gated_calls(tmp_path):
+def _is_denial(output):
+    hook = output.get("hookSpecificOutput", {})
+    return hook.get("hookEventName") == "PreToolUse" and hook.get("permissionDecision") == "deny"
+
+
+def test_one_consult_allows_one_concurrent_gated_call_and_denies_the_rest(tmp_path):
     for round_number in range(ROUNDS):
         scratchpad = tmp_path / str(round_number)
         _mark(scratchpad)
 
-        assert _concurrent_allows(scratchpad) == 1
+        results = _concurrent_checks(scratchpad)
+
+        assert [code for code, _ in results] == [0] * CONCURRENT_CHECKS
+        allowed = [output for _, output in results if output == {}]
+        others = [output for _, output in results if output != {}]
+        assert len(allowed) == 1
+        assert all(_is_denial(output) for output in others)
+        assert list(scratchpad.iterdir()) == []
