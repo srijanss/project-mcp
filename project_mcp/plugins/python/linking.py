@@ -1181,27 +1181,18 @@ def index_pytest_fixture_relationships(
     """Link each test-file function to the fixtures it requests as parameters,
     so a test is credited for what its fixtures call."""
     conftest_fixtures = {}
+    unreadable_directories = set()
     for path in path_to_file_id:
         if Path(path).name != "conftest.py":
             continue
         source = _read_source(Path(project_root) / path)
         if source is None:
+            unreadable_directories.add(Path(path).parent.as_posix())
             continue
         try:
             conftest_fixtures[Path(path).parent.as_posix()] = extract_fixtures(path, source)
         except SyntaxError:
             continue
-    conn.execute(
-        """
-        DELETE FROM relationships
-        WHERE relationship_type = 'calls' AND source_entity_type = 'symbol'
-          AND evidence_json = ?
-          AND source_entity_id IN (
-            SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.project_id = ?
-          )
-        """,
-        (json.dumps(["pytest_fixture"]), project_id),
-    )
     test_files = conn.execute(
         """
         SELECT id, path FROM files
@@ -1209,9 +1200,30 @@ def index_pytest_fixture_relationships(
         """,
         (project_id,),
     ).fetchall()
+    sources = {path: _read_source(Path(project_root) / path) for _, path in test_files}
+    # A test file that cannot be read, or sits under a conftest.py that
+    # cannot, keeps the fixture edges it had.
+    unreadable = [
+        file_id
+        for file_id, path in test_files
+        if sources[path] is None
+        or unreadable_directories & {parent.as_posix() for parent in Path(path).parents}
+    ]
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'calls' AND source_entity_type = 'symbol'
+          AND evidence_json = ?
+          AND source_entity_id IN (
+            SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id
+            WHERE f.project_id = ? AND f.id NOT IN (SELECT value FROM json_each(?))
+          )
+        """,
+        (json.dumps(["pytest_fixture"]), project_id, json.dumps(unreadable)),
+    )
     for file_id, path in test_files:
-        source = _read_source(Path(project_root) / path)
-        if source is None:
+        source = sources[path]
+        if file_id in unreadable:
             continue
         # Nearer conftest.py files override fixtures of the same name.
         outer_fixtures = {}

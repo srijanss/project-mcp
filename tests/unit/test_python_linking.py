@@ -180,3 +180,32 @@ def test_link_test_evidence_links_a_test_to_the_fixtures_it_requests(tmp_path):
         ("tests.test_shapes.test_area", "tests.test_shapes.square"),
         ("tests.test_shapes.test_area", "tests.conftest.shape"),
     }
+
+
+FIXTURE_FILES = {
+    **FILES,
+    "tests/conftest.py": "import pytest\n\n\n@pytest.fixture\ndef shape():\n    return 1\n",
+    "tests/test_shapes.py": "def test_area(shape):\n    assert shape == 1\n",
+}
+
+
+def test_link_test_evidence_keeps_the_fixture_edges_of_a_test_file_it_cannot_read(tmp_path):
+    conn = _scan_without_linking(tmp_path, FIXTURE_FILES)
+    context = _context(conn, tmp_path, FIXTURE_FILES)
+    PythonAnalyzer().link_test_evidence(context)
+    (tmp_path / "tests" / "test_shapes.py").unlink()
+
+    PythonAnalyzer().link_test_evidence(context)
+
+    assert _edges(conn, "calls") == {("tests.test_shapes.test_area", "tests.conftest.shape")}
+
+
+def test_link_test_evidence_keeps_the_fixture_edges_of_tests_under_a_conftest_it_cannot_read(tmp_path):
+    conn = _scan_without_linking(tmp_path, FIXTURE_FILES)
+    context = _context(conn, tmp_path, FIXTURE_FILES)
+    PythonAnalyzer().link_test_evidence(context)
+    (tmp_path / "tests" / "conftest.py").unlink()
+
+    PythonAnalyzer().link_test_evidence(context)
+
+    assert _edges(conn, "calls") == {("tests.test_shapes.test_area", "tests.conftest.shape")}
