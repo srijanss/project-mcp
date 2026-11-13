@@ -87,6 +87,15 @@ def test_resolve_import_maps_a_module_and_its_imported_names_to_files():
     ]
 
 
+def test_is_test_file_counts_a_conftest_anywhere_as_a_test_file():
+    from pathlib import Path
+
+    analyzer = PythonAnalyzer()
+
+    assert analyzer.is_test_file(Path("conftest.py"))
+    assert analyzer.is_test_file(Path("app/conftest.py"))
+
+
 def test_is_test_file_recognises_test_dirs_and_test_name_affixes():
     from pathlib import Path
 

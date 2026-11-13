@@ -161,7 +161,13 @@ class PythonAnalyzer:
     def is_test_file(self, path: Path) -> bool:
         path = Path(path)
         in_test_dir = bool({"tests", "test"} & set(path.parts[:-1]))
-        return in_test_dir or path.stem.startswith("test_") or path.stem.endswith("_test")
+        # pytest loads a conftest.py wherever it sits, only to run tests.
+        return (
+            in_test_dir
+            or path.name == "conftest.py"
+            or path.stem.startswith("test_")
+            or path.stem.endswith("_test")
+        )
 
     def analyze(self, path: str, source: str) -> FileAnalysis:
         parsed = analyze_python_source(path, source)

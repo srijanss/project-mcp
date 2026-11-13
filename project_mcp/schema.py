@@ -22,7 +22,9 @@ import sqlite3
 #    patches made in fixtures (conftest.py too) or on instances are `mocks`.
 # 9: files record whether their language plugin analyzed them
 #    (analysis_status) and the error when it failed on them (analysis_error).
-CURRENT_SCHEMA_VERSION = 9
+# 10: every conftest.py is a test file, tests link to the pytest fixtures
+#    they request, and Rust items link to their callers, `use`rs and tests.
+CURRENT_SCHEMA_VERSION = 10
 
 REQUIRED_TABLES = {
     "projects",

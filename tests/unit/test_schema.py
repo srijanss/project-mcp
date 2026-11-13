@@ -81,3 +81,9 @@ def test_files_record_whether_their_plugin_analyzed_them():
     columns = {row[1] for row in conn.execute("PRAGMA table_info(files)").fetchall()}
     assert {"analysis_status", "analysis_error"} <= columns
     assert CURRENT_SCHEMA_VERSION >= 9  # older indexes lack the columns and are rebuilt
+
+
+def test_indexes_written_before_every_conftest_was_a_test_file_are_rebuilt():
+    # Version 10: every conftest.py is a test file, and tests link to the
+    # fixtures they request; older indexes lack both and are rebuilt.
+    assert CURRENT_SCHEMA_VERSION >= 10
