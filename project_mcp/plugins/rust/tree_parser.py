@@ -155,7 +155,8 @@ def _test_functions(node, scope: str):
         if child.type == "mod_item":
             if child.field("body") is not None:
                 yield from _test_functions(child.field("body"), f"{scope}.{child.field('name').text}")
-        elif child.type != "function_item":
+        elif child.type not in ("function_item", "token_tree"):
+            # A macro's tokens hold no parsed items and can nest very deep.
             yield from _test_functions(child, scope)
 
 

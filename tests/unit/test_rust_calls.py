@@ -124,6 +124,14 @@ def test_rust_symbol_uses_scans_a_macro_s_tokens_once_however_deeply_nested(monk
     assert len(scanned) == 1
 
 
+def test_rust_symbol_uses_reads_past_a_deeply_nested_module_level_macro():
+    source = "table!" + "(" * 3000 + "1" + ")" * 3000 + ";\n\nfn checks() {\n    add();\n}\n"
+
+    uses = rust_symbol_uses("src/lib.rs", source, {}, {"src.lib.add", "src.lib.checks"})
+
+    assert uses == [("src.lib.checks", "src.lib.add", "calls")]
+
+
 def test_workspace_crates_skips_a_manifest_that_is_not_utf_8(tmp_path):
     from project_mcp.plugins.rust.calls import workspace_crates
 

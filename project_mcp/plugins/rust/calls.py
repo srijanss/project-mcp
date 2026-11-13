@@ -132,7 +132,8 @@ def _visit_items(node, scope, bindings, globs, resolver, edges) -> None:
         elif child.type == "function_item":
             caller = f"{scope}.{child.field('name').text}"
             _visit_body(child.field("body"), caller, scope, bindings, globs, resolver, edges)
-        else:
+        elif child.type != "token_tree":
+            # A macro's tokens hold no parsed items and can nest very deep.
             _visit_items(child, scope, bindings, globs, resolver, edges)
 
 

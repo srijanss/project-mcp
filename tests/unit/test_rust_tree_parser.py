@@ -184,3 +184,9 @@ def test_parse_rust_tree_reads_a_file_with_deeply_nested_macro_arguments():
     symbols = parse_rust_tree("src/lib.rs", source)
 
     assert [s["qualified_name"] for s in symbols] == ["src.lib", "src.lib.checks"]
+
+
+def test_discover_rust_tests_reads_past_a_deeply_nested_module_level_macro():
+    source = "table!" + "(" * 3000 + "1" + ")" * 3000 + ";\n\n#[test]\nfn adds() {}\n"
+
+    assert discover_rust_tests("src/lib.rs", source) == [("src.lib.adds", 4)]
