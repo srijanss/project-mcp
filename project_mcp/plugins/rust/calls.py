@@ -114,8 +114,14 @@ class _Resolver:
 
 
 def _module_path(name: str) -> str:
-    """The name as Rust paths spell it: `mod` is a keyword, so only a mod.rs file adds it."""
-    return ".".join(part for part in name.split(".") if part != "mod")
+    """The name as Rust paths spell it: `mod` is a keyword, so only a mod.rs file adds it.
+
+    The crate's own directory precedes its `src` (or `tests`, ...) and may
+    well be called `mod`; only the segments after it are module names.
+    """
+    parts = name.split(".")
+    start = next((index + 1 for index, part in enumerate(parts) if part in _CRATE_DIRS), 0)
+    return ".".join(parts[:start] + [part for part in parts[start:] if part != "mod"])
 
 
 def _visit_module(node, scope: str, resolver: _Resolver, edges: list) -> None:

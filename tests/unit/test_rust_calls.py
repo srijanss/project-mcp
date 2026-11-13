@@ -132,6 +132,14 @@ def test_rust_symbol_uses_reads_past_a_deeply_nested_module_level_macro():
     assert uses == [("src.lib.checks", "src.lib.add", "calls")]
 
 
+def test_rust_symbol_uses_keeps_a_crate_directory_named_mod_in_paths():
+    known = {"mod.src.lib.add", "mod.src.util.adds", "src.lib.add"}
+
+    uses = rust_symbol_uses("mod/src/util.rs", "fn adds() {\n    super::add();\n}\n", {}, known)
+
+    assert uses == [("mod.src.util.adds", "mod.src.lib.add", "calls")]
+
+
 def test_workspace_crates_skips_a_manifest_that_is_not_utf_8(tmp_path):
     from project_mcp.plugins.rust.calls import workspace_crates
 
