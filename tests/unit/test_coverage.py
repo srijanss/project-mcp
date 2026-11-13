@@ -221,3 +221,24 @@ def test_server_instructions_prefer_project_mcp_tools_over_shell_navigation():
         "Prefer find_symbol, get_symbol_context and get_project_overview over"
         " grep/find/cat for code navigation." in instructions.splitlines()
     )
+
+
+def test_server_instructions_open_with_the_core_tools_and_when_to_use_each():
+    from project_mcp.coverage import server_instructions
+
+    lines = server_instructions(builtin_registry()).splitlines()
+
+    assert lines[1:5] == [
+        "- find_symbol: locate a class, function or module by name.",
+        "- get_symbol_context: before drilling into a class or function, read its"
+        " source, callers, callees and tests.",
+        "- get_tests_for: find the existing tests for a symbol or module before"
+        " writing new ones.",
+        "- get_dependents: before changing a shared symbol, see what relies on it.",
+    ]
+    assert lines[-1] == (
+        "Also available: get_change_history, get_change_coupling, get_hotspots,"
+        " get_architecture_facts, get_architecture_context, get_legacy_hotspots,"
+        " get_legacy_signals, get_context_for_symbol, get_context_for_feature,"
+        " get_context_for_bug, get_context_for_refactor, get_context_for_architecture."
+    )
