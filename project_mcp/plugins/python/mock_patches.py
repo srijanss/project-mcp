@@ -81,7 +81,7 @@ class _PatchCollector(ast.NodeVisitor):
             self.fixture_definitions.append((node.name, scope))
             if _is_autouse(decorator):
                 self.autouse.append(scope)
-        self.parameters[scope] = [arg.arg for arg in node.args.args]
+        self.parameters[scope] = [arg.arg for arg in [*node.args.args, *node.args.kwonlyargs]]
         self._visit_scope(node)
 
     visit_AsyncFunctionDef = visit_FunctionDef

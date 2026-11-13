@@ -297,3 +297,15 @@ def test_extract_fixtures_leaves_out_fixtures_only_a_class_can_request():
     )
 
     assert extract_fixtures("tests/conftest.py", source) == {}
+
+
+def test_extract_fixture_requests_reads_keyword_only_parameters():
+    source = (
+        "import pytest\n\n\n"
+        "@pytest.fixture\ndef cube():\n    return 8\n\n\n"
+        "def test_cube(*, cube):\n    pass\n"
+    )
+
+    assert extract_fixture_requests("tests/test_cube.py", source, {}) == [
+        ("tests.test_cube.test_cube", "tests.test_cube.cube")
+    ]
