@@ -178,3 +178,10 @@ def test_rust_use_imports_lists_the_known_items_a_file_s_use_declarations_name()
     imports = rust_use_imports("src/app.rs", source, {}, known)
 
     assert sorted(imports) == ["src.lib.add", "src.shapes.Circle", "src.shapes.Square", "src.util.mod.helper"]
+
+
+def test_rust_use_imports_lists_an_item_imported_as_underscore():
+    known = {"src.traits.Describe", "src.traits.Show"}
+    source = "use crate::traits::Describe as _;\nuse crate::traits::{Show as _};\n"
+
+    assert sorted(rust_use_imports("src/app.rs", source, {}, known)) == ["src.traits.Describe", "src.traits.Show"]

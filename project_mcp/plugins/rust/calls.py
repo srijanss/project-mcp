@@ -62,10 +62,10 @@ def rust_use_imports(
 
 def _visit_imports(node, scope: str, resolver: "_Resolver", imports: list) -> None:
     bindings, _ = _use_bindings(node)
-    for name in bindings:
-        target = resolver.resolve([name], scope, bindings, [])
-        if target is not None:
-            imports.append(target)
+    targets = [resolver.resolve([name], scope, bindings, []) for name in bindings]
+    # `use path::Trait as _;` binds no name but still brings the trait in.
+    targets += [resolver.resolve(path, scope, bindings, []) for path, name in _use_paths(node) if name == "_"]
+    imports.extend(target for target in targets if target is not None)
     for child in node.children:
         if child.type == "mod_item":
             body = child.field("body")
@@ -254,21 +254,25 @@ def _use_bindings(node) -> tuple[dict[str, list[str]], list[list[str]]]:
     """The names a module's (or block's) `use` declarations bind, and its glob imports."""
     bindings: dict[str, list[str]] = {}
     globs: list[list[str]] = []
+    for segments, name in _use_paths(node):
+        if name == "*":
+            globs.append(segments)
+        elif name != "_":
+            bindings[name] = segments
+    return bindings, globs
+
+
+def _use_paths(node):
+    """(path segments, bound name) for each path the node's own `use` declarations name."""
     if node is None:
-        return bindings, globs
-    declarations = (child for child in node.children if child.type == "use_declaration")
-    for declaration in declarations:
+        return
+    for declaration in (child for child in node.children if child.type == "use_declaration"):
         match = _USE.match(declaration.text.strip())
         if match is None:
             continue
         for segments, name in _expand_use(match.group(1), []):
-            if not segments:
-                continue
-            if name == "*":
-                globs.append(segments)
-            elif name != "_":
-                bindings[name] = segments
-    return bindings, globs
+            if segments:
+                yield segments, name
 
 
 def _expand_use(text: str, prefix: list[str]):
