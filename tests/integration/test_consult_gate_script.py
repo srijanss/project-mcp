@@ -47,3 +47,14 @@ def test_both_modes_fail_open_without_a_scratchpad_dir(tmp_path, monkeypatch):
     assert _hook("check", {"tool_name": "mcp__outside-in-tdd__init_feature"}) == {}
     assert list(tmp_path.iterdir()) == []
 
+
+
+def test_the_denial_tells_the_agent_which_project_mcp_tools_to_call(tmp_path):
+    output = _hook("check", {"tool_name": "mcp__outside-in-tdd__drill_down", "scratchpad_dir": str(tmp_path)})
+
+    assert output["hookSpecificOutput"]["permissionDecisionReason"] == (
+        "Blocked: call a project-mcp tool relevant to this step (find_symbol,"
+        " get_symbol_context, get_dependencies, get_dependents or"
+        " get_project_overview), then retry mcp__outside-in-tdd__drill_down."
+        " Each consult unlocks one init_feature or drill_down call."
+    )

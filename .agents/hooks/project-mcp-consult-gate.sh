@@ -6,7 +6,9 @@
 #
 #   mark   PostToolUse on the project-mcp query tools. Drops a marker in this
 #          session's scratchpad_dir.
-#   check  PreToolUse on the gated tools. Denies the call unless the marker
+#   check  PreToolUse on the gated tools (outside-in-tdd's init_feature and
+#          drill_down: the points where what to build next gets decided;
+#          write_test/write_code are left ungated). Denies the call unless the marker
 #          exists; on allow it consumes the marker, so each consult unlocks
 #          exactly one gated call.
 #
@@ -43,7 +45,10 @@ if mv "$marker" "$claimed" 2>/dev/null; then
   exit 0
 fi
 
-reason="Blocked: consult project-mcp before $tool."
+reason="Blocked: call a project-mcp tool relevant to this step (find_symbol,\
+ get_symbol_context, get_dependencies, get_dependents or\
+ get_project_overview), then retry $tool.\
+ Each consult unlocks one init_feature or drill_down call."
 
 jq -n --arg reason "$reason" '{
   hookSpecificOutput: {
