@@ -263,3 +263,37 @@ def test_extract_fixtures_names_each_fixture_a_module_defines():
     )
 
     assert extract_fixtures("tests/conftest.py", source) == {"cube": "tests.conftest.cube"}
+
+
+def test_extract_fixture_requests_resolves_a_name_to_the_nearest_fixture_in_scope():
+    source = (
+        "import pytest\n\n\n"
+        "@pytest.fixture\ndef shape(shape):\n    return shape\n\n\n"
+        "class TestCube:\n"
+        "    @pytest.fixture\n    def shape(self, shape):\n        return shape\n\n"
+        "    def test_cube(self, shape):\n        pass\n\n\n"
+        "class TestSquare:\n"
+        "    @pytest.fixture\n    def shape(self):\n        return 4\n\n"
+        "    def test_square(self, shape):\n        pass\n\n\n"
+        "def test_plain(shape):\n    pass\n"
+    )
+
+    assert sorted(
+        extract_fixture_requests("tests/test_shapes.py", source, {"shape": "tests.conftest.shape"})
+    ) == [
+        ("tests.test_shapes.TestCube.shape", "tests.test_shapes.shape"),
+        ("tests.test_shapes.TestCube.test_cube", "tests.test_shapes.TestCube.shape"),
+        ("tests.test_shapes.TestSquare.test_square", "tests.test_shapes.TestSquare.shape"),
+        ("tests.test_shapes.shape", "tests.conftest.shape"),
+        ("tests.test_shapes.test_plain", "tests.test_shapes.shape"),
+    ]
+
+
+def test_extract_fixtures_leaves_out_fixtures_only_a_class_can_request():
+    source = (
+        "import pytest\n\n\n"
+        "class TestCube:\n"
+        "    @pytest.fixture\n    def cube(self):\n        return 8\n"
+    )
+
+    assert extract_fixtures("tests/conftest.py", source) == {}

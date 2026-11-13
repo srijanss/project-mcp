@@ -65,6 +65,8 @@ class _PatchCollector(ast.NodeVisitor):
         self.fixtures: dict[str, str] = {}
         self.autouse: list[str] = []
         self.parameters: dict[str, list[str]] = {}
+        # (name, scope) of every fixture, including those classes shadow.
+        self.fixture_definitions: list[tuple[str, str]] = []
 
     def _visit_scope(self, node):
         self.scope.append(node.name)
@@ -76,6 +78,7 @@ class _PatchCollector(ast.NodeVisitor):
         decorator = _fixture_decorator(node)
         if decorator is not None:
             self.fixtures[node.name] = scope
+            self.fixture_definitions.append((node.name, scope))
             if _is_autouse(decorator):
                 self.autouse.append(scope)
         self.parameters[scope] = [arg.arg for arg in node.args.args]
@@ -202,21 +205,43 @@ def extract_fixture_requests(
     path: str, source: str, outer_fixtures: dict[str, str]
 ) -> list[tuple[str, str]]:
     """(function, fixture) for each fixture a function requests by naming it
-    as a parameter, with the module's own fixtures shadowing `outer_fixtures`
-    (name -> qualified name, from its conftest.py files)."""
+    as a parameter.
+
+    A name resolves to the fixture in the nearest class or module around the
+    function, other than the function itself, then to `outer_fixtures`
+    (name -> qualified name, from its conftest.py files).
+    """
     collector = _PatchCollector(".".join(Path(path).with_suffix("").parts))
     collector.visit(ast.parse(source, path))
-    fixtures = {**outer_fixtures, **collector.fixtures}
-    return [
-        (function, fixtures[name])
-        for function, parameters in collector.parameters.items()
-        for name in parameters
-        if name in fixtures
+    requests = []
+    for function, parameters in collector.parameters.items():
+        for name in parameters:
+            fixture = _visible_fixture(collector, function, name) or outer_fixtures.get(name)
+            if fixture is not None:
+                requests.append((function, fixture))
+    return requests
+
+
+def _visible_fixture(collector: _PatchCollector, function: str, name: str) -> str | None:
+    """The fixture `name` resolves to in `function`'s nearest enclosing scope."""
+    visible = [
+        scope
+        for fixture_name, scope in collector.fixture_definitions
+        if fixture_name == name
+        and scope != function
+        and function.startswith(f"{scope.rpartition('.')[0]}.")
     ]
+    return max(visible, key=lambda scope: scope.count("."), default=None)
 
 
 def extract_fixtures(path: str, source: str) -> dict[str, str]:
-    """The qualified name of each fixture the module (as a conftest.py) defines."""
-    collector = _PatchCollector(".".join(Path(path).with_suffix("").parts))
+    """The qualified name of each fixture the module (as a conftest.py) defines
+    outside a class, where other modules can request it."""
+    module = ".".join(Path(path).with_suffix("").parts)
+    collector = _PatchCollector(module)
     collector.visit(ast.parse(source, path))
-    return dict(collector.fixtures)
+    return {
+        name: scope
+        for name, scope in collector.fixture_definitions
+        if scope.rpartition(".")[0] == module
+    }
