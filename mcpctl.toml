@@ -35,16 +35,8 @@ to = ".codex/config.toml"
 merge = "toml"
 
 [[scaffold.files]]
-from = ".agents/hooks/project-mcp-session-gate.sh"
-to = ".agents/hooks/project-mcp-session-gate.sh"
-
-[[scaffold.files]]
-from = ".agents/hooks/project-mcp-reminder.sh"
-to = ".agents/hooks/project-mcp-reminder.sh"
-
-[[scaffold.files]]
-from = ".agents/hooks/project-mcp-mark-consulted.sh"
-to = ".agents/hooks/project-mcp-mark-consulted.sh"
+from = ".agents/hooks/project-mcp-consult-gate.sh"
+to = ".agents/hooks/project-mcp-consult-gate.sh"
 
 [[scaffold.files]]
 from = ".project-mcp/config.toml.example"
