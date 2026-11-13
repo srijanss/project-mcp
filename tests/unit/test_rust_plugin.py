@@ -223,3 +223,23 @@ def test_descriptor_version_is_past_the_release_without_call_edges():
     from project_mcp.plugins.rust.descriptor import DESCRIPTOR
 
     assert tuple(int(part) for part in DESCRIPTOR.version.split(".")) > (0, 2, 0)
+
+
+def test_link_cross_file_builds_one_symbol_index_for_every_file(tmp_path, monkeypatch):
+    from project_mcp.config import load_config
+    from project_mcp.db import get_connection
+    from project_mcp.indexer import run_scan
+    from project_mcp.plugins.rust import calls
+
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "lib.rs").write_text("pub mod a;\n\npub fn add() {}\n")
+    (tmp_path / "src" / "a.rs").write_text("pub fn first() {\n    crate::add();\n}\n")
+    built = []
+    symbol_index = calls.symbol_index
+    monkeypatch.setattr(calls, "symbol_index", lambda known: built.append(sorted(known)) or symbol_index(known))
+
+    conn = get_connection(tmp_path)
+    run_scan(conn, tmp_path, load_config(tmp_path))
+    conn.close()
+
+    assert built == [["src.a", "src.a.first", "src.lib", "src.lib.add"]]

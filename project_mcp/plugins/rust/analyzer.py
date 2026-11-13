@@ -3,7 +3,7 @@ from pathlib import Path
 
 from project_mcp.plugins import treesitter
 from project_mcp.plugins.analysis import FileAnalysis
-from project_mcp.plugins.rust.calls import rust_symbol_uses, workspace_crates
+from project_mcp.plugins.rust import calls
 from project_mcp.plugins.rust.dependencies import list_rust_dependencies
 from project_mcp.plugins.rust.parser import (
     _module_qualified_name,
@@ -75,7 +75,8 @@ class RustAnalyzer:
             known.update(
                 conn.execute("SELECT qualified_name, id FROM symbols WHERE file_id = ?", (file_id,))
             )
-        crates = workspace_crates(context.project_root, context.plugin_paths)
+        crates = calls.workspace_crates(context.project_root, context.plugin_paths)
+        index = calls.symbol_index(known)
         for path, file_id in zip(context.plugin_paths, file_ids):
             changed = context.changed.get(path)
             if changed is not None:
@@ -94,7 +95,7 @@ class RustAnalyzer:
                 """,
                 (file_id,),
             )
-            for caller, target, kind in rust_symbol_uses(path, source, crates, known):
+            for caller, target, kind in calls.rust_symbol_uses(path, source, crates, known, index=index):
                 if caller not in known:
                     continue
                 conn.execute(

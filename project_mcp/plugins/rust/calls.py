@@ -25,16 +25,17 @@ _CRATE_DIRS = ("src", "tests", "benches", "examples")
 
 
 def rust_symbol_uses(
-    path: str, source: str, crates: dict[str, str], known
+    path: str, source: str, crates: dict[str, str], known, index: dict[str, str] | None = None
 ) -> list[tuple[str, str, str]]:
     """(function, item, "calls" | "references") for each item in `known` a function uses.
 
     `crates` maps each workspace crate's name to its directory as a dotted
     module prefix ("" for a crate at the project root). A call resolves
     through the function's module, its `use` bindings and glob imports; a
-    name bound by `use` that is not called is a reference.
+    name bound by `use` that is not called is a reference. Linking many
+    files, pass the `symbol_index(known)` built once for them all.
     """
-    resolver = _Resolver(_crate_dir(path), crates, known)
+    resolver = _Resolver(_crate_dir(path), crates, symbol_index(known) if index is None else index)
     edges: list[tuple[str, str, str]] = []
     _visit_module(treesitter.parse(source, "rust"), _module_qualified_name(path), resolver, edges)
     called = {(caller, target) for caller, target, kind in edges if kind == "calls"}
@@ -59,6 +60,17 @@ def workspace_crates(project_root: Path, paths) -> dict[str, str]:
     return crates
 
 
+def symbol_index(known) -> dict[str, str]:
+    """Each known qualified name, and the path Rust spells it by, → the qualified name.
+
+    A `foo/mod.rs` file is indexed as `foo.mod` but named `foo` in paths.
+    """
+    index = {name: name for name in known}
+    for name in known:
+        index.setdefault(_module_path(name), name)
+    return index
+
+
 def _crate_dir(path: str) -> str:
     parts = path.split("/")[:-1]
     for index, part in enumerate(parts):
@@ -68,12 +80,10 @@ def _crate_dir(path: str) -> str:
 
 
 class _Resolver:
-    def __init__(self, crate_dir: str, crates: dict[str, str], known) -> None:
+    def __init__(self, crate_dir: str, crates: dict[str, str], by_path: dict[str, str]) -> None:
         self.crate_dir = crate_dir
         self.crates = crates
-        # A `foo/mod.rs` file is indexed as `foo.mod` but named `foo` in paths.
-        self.by_path = {_module_path(name): name for name in known}
-        self.by_path.update({name: name for name in known})
+        self.by_path = by_path
 
     def roots(self, crate_dir: str) -> list[str]:
         prefix = f"{crate_dir}." if crate_dir else ""

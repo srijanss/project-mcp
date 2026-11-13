@@ -140,6 +140,20 @@ def test_rust_symbol_uses_keeps_a_crate_directory_named_mod_in_paths():
     assert uses == [("mod.src.util.adds", "mod.src.lib.add", "calls")]
 
 
+def test_rust_symbol_uses_resolves_through_a_symbol_index_built_once(monkeypatch):
+    from project_mcp.plugins.rust import calls
+
+    known = {"src.lib.uses", "src.utils.mod.helper"}
+    index = calls.symbol_index(known)
+    # Only the index built beforehand still knows `src.utils.mod` as `src.utils`.
+    monkeypatch.setattr(calls, "_module_path", lambda name: name)
+    source = "fn uses() {\n    crate::utils::helper();\n}\n"
+
+    uses = rust_symbol_uses("src/lib.rs", source, {}, known, index=index)
+
+    assert uses == [("src.lib.uses", "src.utils.mod.helper", "calls")]
+
+
 def test_workspace_crates_skips_a_manifest_that_is_not_utf_8(tmp_path):
     from project_mcp.plugins.rust.calls import workspace_crates
 
