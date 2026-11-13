@@ -1,5 +1,7 @@
 from project_mcp.plugins.python.mock_patches import (
     extract_fixture_patches,
+    extract_fixture_requests,
+    extract_fixtures,
     extract_mock_patches,
 )
 
@@ -235,3 +237,29 @@ def test_extract_mock_patches_applies_patches_of_fixtures_defined_outside_the_fi
         {"caller": "tests.test_pay.test_pay", "symbol": "app.payments.Gateway._sign"},
         {"caller": "tests.test_pay.test_refund", "target": "app.payments._post"},
     ]
+
+
+def test_extract_fixture_requests_names_the_fixture_each_function_requests():
+    source = (
+        "import pytest\n\n\n"
+        "@pytest.fixture\ndef square(base):\n    return base\n\n\n"
+        "def test_square(square, cube, tmp_path):\n    pass\n"
+    )
+
+    assert extract_fixture_requests(
+        "tests/test_shapes.py", source, {"cube": "tests.conftest.cube", "base": "tests.conftest.base"}
+    ) == [
+        ("tests.test_shapes.square", "tests.conftest.base"),
+        ("tests.test_shapes.test_square", "tests.test_shapes.square"),
+        ("tests.test_shapes.test_square", "tests.conftest.cube"),
+    ]
+
+
+def test_extract_fixtures_names_each_fixture_a_module_defines():
+    source = (
+        "import pytest\n\n\n"
+        "@pytest.fixture\ndef cube():\n    return 8\n\n\n"
+        "def helper():\n    pass\n"
+    )
+
+    assert extract_fixtures("tests/conftest.py", source) == {"cube": "tests.conftest.cube"}

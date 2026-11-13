@@ -11,6 +11,8 @@ from pathlib import Path
 from project_mcp.plugins.python.analyzer import resolve_relative_imports
 from project_mcp.plugins.python.mock_patches import (
     extract_fixture_patches,
+    extract_fixture_requests,
+    extract_fixtures,
     extract_mock_patches,
 )
 from project_mcp.plugins.python.parser import analyze_python_source
@@ -1168,3 +1170,56 @@ def link_test_evidence(context) -> None:
             path_to_file_id,
             context.source_roots,
         )
+        index_pytest_fixture_relationships(
+            conn, _project_id(context), context.project_root, path_to_file_id
+        )
+
+
+def index_pytest_fixture_relationships(
+    conn: sqlite3.Connection, project_id: int, project_root: Path, path_to_file_id: dict
+) -> None:
+    """Link each test-file function to the fixtures it requests as parameters,
+    so a test is credited for what its fixtures call."""
+    conftest_fixtures = {}
+    for path in path_to_file_id:
+        if Path(path).name != "conftest.py":
+            continue
+        source = _read_source(Path(project_root) / path)
+        if source is None:
+            continue
+        try:
+            conftest_fixtures[Path(path).parent.as_posix()] = extract_fixtures(path, source)
+        except SyntaxError:
+            continue
+    conn.execute(
+        """
+        DELETE FROM relationships
+        WHERE relationship_type = 'calls' AND source_entity_type = 'symbol'
+          AND evidence_json = ?
+          AND source_entity_id IN (
+            SELECT s.id FROM symbols s JOIN files f ON f.id = s.file_id WHERE f.project_id = ?
+          )
+        """,
+        (json.dumps(["pytest_fixture"]), project_id),
+    )
+    test_files = conn.execute(
+        """
+        SELECT id, path FROM files
+        WHERE project_id = ? AND file_kind = 'test' AND language = 'python'
+        """,
+        (project_id,),
+    ).fetchall()
+    for file_id, path in test_files:
+        source = _read_source(Path(project_root) / path)
+        if source is None:
+            continue
+        # Nearer conftest.py files override fixtures of the same name.
+        outer_fixtures = {}
+        for directory in reversed(Path(path).parents):
+            outer_fixtures.update(conftest_fixtures.get(directory.as_posix(), {}))
+        try:
+            requests = extract_fixture_requests(path, source, outer_fixtures)
+        except SyntaxError:
+            continue
+        for caller, fixture in requests:
+            _link_test_symbol(conn, project_id, file_id, caller, fixture, "calls", "pytest_fixture")

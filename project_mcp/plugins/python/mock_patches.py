@@ -196,3 +196,27 @@ def _fixture_closure(
             closure.append(fixture)
             pending += collector.parameters[fixture]
     return closure
+
+
+def extract_fixture_requests(
+    path: str, source: str, outer_fixtures: dict[str, str]
+) -> list[tuple[str, str]]:
+    """(function, fixture) for each fixture a function requests by naming it
+    as a parameter, with the module's own fixtures shadowing `outer_fixtures`
+    (name -> qualified name, from its conftest.py files)."""
+    collector = _PatchCollector(".".join(Path(path).with_suffix("").parts))
+    collector.visit(ast.parse(source, path))
+    fixtures = {**outer_fixtures, **collector.fixtures}
+    return [
+        (function, fixtures[name])
+        for function, parameters in collector.parameters.items()
+        for name in parameters
+        if name in fixtures
+    ]
+
+
+def extract_fixtures(path: str, source: str) -> dict[str, str]:
+    """The qualified name of each fixture the module (as a conftest.py) defines."""
+    collector = _PatchCollector(".".join(Path(path).with_suffix("").parts))
+    collector.visit(ast.parse(source, path))
+    return dict(collector.fixtures)

@@ -154,3 +154,29 @@ def test_link_test_evidence_keeps_the_mock_edges_of_tests_under_a_conftest_it_ca
     PythonAnalyzer().link_test_evidence(context)
 
     assert _edges(conn, "mocks") == {("tests.test_shapes.test_area", "app.shapes.Shape.area")}
+
+
+def test_link_test_evidence_links_a_test_to_the_fixtures_it_requests(tmp_path):
+    files = {
+        **FILES,
+        "tests/conftest.py": (
+            "import pytest\n\n\n"
+            "@pytest.fixture\ndef shape():\n    return 1\n"
+        ),
+        "tests/test_shapes.py": (
+            "import pytest\n\n\n"
+            "@pytest.fixture\ndef square(shape):\n    return shape\n\n\n"
+            "def test_area(square, shape):\n    assert square == shape\n"
+        ),
+    }
+    conn = _scan_without_linking(tmp_path, files)
+    context = _context(conn, tmp_path, files)
+    PythonAnalyzer().link_test_evidence(context)
+
+    PythonAnalyzer().link_test_evidence(context)
+
+    assert _edges(conn, "calls") == {
+        ("tests.test_shapes.square", "tests.conftest.shape"),
+        ("tests.test_shapes.test_area", "tests.test_shapes.square"),
+        ("tests.test_shapes.test_area", "tests.conftest.shape"),
+    }
