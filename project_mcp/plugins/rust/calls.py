@@ -76,8 +76,7 @@ def rust_use_imports(
 
 def _visit_imports(node, scope: str, resolver: "_Resolver", imports: list, outer: dict | None = None) -> None:
     local, _ = _use_bindings(node)
-    # A block's declarations see the enclosing module's and blocks' names too.
-    bindings = {**(outer or {}), **local}
+    bindings = _scope_bindings(outer or {}, local)
     targets = [resolver.resolve([name], scope, bindings, []) for name in local]
     # `use path::Trait as _;` binds no name but still brings the trait in.
     targets += [resolver.resolve(path, scope, bindings, []) for path, name in _use_paths(node) if name == "_"]
@@ -155,12 +154,8 @@ class _Resolver:
 
     def resolve(self, segments: list[str], scope: str, bindings: dict, globs: list) -> str | None:
         if segments[0] in bindings:
-            # An alias may name another alias (`use a as b; use b::T;`);
-            # each is expanded once, so `use foo::foo;` cannot loop.
-            seen = set()
-            while segments[0] in bindings and segments[0] not in seen:
-                seen.add(segments[0])
-                segments = bindings[segments[0]] + segments[1:]
+            # Bindings are already expanded (see `_scope_bindings`), so one step does.
+            segments = bindings[segments[0]] + segments[1:]
             return self._first(self.candidates(segments, scope))
         found = self._first(self.candidates(segments, scope))
         if found is None and len(segments) == 1:
@@ -186,7 +181,8 @@ def _module_path(name: str) -> str:
 
 
 def _visit_module(node, scope: str, resolver: _Resolver, edges: list) -> None:
-    bindings, globs = _use_bindings(node)
+    local, globs = _use_bindings(node)
+    bindings = _scope_bindings({}, local)
     _visit_items(node, scope, bindings, globs, resolver, edges)
 
 
@@ -210,7 +206,7 @@ def _visit_body(node, caller, scope, bindings, globs, resolver, edges) -> None:
     if node.type == "block":
         # A block's `use` declarations bind names for that block alone.
         local_bindings, local_globs = _use_bindings(node)
-        bindings, globs = {**bindings, **local_bindings}, [*globs, *local_globs]
+        bindings, globs = _scope_bindings(bindings, local_bindings), [*globs, *local_globs]
     for child in node.children:
         if child.type == "use_declaration":
             continue
@@ -282,6 +278,24 @@ def _use_bindings(node) -> tuple[dict[str, list[str]], list[list[str]]]:
         elif name != "_":
             bindings[name] = segments
     return bindings, globs
+
+
+def _scope_bindings(outer: dict, local: dict) -> dict:
+    """The names bound in a scope, each expanded to the path it named where it was declared.
+
+    A declaration may build on another alias (`use a::T as S;`); expanding it
+    here keeps it pointing there when an inner block rebinds `a`. Each name
+    is expanded at most once, so `use foo::foo;` or a cycle cannot loop.
+    """
+    visible = {**outer, **local}
+    expanded = dict(outer)
+    for name, segments in local.items():
+        seen = {name}
+        while segments[0] in visible and segments[0] not in seen:
+            seen.add(segments[0])
+            segments = visible[segments[0]] + segments[1:]
+        expanded[name] = segments
+    return expanded
 
 
 def _use_paths(node):

@@ -217,3 +217,16 @@ def test_rust_file_links_reads_uses_and_imports_from_one_parse(monkeypatch):
         ["src.lib.add"],
     )
     assert parsed == [source]
+
+
+def test_rust_file_links_keeps_an_outer_alias_s_target_when_a_block_shadows_its_base():
+    known = {"src.shapes.make", "src.shapes.Square", "src.other.make", "src.other.Square", "src.other", "src.app.run"}
+    source = (
+        "use crate::shapes as alias;\nuse alias::make as build;\nuse alias::Square as S;\n\n"
+        "pub fn run() {\n    use crate::other as alias;\n    use S as T;\n    build();\n}\n"
+    )
+
+    uses, imports = rust_file_links("src/app.rs", source, {}, known)
+
+    assert uses == [("src.app.run", "src.shapes.make", "calls")]
+    assert sorted(imports) == ["src.other", "src.shapes.Square", "src.shapes.make"]
