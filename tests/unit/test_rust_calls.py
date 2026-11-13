@@ -122,3 +122,14 @@ def test_rust_symbol_uses_scans_a_macro_s_tokens_once_however_deeply_nested(monk
 
     assert uses == [("src.lib.checks", "src.lib.add", "calls")]
     assert len(scanned) == 1
+
+
+def test_workspace_crates_skips_a_manifest_that_is_not_utf_8(tmp_path):
+    from project_mcp.plugins.rust.calls import workspace_crates
+
+    (tmp_path / "good").mkdir()
+    (tmp_path / "good" / "Cargo.toml").write_text('[package]\nname = "good-crate"\n')
+    (tmp_path / "bad").mkdir()
+    (tmp_path / "bad" / "Cargo.toml").write_bytes(b'[package]\nname = "caf\xe9"\n')
+
+    assert workspace_crates(tmp_path, ["bad/src/lib.rs", "good/src/lib.rs"]) == {"good_crate": "good"}

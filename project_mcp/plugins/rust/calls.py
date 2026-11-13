@@ -51,8 +51,8 @@ def workspace_crates(project_root: Path, paths) -> dict[str, str]:
     for crate_dir in dict.fromkeys(_crate_dir(path) for path in paths):
         manifest = Path(project_root, *crate_dir.split(".") if crate_dir else ()) / "Cargo.toml"
         try:
-            name = tomllib.loads(manifest.read_text())["package"]["name"]
-        except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError):
+            name = tomllib.loads(manifest.read_text(encoding="utf-8"))["package"]["name"]
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError):
             continue
         if isinstance(name, str):
             crates[name.replace("-", "_")] = crate_dir
