@@ -641,6 +641,18 @@ def test_find_symbol_accepts_name_and_symbol_as_aliases_for_query(tmp_path, alia
     assert [c.text for c in by_alias.content] == [c.text for c in by_query.content]
 
 
+def test_find_symbol_with_an_empty_query_lists_every_symbol(tmp_path):
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "models.py").write_text("class Widget:\n    pass\n\n\ndef build():\n    pass\n")
+    server = build_server(tmp_path)
+
+    result = asyncio.run(server.call_tool("find_symbol", {"query": ""}))
+
+    assert result.is_error is False
+    text = "".join(c.text for c in result.content)
+    assert "Widget" in text and "build" in text
+
+
 @pytest.mark.parametrize("tool", ["get_dependents", "find_symbol"])
 def test_symbol_tools_name_every_accepted_spelling_when_the_symbol_is_missing(tmp_path, tool):
     from mcp.server.mcpserver.exceptions import ToolError

@@ -77,11 +77,20 @@ def _indexed_dependencies(project_root: Path, config, ecosystem: str | None) -> 
 
 
 def _symbol_name(
-    qualified_name: str | None, query: str | None, symbol: str | None, name: str | None
+    qualified_name: str | None,
+    query: str | None,
+    symbol: str | None,
+    name: str | None,
+    *,
+    allow_empty: bool = False,
 ) -> str:
-    """The name a symbol tool was asked about, under any of its accepted spellings."""
+    """The name a symbol tool was asked about, under any of its accepted spellings.
+
+    With `allow_empty`, an explicitly passed "" counts (find_symbol browses
+    every symbol with it); otherwise only a non-empty name does.
+    """
     for spelling in (qualified_name, query, symbol, name):
-        if spelling:
+        if spelling or (allow_empty and spelling is not None):
             return spelling
     raise ToolError("a symbol is required: pass qualified_name, name, query or symbol")
 
@@ -318,7 +327,7 @@ def build_server(project_root: Path) -> MCPServer:
         `offset=N` for the next page. `name`, `symbol` and `qualified_name`
         are aliases for `query`.
         """
-        query = _symbol_name(qualified_name, query, symbol, name)
+        query = _symbol_name(qualified_name, query, symbol, name, allow_empty=True)
         if limit < 1:
             raise ToolError("limit must be at least 1")
         if offset < 0:
