@@ -65,12 +65,32 @@ def test_the_scaffold_gitignore_hint_covers_the_index_and_its_wal_files(generate
 README = Path(__file__).resolve().parents[2] / "README.md"
 
 
+def _readme_section(heading: str) -> str:
+    """The README text under `heading` up to the next heading, whitespace-collapsed."""
+    body = README.read_text().split(heading, 1)[1].split("\n#", 1)[0]
+    return " ".join(body.split())
+
+
 @pytest.mark.parametrize("sidecar", ["index.db-wal", "index.db-shm"])
 def test_the_readme_describes_the_wal_files_as_part_of_the_disposable_index(sidecar):
     """README's .project-mcp/ list and its "safe to delete" note both name the WAL files."""
-    readme = README.read_text()
-    state_list = readme.split("## Project-local `.project-mcp/`", 1)[1].split("###", 1)[0]
-    rebuildable = readme.split("## SQLite as a rebuildable index", 1)[1].split("##", 1)[0]
+    state_list = _readme_section("## Project-local `.project-mcp/`")
+    rebuildable = _readme_section("## SQLite as a rebuildable index")
 
     assert sidecar in state_list
     assert sidecar in rebuildable
+
+
+def test_the_readme_only_allows_deleting_the_index_once_no_server_has_it_open():
+    """Deleting live WAL/SHM files under an open connection can corrupt the index."""
+    rebuildable = _readme_section("## SQLite as a rebuildable index")
+
+    assert "at any time" not in rebuildable
+    assert "stop every project-mcp server" in rebuildable
+
+
+def test_the_readme_says_to_delete_the_index_and_its_wal_files_together():
+    """A stale -wal/-shm left beside a fresh index.db must not be paired with it."""
+    rebuildable = _readme_section("## SQLite as a rebuildable index")
+
+    assert "delete `.project-mcp/index.db*`" in rebuildable
