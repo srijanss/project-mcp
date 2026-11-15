@@ -8,6 +8,6 @@ manifest_digest = "sha256:bbcfc992914092cabea5dc8a22c097f2f5ac8a47c2f3b06dca8676
 
 [[mcp]]
 name = "project-mcp"
-version = "1.3.0"
+version = "1.3.1"
 source = "/home/dev/code/project-mcp"
-manifest_digest = "sha256:5658bdb44f0dbf70ce1901043363e2ec5a2f5343525cf1431971beb63b72f2d0"
+manifest_digest = "sha256:e5bc473f6b6b4a47b0679ad021025fa8e4740e9f0d76264e65142d71686828e3"
