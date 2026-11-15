@@ -2,9 +2,9 @@ version = 1
 
 [[mcp]]
 name = "outside-in-tdd-mcp"
-version = "0.4.1"
+version = "0.4.2"
 source = "/home/dev/code/outside-in-tdd-mcp"
-manifest_digest = "sha256:0947032e9326558aa50d52a92d4490622dfafa5d6e4c84353ac1c96aa2d794b0"
+manifest_digest = "sha256:bbcfc992914092cabea5dc8a22c097f2f5ac8a47c2f3b06dca8676821140c258"
 
 [[mcp]]
 name = "project-mcp"
