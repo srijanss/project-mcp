@@ -1,5 +1,6 @@
 import fnmatch
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -40,3 +41,36 @@ def test_the_recommended_gitignore_ignores_every_file_an_open_index_leaves_behin
 def test_the_recommended_gitignore_covers_every_sqlite_file_of_the_index(sidecar):
     """WAL mode writes -wal/-shm; an index left in rollback mode (busy upgrade) writes -journal."""
     assert _ignored(f".project-mcp/index.db{sidecar}", _recommended_gitignore_patterns())
+
+
+MCPCTL = Path(__file__).resolve().parents[2] / "mcpctl.toml"
+
+
+def _gitignore_hint_patterns() -> list[str]:
+    hints = [h["message"] for h in tomllib.loads(MCPCTL.read_text())["scaffold"]["hints"]]
+    gitignore_hints = [m for m in hints if ".gitignore" in m]
+    assert len(gitignore_hints) == 1, gitignore_hints
+    return re.findall(r"\.project-mcp/[\w.*-]+", gitignore_hints[0])
+
+
+@pytest.mark.parametrize("generated", ["index.db", "index.db-wal", "index.db-shm", "state.json"])
+def test_the_scaffold_gitignore_hint_covers_the_index_and_its_wal_files(generated):
+    """Following mcpctl's printed hint word for word must leave no WAL file untracked."""
+    patterns = _gitignore_hint_patterns()
+
+    assert _ignored(f".project-mcp/{generated}", patterns)
+    assert not _ignored(".project-mcp/config.toml", patterns)
+
+
+README = Path(__file__).resolve().parents[2] / "README.md"
+
+
+@pytest.mark.parametrize("sidecar", ["index.db-wal", "index.db-shm"])
+def test_the_readme_describes_the_wal_files_as_part_of_the_disposable_index(sidecar):
+    """README's .project-mcp/ list and its "safe to delete" note both name the WAL files."""
+    readme = README.read_text()
+    state_list = readme.split("## Project-local `.project-mcp/`", 1)[1].split("###", 1)[0]
+    rebuildable = readme.split("## SQLite as a rebuildable index", 1)[1].split("##", 1)[0]
+
+    assert sidecar in state_list
+    assert sidecar in rebuildable
