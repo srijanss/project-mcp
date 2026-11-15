@@ -13,6 +13,9 @@ dist/
 
 # this repo's own dev-time TDD/session state
 # (.tdd-features.json is the upfront plan ledger and IS committed)
+.agents/
+.claude/
+.pi/
 .tdd-state.json
 .tdd-state.json.lock
 .tdd-features.json.lock
@@ -22,8 +25,6 @@ dist/
 .tdd-review-findings.json
 .tdd-review-findings.json.lock
 .tdd-session.log
-.agents/
-.pi/
-.claude/
+.mcpctl.*
 .claude/scheduled_tasks.lock
 **/fixtures/**/index.db*

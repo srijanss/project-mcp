@@ -63,7 +63,8 @@ scaffold, not this one.
 
 All state lives inside the indexed project, in `.project-mcp/`:
 
-- `.project-mcp/index.db` - the SQLite index.
+- `.project-mcp/index.db` - the SQLite index, with its `index.db-wal` and
+  `index.db-shm` files while it is open (WAL mode).
 - `.project-mcp/config.toml` - optional configuration.
 
 Consider adding `.project-mcp/` to the project's `.gitignore`.
@@ -105,8 +106,11 @@ in the config replaces the default list.
 ## SQLite as a rebuildable index
 
 The SQLite database is a cache derived from the repository, never a source of
-truth. It is safe to delete `.project-mcp/index.db` at any time; the next
-query rebuilds it with a full scan.
+truth. To rebuild it, stop every project-mcp server using the project (close
+or restart the clients that run it), then delete `.project-mcp/index.db*` -
+the index and its `index.db-wal` / `index.db-shm` files together. The next
+query rebuilds it with a full scan. Deleting the files while a server still
+has the index open can leave it reading stale or mismatched WAL files.
 
 ## Indexing lifecycle
 

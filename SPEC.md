@@ -140,9 +140,13 @@ my-project/
 Recommended `.gitignore`:
 
 ```text
-.project-mcp/index.db
+.project-mcp/index.db*
 .project-mcp/state.json
 ```
+
+The trailing `*` also covers the SQLite sidecar files next to the index:
+`index.db-wal` and `index.db-shm` while it runs in WAL mode, and
+`index.db-journal` when an older index is still in rollback-journal mode.
 
 `config.toml` may be committed when the team wants shared project hints.
 
