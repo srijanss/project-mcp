@@ -22,5 +22,8 @@ dist/
 .tdd-review-findings.json
 .tdd-review-findings.json.lock
 .tdd-session.log
+.agents/
+.pi/
+.claude/
 .claude/scheduled_tasks.lock
 **/fixtures/**/index.db*
